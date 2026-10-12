@@ -29,6 +29,8 @@
         <button class="tab-btn" data-view="journal">記録</button>
       </nav>
       <div class="header-right">
+        <button id="undoBtn" class="text-btn edit-only" title="元に戻す（Ctrl+Z）" hidden>↶ 元に戻す</button>
+        <button id="redoBtn" class="text-btn edit-only" title="やり直す（Ctrl+Y）" hidden>↷ やり直す</button>
         <span id="saveStatus" class="muted" role="status"></span>
         <button id="logoutBtn" class="text-btn" hidden>ログアウト</button>
       </div>
@@ -341,7 +343,7 @@
     <script type="module">
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // 読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js"];
       try {
         await Promise.all(parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })));
         await import("./app.js");

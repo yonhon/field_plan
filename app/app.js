@@ -25,6 +25,7 @@ import {
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
 import { notify } from "./dialog.js";
+import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal } from "./journal.js";
 import { existsOn, harvestEnd, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule } from "./schedule-view.js";
@@ -773,7 +774,7 @@ function applyScale(factor) {
   }
   const { x, y, w, h } = state.view;
   setView({ x: x * factor, y: y * factor, w: w * factor, h: h * factor });
-  persist(() => transformShapes((points) => scalePoints(points, factor)));
+  persist(() => transformShapes((points) => scalePoints(points, factor))).then(resetHistory);
   record({ kind: "field.scale", plan: false, text: "縮尺を合わせ直した（すべての図形の大きさが変わる）" });
   render();
 }
@@ -816,7 +817,7 @@ function setRotation(degrees) {
   const delta = degrees - state.backdrop.rotation_deg;
   state.backdrop.rotation_deg = degrees;
   queueSave("backdrop");
-  persist(() => transformShapes((points) => rotatePoints(points, delta)));
+  persist(() => transformShapes((points) => rotatePoints(points, delta))).then(resetHistory);
   record({ kind: "field.rotation", plan: false, text: "下絵の向きを合わせ直した", after: `${degrees} 度` });
   render();
 }
@@ -1933,6 +1934,27 @@ async function startApp() {
   } catch (error) {
     $("saveStatus").textContent = `変更の記録を読み込めませんでした: ${error.message}`;
   }
+  initHistory({
+    state,
+    setStatus: (text) => ($("saveStatus").textContent = text),
+    // まだ送っていない図形の保存を、先に済ませる
+    flush: async () => {
+      clearTimeout(saveTimer);
+      await flushSaves();
+    },
+    // データを入れ替えたあと、どの画面も描き直す。なくなった図形を選んだままにしない
+    refresh: () => {
+      if (state.selected && state.selected !== "outline" && !findShape(state.selected)) {
+        state.selected = null;
+      }
+      state.selectedVertex = null;
+      state.draft = [];
+      render();
+      renderSchedule();
+      renderCrops();
+      renderJournal();
+    },
+  });
   // スマホは作業の確認が主なので、日程から開く
   if (window.matchMedia("(max-width: 800px)").matches) {
     showView("schedule");
