@@ -54,6 +54,7 @@ function typesFor(owner) {
   const planting = state().plantings.find((item) => item.id === owner.planting_id);
   return typesForCrop(state().workTypes, cropOf(planting), planting ? plantingWorks(planting.id) : []);
 }
+const typeFor = (owner, code) => typesFor(owner).find((type) => type.code === code);
 const typeLabel = (code) => typeOf(code)?.label || code;
 const bySeq = (a, b) => a.seq - b.seq;
 
@@ -338,7 +339,7 @@ function renderSummary() {
 // 日付の入った作業がなければ空
 function startAfter(works) {
   const last = works.filter((work) => work.plan_start && work.plan_end).sort((a, b) => a.plan_end.localeCompare(b.plan_end)).at(-1);
-  return last ? addDays(last.plan_end, 1 + (typeOf(last.work_type)?.min_gap_days || 0)) : "";
+  return last ? addDays(last.plan_end, 1 + (typeFor(ownerOf(last), last.work_type)?.min_gap_days || 0)) : "";
 }
 
 const optionList = (entries, selected) =>
@@ -722,7 +723,7 @@ function addWork(owner) {
   const first = state().workTypes.find((type) => (type.scope || "block") === kindOf(owner)) || state().workTypes[0];
   const work = newWork(owner, first.code, works.length + 1);
   if (last && last.plan_end) {
-    work.plan_start = addDays(last.plan_end, 1 + (typeOf(last.work_type)?.min_gap_days || 0));
+    work.plan_start = addDays(last.plan_end, 1 + (typeFor(owner, last.work_type)?.min_gap_days || 0));
     work.plan_end = addDays(work.plan_start, first.default_days - 1);
   }
   record({ kind: "work.add", target: ["work", work.id], text: `${ownerName(owner)}に、作業「${first.label}」を追加` });
@@ -739,7 +740,7 @@ function changeWork(id, field, value) {
     // 開始日だけ入れたら、目安の日数で終了日を入れる。開始日を動かしたら、日数を保って終了日も動かす
     if (field === "plan_start" && value) {
       const kept = daysBeforeEdit && daysBeforeEdit.id === id ? daysBeforeEdit.days : null;
-      work.plan_end = addDays(value, (kept || typeOf(work.work_type)?.default_days || 1) - 1);
+      work.plan_end = addDays(value, (kept || typeFor(ownerOf(work), work.work_type)?.default_days || 1) - 1);
     }
   }
   record({
