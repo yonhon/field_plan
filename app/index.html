@@ -25,6 +25,7 @@
       <nav id="viewTabs" class="control-group" aria-label="画面の切り替え" hidden>
         <button class="tab-btn is-active" data-view="map">圃場図</button>
         <button class="tab-btn" data-view="schedule">日程</button>
+        <button class="tab-btn" data-view="crops">品目</button>
       </nav>
       <div class="header-right">
         <span id="saveStatus" class="muted" role="status"></span>
@@ -56,6 +57,7 @@
               <option value="shed">物置</option>
               <option value="well">井戸</option>
               <option value="path">通路</option>
+              <option value="residue">残渣処理場</option>
               <option value="other">その他</option>
             </select>
             <button class="mode-btn" data-mode="zone">多角形</button>
@@ -116,7 +118,7 @@
           <dl class="figures">
             <div><dt>圃場の面積</dt><dd id="areaField">-</dd></div>
             <div class="total"><dt>有効圃場</dt><dd id="areaTillable">-</dd></div>
-            <div><dt>物置・井戸・通路など</dt><dd id="areaZones">-</dd></div>
+            <div><dt>物置・井戸・通路・残渣処理場など</dt><dd id="areaZones">-</dd></div>
             <div><dt>どの区域でもない部分</dt><dd id="areaRest">-</dd></div>
             <div class="total"><dt>耕起対象区画（表示日）</dt><dd id="areaBlocks">-</dd></div>
             <div><dt>畝（表示日）</dt><dd id="areaBeds">-</dd></div>
@@ -134,6 +136,7 @@
                 <option value="shed">物置</option>
                 <option value="well">井戸</option>
                 <option value="path">通路</option>
+                <option value="residue">残渣処理場</option>
                 <option value="other">その他</option>
               </select>
             </label>
@@ -236,6 +239,7 @@
           </div>
           <p class="muted edit-only">畝や区画の作業をクリックすると、下で編集できます。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わります。数字をクリックすると、畝幅や隙間を cm で指定できます。図の中の「＋」を押すと、その場所に下の畝幅と隙間で畝を足します。</p>
           <div class="row edit-only strip-tools">
+            <select id="stripCrop" aria-label="足す畝の品目"></select>
             <label class="inline-field">畝幅（cm）<input id="stripWidth" type="number" min="1" value="70" /></label>
             <label class="inline-field">左右の隙間（cm）<input id="stripAisle" type="number" min="0" value="60" /></label>
             <label class="inline-field">本数<input id="stripCount" type="number" min="1" value="1" /></label>
@@ -251,36 +255,20 @@
             <h2>作業の計画</h2>
             <select id="scheduleTarget" aria-label="区画の作業か、畝か"></select>
           </div>
-          <div id="plantingBar" class="planting-bar">
-            <div class="row">
-              <select id="plantingSelect" aria-label="作付"></select>
-              <label id="cropField" class="inline-field edit-only">品目<input id="cropName" type="text" /></label>
-              <button id="addPlantingBtn" class="chip-btn edit-only">作付を追加</button>
-              <button id="deletePlantingBtn" class="text-btn danger edit-only">作付を削除</button>
-            </div>
-            <p id="harvestInfo" class="muted"></p>
+          <!-- 区画なら区画の作業、畝なら作付ごとの欄が、上から順に並ぶ（schedule-view.js が描く） -->
+          <div id="editorSections"></div>
+          <!-- 畝のとき: 次の作付を足す欄。作付がまだなければ、これだけが出る -->
+          <div id="addPlantingBar" class="row edit-only add-planting">
+            <label class="inline-field">追加する作付の品目
+              <select id="newCropSelect"></select>
+            </label>
+            <select id="newPlantingMode" aria-label="日付の基準">
+              <option value="plant">定植・播種をこの日に始める（前は逆算）</option>
+              <option value="forward">最初の作業をこの日に始める</option>
+            </select>
+            <input id="newPlantingDate" type="date" aria-label="基準にする日" />
+            <button id="addPlantingBtn" class="chip-btn">作付を追加</button>
           </div>
-          <div id="workTools" class="row edit-only schedule-tools">
-            <select id="templateSelect" aria-label="ひな形"></select>
-            <label class="inline-field">最初の作業の日<input id="templateStart" type="date" /></label>
-            <button id="applyTemplateBtn" class="chip-btn">ひな形から作る</button>
-            <button id="copyWorksBtn" class="chip-btn">同じ区画のほかの畝にコピー</button>
-          </div>
-          <div id="arrangeTools" class="row edit-only schedule-tools">
-            <select id="arrangeMode" aria-label="並べ直しの基準"></select>
-            <input id="arrangeDate" type="date" aria-label="基準にする日" />
-            <button id="arrangeBtn" class="chip-btn">並べ直す</button>
-          </div>
-          <ul id="scheduleWarnings" class="error warning-list"></ul>
-          <div class="table-scroll">
-            <table id="workTable" class="work-table">
-              <thead>
-                <tr><th></th><th>作業</th><th>開始日</th><th>終了日</th><th>日数</th><th>前との間隔</th><th>メモ</th><th class="edit-only"></th></tr>
-              </thead>
-              <tbody id="workRows"></tbody>
-            </table>
-          </div>
-          <button id="addWorkBtn" class="text-btn edit-only">＋ 作業を追加</button>
         </section>
 
         <section class="panel">
@@ -299,6 +287,17 @@
           <div id="gantt"></div>
         </section>
 
+        <section id="summaryPanel" class="panel" hidden>
+          <h2>苗と肥料の集計</h2>
+          <div class="table-scroll">
+            <table class="work-table summary-table">
+              <thead><tr><th>品目</th><th>作付の数</th><th>面積（㎡）</th><th>苗数</th><th>肥料</th></tr></thead>
+              <tbody id="cropSummary"></tbody>
+            </table>
+          </div>
+          <p id="fertilizerSummary" class="muted"></p>
+        </section>
+
         <section class="panel edit-only">
           <h2>作業の種類と目安の日数</h2>
           <p class="muted">ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。</p>
@@ -310,6 +309,25 @@
       </div>
     </main>
 
+    <main id="cropsView" class="schedule" hidden>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>品目</h2>
+          <button id="addCropBtn" class="chip-btn edit-only">品目を追加</button>
+        </div>
+        <p class="muted">品目ごとの設定値です。作付に品目を割り当てると、畝の寸法とこの値から、苗数と肥料の量を計算します。空の欄は計算に使いません。すべてのプランで共通です。</p>
+        <div class="table-scroll"><table id="cropTable" class="work-table crop-table"></table></div>
+      </section>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>肥料</h2>
+          <button id="addFertilizerBtn" class="chip-btn edit-only">肥料を追加</button>
+        </div>
+        <p class="muted">窒素の成分（%）から、肥料の量を計算します。</p>
+        <div class="table-scroll"><table id="fertilizerTable" class="work-table crop-table"></table></div>
+      </section>
+    </main>
+
     <div id="ganttTip" class="gantt-tip" role="tooltip" hidden></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -317,7 +335,7 @@
     <script type="module">
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // 読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js"];
       try {
         await Promise.all(parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })));
         await import("./app.js");

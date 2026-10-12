@@ -11,9 +11,12 @@ import {
   scheduleAnchored,
   scheduleBefore,
   scheduleForward,
+  typesForCrop,
   workDays,
   worksRange,
 } from "./schedule.js";
+import { cropLabel, plantingNumbers, summarize } from "./crops.js";
+import { notify } from "./dialog.js";
 import { initStrip, renderStrip } from "./strip-view.js";
 
 const $ = (id) => document.getElementById(id);
@@ -28,7 +31,9 @@ let ctx = null; // { state, setStatus, queueSave, cropColor, plantingOn }
 // いま編集している相手。target は "block"（区画の作業）か、畝の ID
 const sel = { blockId: null, target: "block", plantingId: null };
 let daysBeforeEdit = null; // 開始日を動かす前の日数 { id, days }
-let suggestedFor = null; // ひな形の開始日の候補を入れた相手
+const folded = new Set(); // 折りたたんでいる作付の ID
+const arrangeChoice = new Map(); // 並べ直しの欄で選んだ基準と日 { mode, date }。区画や作付ごと
+const template = { key: Object.keys(TEMPLATES.block)[0], start: "" }; // 区画のひな形の欄で選んだもの
 let problems = []; // 日程の無理。描くたびに求め直す
 const ARRANGE_MODES = {
   block: { before: "畝立てをこの日に始められるように逆算", forward: "最初の作業をこの日に始める" },
@@ -37,11 +42,17 @@ const ARRANGE_MODES = {
 const picked = new Set(); // 工程表で選んでいる作業の ID
 let clipboard = null; // コピーか切り取りをした作業 { works, cut }
 let barDrag = null; // 工程表で帯をドラッグしている途中の状態
-let arrangedFor = null; // 並べ直しの基準日の初期値を入れた相手
+let addingFor = null; // 「作付を追加」の日付の初期値を入れたときの状態
 
 const state = () => ctx.state;
 const store = () => ctx.state.store;
 const typeOf = (code) => state().workTypes.find((type) => type.code === code);
+const cropOf = (planting) => state().crops.find((crop) => crop.id === planting?.crop_id) || null;
+// 区画や作付に合わせた、作業の種類の目安。品目を登録した作付なら、その品目の日数を使う
+function typesFor(owner) {
+  const planting = state().plantings.find((item) => item.id === owner.planting_id);
+  return typesForCrop(state().workTypes, cropOf(planting), planting ? plantingWorks(planting.id) : []);
+}
 const typeLabel = (code) => typeOf(code)?.label || code;
 const bySeq = (a, b) => a.seq - b.seq;
 
@@ -50,8 +61,8 @@ const bedPlantings = (bedId) => state().plantings.filter((planting) => planting.
 const blockWorks = (blockId) => state().works.filter((work) => work.block_id === blockId).sort(bySeq);
 const plantingWorks = (plantingId) => state().works.filter((work) => work.planting_id === plantingId).sort(bySeq);
 
-const scope = () => (sel.target === "block" ? "block" : "bed");
-const currentWorks = () => (sel.target === "block" ? blockWorks(sel.blockId) : sel.plantingId ? plantingWorks(sel.plantingId) : []);
+const kindOf = (owner) => (owner.block_id ? "block" : "bed");
+const worksOf = (owner) => (owner.block_id ? blockWorks(owner.block_id) : plantingWorks(owner.planting_id));
 
 function formatDay(iso) {
   const [year, month, day] = iso.split("-").map(Number);
@@ -118,6 +129,7 @@ export function openInSchedule(kind, id) {
     const planting = state().plantings.find((item) => item.id === id);
     const bed = state().beds.find((item) => item.id === planting.bed_id);
     Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: id });
+    folded.delete(id);
   } else if (kind === "bed") {
     const bed = state().beds.find((item) => item.id === id);
     Object.assign(sel, { blockId: bed.block_id, target: id, plantingId: null });
@@ -135,6 +147,7 @@ export function renderSchedule() {
   renderWeek();
   problems = planProblems(state());
   renderProblems();
+  renderSummary();
   if (!blocks.length) {
     return;
   }
@@ -270,111 +283,87 @@ function renderGantt() {
   renderPickTools();
 }
 
-// ひな形を並べ始める日の候補。畝なら、前の作付の収穫完了の翌日か、区画の作業が終わった翌日
-function suggestedStart() {
-  if (sel.target === "block") {
-    return "";
+// 作付の寸法、苗数、肥料の量を 1 行にする
+function numbersText(planting) {
+  const bed = state().beds.find((item) => item.id === planting.bed_id);
+  const crop = cropOf(planting);
+  const fertilizer = state().fertilizers.find((item) => item.id === crop?.fertilizer_id);
+  const numbers = plantingNumbers(bed.shape, crop, fertilizer);
+  const parts = [`畝 ${Math.round(numbers.width * 100)} cm × ${numbers.length.toFixed(1)} m（${numbers.area.toFixed(1)} ㎡）`];
+  if (numbers.seedlings !== null) {
+    parts.push(`苗 ${numbers.seedlings.toLocaleString("ja-JP")}`);
   }
-  const plantings = bedPlantings(sel.target);
-  const index = plantings.findIndex((planting) => planting.id === sel.plantingId);
-  const before = index > 0 ? harvestEnd(plantingWorks(plantings[index - 1].id)) : worksRange(blockWorks(sel.blockId))?.end;
-  return before ? addDays(before, 1) : "";
+  if (numbers.nitrogenKg !== null) {
+    parts.push(`窒素 ${numbers.nitrogenKg.toFixed(2)} kg`);
+  }
+  if (numbers.fertilizerKg !== null) {
+    parts.push(`${fertilizer.name} ${numbers.fertilizerKg.toFixed(2)} kg`);
+  }
+  return parts.join(" ／ ");
 }
 
-function renderEditor() {
-  const blocks = state().blocks;
-  const beds = blockBeds(sel.blockId);
-  $("scheduleBlock").innerHTML = blocks.map((block) => `<option value="${block.id}">${escapeHtml(block.name)}</option>`).join("");
-  $("scheduleBlock").value = sel.blockId;
-  $("scheduleTarget").innerHTML =
-    `<option value="block">区画の作業（畝立ての前まで）</option>` +
-    beds
-      .map((bed) => {
-        const crops = bedPlantings(bed.id).map((planting) => planting.crop_name).filter(Boolean).join(" → ");
-        return `<option value="${bed.id}">畝${bed.seq}${crops ? `（${escapeHtml(crops)}）` : ""}</option>`;
-      })
-      .join("");
-  $("scheduleTarget").value = sel.target;
+// プラン全体の、品目ごとの苗数と、肥料ごとの量
+function renderSummary() {
+  const summary = summarize(state());
+  $("summaryPanel").hidden = summary.crops.length === 0;
+  const number = (value, digits = 0) => value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  $("cropSummary").innerHTML = summary.crops
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.name)}${row.registered ? "" : '<span class="muted">（未登録）</span>'}</td>` +
+        `<td class="num">${row.count}</td><td class="num">${number(row.area, 1)}</td>` +
+        `<td class="num">${row.seedlings ? number(row.seedlings) : "-"}</td>` +
+        `<td>${row.fertilizerKg ? `${escapeHtml(row.fertilizer)} ${number(row.fertilizerKg, 2)} kg` : "-"}</td></tr>`
+    )
+    .join("");
+  $("fertilizerSummary").textContent = summary.fertilizers.length
+    ? `肥料の合計: ${summary.fertilizers.map((row) => `${row.name} ${number(row.kg, 2)} kg`).join("、")}`
+    : "";
+}
 
-  const onBed = sel.target !== "block";
-  const plantings = onBed ? bedPlantings(sel.target) : [];
-  const planting = plantings.find((item) => item.id === sel.plantingId);
-  $("plantingBar").hidden = !onBed;
-  if (onBed) {
-    $("plantingSelect").innerHTML = plantings
-      .map((item) => `<option value="${item.id}">作付 ${item.seq}${item.crop_name ? `: ${escapeHtml(item.crop_name)}` : ""}</option>`)
-      .join("");
-    $("plantingSelect").value = sel.plantingId || "";
-    $("plantingSelect").hidden = plantings.length === 0;
-    $("deletePlantingBtn").hidden = !planting;
-    $("cropField").hidden = !planting;
-    if (planting && document.activeElement !== $("cropName")) {
-      $("cropName").value = planting.crop_name;
-    }
-    const end = planting ? harvestEnd(plantingWorks(planting.id)) : null;
-    $("harvestInfo").textContent = !planting
-      ? "この畝には作付がまだありません。「作付を追加」で、畝立てから収穫までの 1 回ぶんを作ります。"
-      : end
-        ? `収穫完了予定日: ${formatDay(end)}`
-        : "収穫完了予定日: 未定（「収穫」の終了日を入れると決まります）";
-  }
+// 並んだ作業がすべて終わり、最後の作業のあとにあける日数（すき込みのあとの 21 日など）も過ぎた、最初の日。
+// 日付の入った作業がなければ空
+function startAfter(works) {
+  const last = works.filter((work) => work.plan_start && work.plan_end).sort((a, b) => a.plan_end.localeCompare(b.plan_end)).at(-1);
+  return last ? addDays(last.plan_end, 1 + (typeOf(last.work_type)?.min_gap_days || 0)) : "";
+}
 
-  const usable = !onBed || Boolean(planting);
-  $("workTools").hidden = !usable;
-  $("workTable").hidden = !usable;
-  $("addWorkBtn").hidden = !usable;
-  const templates = TEMPLATES[scope()];
-  const templateKey = `${scope()}`;
-  if ($("templateSelect").dataset.scope !== templateKey) {
-    $("templateSelect").dataset.scope = templateKey;
-    $("templateSelect").innerHTML = Object.entries(templates)
-      .map(([key, template]) => `<option value="${key}">${template.label}</option>`)
-      .join("");
-  }
-  const target = `${sel.blockId}|${sel.target}|${sel.plantingId}`;
-  if (suggestedFor !== target) {
-    suggestedFor = target;
-    $("templateStart").value = suggestedStart();
-  }
-  $("copyWorksBtn").hidden = !onBed;
-  $("copyWorksBtn").disabled = beds.length < 2;
+const optionList = (entries, selected) =>
+  entries.map(([value, text]) => `<option value="${value}"${value === selected ? " selected" : ""}>${escapeHtml(text)}</option>`).join("");
+const cropOptions = (selected) =>
+  optionList([["", "登録していない品目"], ...state().crops.map((crop) => [crop.id, cropLabel(crop)])], selected || "");
 
-  const works = currentWorks();
-  const owner = usable ? currentOwner() : null;
-  const mine = owner ? problems.filter((problem) => (owner.block_id ? problem.block_id === owner.block_id : problem.planting_id === owner.planting_id)) : [];
+// 並べ直しの欄に出す基準と日。手で選んだものがあればそれを、なければ初期値を使う
+function arrangeFor(owner) {
+  const chosen = arrangeChoice.get(ownerKey(owner)) || {};
+  const mode = chosen.mode || Object.keys(ARRANGE_MODES[kindOf(owner)])[0];
+  return { mode, date: chosen.date ?? arrangeDefault(owner, mode) };
+}
+
+// 並べ直しの欄、指摘、作業の表、「作業を追加」。区画の作業と、作付の作業で同じ形
+function worksBlock(owner) {
+  const kind = kindOf(owner);
+  const works = worksOf(owner);
+  const mine = problems.filter((problem) => (owner.block_id ? problem.block_id === owner.block_id : problem.planting_id === owner.planting_id));
   const flagged = new Set(mine.map((problem) => problem.work_id).filter(Boolean));
-  $("scheduleWarnings").innerHTML = mine
+  const warnings = mine
     .map((problem) => {
       const index = works.findIndex((work) => work.id === problem.work_id);
       const where = index >= 0 ? `${index + 1}. ${escapeHtml(typeLabel(works[index].work_type))}: ` : "";
       return `<li>${where}${escapeHtml(problem.message)}</li>`;
     })
     .join("");
-  $("arrangeTools").hidden = !usable || works.length === 0;
-  if ($("arrangeMode").dataset.scope !== scope()) {
-    $("arrangeMode").dataset.scope = scope();
-    $("arrangeMode").innerHTML = Object.entries(ARRANGE_MODES[scope()])
-      .map(([key, text]) => `<option value="${key}">${text}</option>`)
-      .join("");
-    arrangedFor = null;
-  }
-  if (arrangedFor !== target) {
-    arrangedFor = target;
-    $("arrangeDate").value = arrangeDefault();
-  }
+  const choice = arrangeFor(owner);
   // 相手に合う種類を先に、それ以外を後ろに出す
-  const groups = [scope(), scope() === "block" ? "bed" : "block"];
+  const groups = [kind, kind === "block" ? "bed" : "block"];
   const typeOptions = (selected) =>
     groups
       .map((group) => {
-        const options = state()
-          .workTypes.filter((type) => (type.scope || "block") === group)
-          .map((type) => `<option value="${type.code}"${type.code === selected ? " selected" : ""}>${escapeHtml(type.label)}</option>`)
-          .join("");
-        return `<optgroup label="${SCOPE_LABELS[group]}">${options}</optgroup>`;
+        const types = state().workTypes.filter((type) => (type.scope || "block") === group);
+        return `<optgroup label="${SCOPE_LABELS[group]}">${optionList(types.map((type) => [type.code, type.label]), selected)}</optgroup>`;
       })
       .join("");
-  $("workRows").innerHTML = works.length
+  const rows = works.length
     ? works
         .map((work, index) => {
           const days = workDays(work);
@@ -396,19 +385,106 @@ function renderEditor() {
           );
         })
         .join("")
-    : '<tr><td colspan="8" class="muted">作業がまだありません。ひな形から作るか、「作業を追加」で足してください。</td></tr>';
+    : `<tr><td colspan="8" class="muted">作業がまだありません。${kind === "bed" ? "下の「作付を追加」で入れるか" : "ひな形から作るか"}、「作業を追加」で足してください。</td></tr>`;
+  return (
+    `<div class="row edit-only schedule-tools"${works.length ? "" : " hidden"}>` +
+    `<select data-field="arrange-mode" aria-label="並べ直しの基準">${optionList(Object.entries(ARRANGE_MODES[kind]), choice.mode)}</select>` +
+    `<input type="date" data-field="arrange-date" aria-label="基準にする日" value="${choice.date}" />` +
+    `<button class="chip-btn" data-action="arrange">並べ直す</button></div>` +
+    `<ul class="error warning-list">${warnings}</ul>` +
+    `<div class="table-scroll"><table class="work-table"><thead><tr><th></th><th>作業</th><th>開始日</th><th>終了日</th><th>日数</th>` +
+    `<th>前との間隔</th><th>メモ</th><th class="edit-only"></th></tr></thead><tbody>${rows}</tbody></table></div>` +
+    `<button class="text-btn edit-only" data-action="add-work">＋ 作業を追加</button>`
+  );
+}
+
+// 作付 1 つぶんの欄。見出しの行に、折りたたみ、品目、削除。その下に並べ直しの欄と作業の表
+function plantingSection(planting) {
+  const works = plantingWorks(planting.id);
+  const crop = cropOf(planting);
+  const closed = folded.has(planting.id);
+  const end = harvestEnd(works);
+  const range = worksRange(works);
+  const info = end
+    ? `収穫完了予定日: ${formatDay(end)}`
+    : works.length
+      ? "収穫完了予定日: 未定（「収穫」の終了日を入れると決まります）"
+      : "まだ作業がありません。下で日を決めて「作付を追加」を押すと、この作付にひな形の作業が入ります。";
+  // たたんだときは、期間と作業の数だけを見出しの行に出す
+  const brief = closed ? `<span class="muted">${range ? `${formatDay(range.start)}〜${formatDay(range.end)}` : "日付なし"}、作業 ${works.length} 件</span>` : "";
+  return (
+    `<section class="work-section${sel.plantingId === planting.id ? " is-current" : ""}" data-planting="${planting.id}">` +
+    `<div class="row section-head">` +
+    `<button class="fold-btn" data-action="fold" aria-expanded="${!closed}" title="${closed ? "開く" : "たたむ"}">${closed ? "▸" : "▾"}</button>` +
+    `<h3>作付 ${planting.seq}</h3>` +
+    `<span class="view-only">${escapeHtml(planting.crop_name)}</span>` +
+    `<label class="inline-field edit-only">この作付の品目<select data-field="crop">${cropOptions(crop?.id)}</select>` +
+    `<input type="text" data-field="crop_name" placeholder="品目の名前" value="${escapeHtml(planting.crop_name)}"${crop ? " hidden" : ""} /></label>` +
+    `<button class="text-btn danger edit-only" data-action="delete-planting">この作付を削除</button>${brief}</div>` +
+    `<p class="muted">${escapeHtml(numbersText(planting))} ／ ${info}</p>` +
+    `<div class="section-body"${closed ? " hidden" : ""}>${worksBlock({ planting_id: planting.id })}</div></section>`
+  );
+}
+
+// 区画の作業の欄。ひな形から作る欄は、ここにだけある
+function blockSection(block) {
+  return (
+    `<section class="work-section" data-block="${block.id}">` +
+    `<div class="row section-head"><h3>${escapeHtml(block.name)}の作業（畝立ての前まで）</h3></div>` +
+    `<div class="section-body">` +
+    `<div class="row edit-only schedule-tools">` +
+    `<select data-field="template" aria-label="ひな形">${optionList(Object.entries(TEMPLATES.block).map(([key, item]) => [key, item.label]), template.key)}</select>` +
+    `<label class="inline-field">最初の作業の日<input type="date" data-field="template-start" value="${template.start}" /></label>` +
+    `<button class="chip-btn" data-action="template">ひな形から作る</button></div>` +
+    `${worksBlock({ block_id: block.id })}</div></section>`
+  );
+}
+
+function renderEditor() {
+  const blocks = state().blocks;
+  const beds = blockBeds(sel.blockId);
+  $("scheduleBlock").innerHTML = blocks.map((block) => `<option value="${block.id}">${escapeHtml(block.name)}</option>`).join("");
+  $("scheduleBlock").value = sel.blockId;
+  $("scheduleTarget").innerHTML =
+    `<option value="block">区画の作業（畝立ての前まで）</option>` +
+    beds
+      .map((bed) => {
+        const crops = bedPlantings(bed.id).map((planting) => planting.crop_name).filter(Boolean).join(" → ");
+        return `<option value="${bed.id}">畝${bed.seq}${crops ? `（${escapeHtml(crops)}）` : ""}</option>`;
+      })
+      .join("");
+  $("scheduleTarget").value = sel.target;
+
+  const onBed = sel.target !== "block";
+  const plantings = onBed ? bedPlantings(sel.target) : [];
+  $("addPlantingBar").hidden = !onBed;
+  if (onBed) {
+    // 追加する作付の品目。選んだままにしておく（同じ品目を続けて足せるように）
+    const choice = $("newCropSelect").value;
+    $("newCropSelect").innerHTML = cropOptions(state().crops.some((item) => item.id === choice) ? choice : "");
+    // 日付の初期値は、畝、作付の数、品目、基準が変わったときに入れ直す（手で直した日は、それまで保つ）
+    const adding = [sel.target, plantings.length, plantings.at(-1)?.id, $("newCropSelect").value, $("newPlantingMode").value, state().works.length].join("|");
+    if (addingFor !== adding) {
+      addingFor = adding;
+      $("newPlantingDate").value = newPlantingDefault();
+    }
+  }
+  // 畝では、作付を上から順に並べる。足すたびに下へ伸びる
+  $("editorSections").innerHTML = onBed
+    ? plantings.map(plantingSection).join("") ||
+      '<p class="muted">この畝には作付がまだありません。下で品目と日を決めて「作付を追加」を押すと、畝立てから残渣処理までの作業が入った作付ができます。</p>'
+    : blockSection(blocks.find((block) => block.id === sel.blockId));
 }
 
 // 並べ直しの基準にする日の初期値
-function arrangeDefault() {
-  const works = currentWorks();
-  const mode = $("arrangeMode").value;
+function arrangeDefault(owner, mode) {
+  const works = worksOf(owner);
   if (mode === "plant") {
     return works.find((work) => work.work_type === "plant")?.plan_start || "";
   }
   if (mode === "before") {
     // この区画の畝のうち、いちばん早く始まる最初の作付の開始日
-    const starts = blockBeds(sel.blockId)
+    const starts = blockBeds(owner.block_id)
       .map((bed) => bedPlantings(bed.id)[0])
       .filter(Boolean)
       .map((planting) => worksRange(plantingWorks(planting.id))?.start)
@@ -418,28 +494,28 @@ function arrangeDefault() {
   return works.find((work) => work.plan_start)?.plan_start || "";
 }
 
-function arrange() {
-  const works = currentWorks();
-  const date = $("arrangeDate").value;
-  const mode = $("arrangeMode").value;
+function arrange(owner, mode, date) {
+  const works = worksOf(owner);
   if (!date) {
-    alert("基準にする日を入れてください。");
+    notify("基準にする日を入れてください。");
     return;
   }
   let result;
   if (mode === "before") {
-    result = scheduleBefore(works, state().workTypes, date);
+    result = scheduleBefore(works, typesFor(owner), date);
   } else if (mode === "plant") {
     const index = works.findIndex((work) => work.work_type === "plant");
     if (index < 0) {
-      alert("この作付には「定植・播種」の作業がありません。");
+      notify("この作付には「定植・播種」の作業がありません。");
       return;
     }
-    result = scheduleAnchored(works, state().workTypes, index, date);
+    result = scheduleAnchored(works, typesFor(owner), index, date);
   } else {
-    result = scheduleForward(works, state().workTypes, date);
+    result = scheduleForward(works, typesFor(owner), date);
   }
-  run(() => replaceWorks(currentOwner(), result));
+  // 並べ直したあとは、欄の日を結果に合わせて出し直す
+  arrangeChoice.delete(ownerKey(owner));
+  run(() => replaceWorks(owner, result));
 }
 
 function renderTypes() {
@@ -487,83 +563,99 @@ async function replaceWorks(owner, works) {
   await store().upsert("works", works);
 }
 
-function applyTemplate() {
-  const template = TEMPLATES[scope()][$("templateSelect").value];
-  const owner = currentOwner();
-  if (currentWorks().length && !confirm("いまの作業を、ひな形の内容に置き換えます。")) {
+function applyTemplate(blockId) {
+  const owner = { block_id: blockId };
+  if (worksOf(owner).length && !confirm("いまの作業を、ひな形の内容に置き換えます。")) {
     return;
   }
   run(async () => {
-    let works = template.codes.map((code, index) => newWork(owner, code, index + 1));
-    if ($("templateStart").value) {
-      works = scheduleForward(works, state().workTypes, $("templateStart").value);
+    let works = TEMPLATES.block[template.key].codes.map((code, index) => newWork(owner, code, index + 1));
+    if (template.start) {
+      works = scheduleForward(works, state().workTypes, template.start);
     }
     await replaceWorks(owner, works);
   });
 }
 
-function copyWorks() {
-  const source = currentWorks();
-  const clone = (owner) => source.map((work) => ({ ...work, id: crypto.randomUUID(), block_id: null, planting_id: null, ...owner }));
-  // 区画の作業は、ほかの区画の計画を置き換えてしまうので、まとめては写さない（工程表のコピーと貼り付けを使う）
-  if (sel.target === "block") {
-    return;
-  }
-  // 畝: 同じ回の作付があれば置き換え、ちょうど次の回なら作付を足す。回がずれている畝は飛ばす
-  const planting = state().plantings.find((item) => item.id === sel.plantingId);
-  const targets = blockBeds(sel.blockId).filter((bed) => bed.id !== sel.target);
-  if (!confirm(`この作付（品目と作業）を、同じ区画のほかの畝 ${targets.length} 本にコピーします。同じ回の作付は置き換わります。`)) {
-    return;
-  }
-  run(async () => {
-    let skipped = 0;
-    for (const bed of targets) {
-      const plantings = bedPlantings(bed.id);
-      let other = plantings.find((item) => item.seq === planting.seq);
-      if (!other && plantings.length !== planting.seq - 1) {
-        skipped += 1;
-        continue;
-      }
-      if (other) {
-        other.crop_name = planting.crop_name;
-      } else {
-        other = { ...planting, id: crypto.randomUUID(), bed_id: bed.id };
-        state().plantings.push(other);
-      }
-      await store().upsert("plantings", [other]);
-      await replaceWorks({ planting_id: other.id }, clone({ planting_id: other.id }));
-    }
-    if (skipped) {
-      alert(`作付の回数が合わない畝 ${skipped} 本は、コピーしませんでした。`);
-    }
-  });
+// 作付のひな形の作業（日付なし）。品目を登録してあれば、マルチを張るかどうかでひな形を選ぶ。
+// 品目を登録していない作付は、マルチありで作る（張らないなら、マルチ張りの行を消す）
+function draftWorks(crop, owner = {}) {
+  const key = crop && !crop.mulch ? "bare" : "mulch";
+  return { key, works: TEMPLATES.bed[key].codes.map((code, index) => newWork(owner, code, index + 1)) };
 }
 
+// その畝の seq 番目の作付を、いちばん早く始められる日。
+// 前の作付（なければ区画）の作業が終わり、あける日数も過ぎた最初の日。どちらにも日付がなければ空
+function earliestStart(bed, seq) {
+  const earlier = bedPlantings(bed.id).filter((item) => item.seq < seq).at(-1);
+  return startAfter(earlier ? plantingWorks(earlier.id) : blockWorks(bed.block_id));
+}
+
+// 作付に、ひな形の作業を入れる。日付は品目の日数（収穫開始まで、収穫の日数）で決める。
+// timing = { mode: "plant"（定植・播種をその日に始め、前は逆算）か "forward"（最初の作業をその日に始める）, date }
+// date が空なら、いちばん早く始められる日から順に並べる。それも分からなければ、日付は空のまま
+async function fillPlanting(planting, timing = {}) {
+  const crop = cropOf(planting);
+  const owner = { planting_id: planting.id };
+  const draft = draftWorks(crop, owner);
+  const types = typesForCrop(state().workTypes, crop, []);
+  const anchor = draft.works.findIndex((work) => work.work_type === "plant");
+  const earliest = earliestStart(state().beds.find((item) => item.id === planting.bed_id), planting.seq);
+  let works = draft.works;
+  if (timing.date && timing.mode === "plant" && anchor >= 0) {
+    works = scheduleAnchored(works, types, anchor, timing.date);
+  } else if (timing.date || earliest) {
+    works = scheduleForward(works, types, timing.date || earliest);
+  }
+  await replaceWorks(owner, works);
+}
+
+// 「作付を追加」の日付の初期値。いちばん早く始められる日から並べたときの、定植・播種の日（または最初の作業の日）
+function newPlantingDefault() {
+  const plantings = bedPlantings(sel.target);
+  const last = plantings.at(-1);
+  // 作業のない作付が最後にあれば、足すのではなく、その作付に入れる
+  const seq = last && !plantingWorks(last.id).length ? last.seq : (last?.seq || 0) + 1;
+  const earliest = earliestStart(state().beds.find((bed) => bed.id === sel.target), seq);
+  if (!earliest || $("newPlantingMode").value === "forward") {
+    return earliest;
+  }
+  const crop = state().crops.find((item) => item.id === $("newCropSelect").value);
+  const dated = scheduleForward(draftWorks(crop).works, typesForCrop(state().workTypes, crop, []), earliest);
+  return dated.find((work) => work.work_type === "plant")?.plan_start || earliest;
+}
+
+// 作付を足す。「追加する作付の品目」で選んだ品目の作付を作り、ひな形の作業まで入れる。
+// 作業のない作付がもうあるときは、新しく足さずに、その作付に品目と作業を入れる
 function addPlanting() {
   const plantings = bedPlantings(sel.target);
   const last = plantings.at(-1);
-  if (last && !harvestEnd(plantingWorks(last.id))) {
-    alert("前の作付の収穫完了予定日が決まっていません。「収穫」の終了日を入れてから、次の作付を足してください。");
+  const crop = state().crops.find((item) => item.id === $("newCropSelect").value);
+  const timing = { mode: $("newPlantingMode").value, date: $("newPlantingDate").value };
+  const empty = last && !plantingWorks(last.id).length ? last : null;
+  if (last && !empty && !harvestEnd(plantingWorks(last.id))) {
+    notify(
+      `作付 ${last.seq}${last.crop_name ? `（${last.crop_name}）` : " "}の収穫完了予定日が決まっていません。\n` +
+        "次の作付を足す前に、その作付に「収穫」の作業を入れ、終了日を入れてください。"
+    );
     return;
   }
-  const planting = {
-    id: crypto.randomUUID(),
-    plan_id: state().plan.id,
-    bed_id: sel.target,
-    seq: (last?.seq || 0) + 1,
-    crop_id: null,
-    crop_name: "",
-    note: "",
-  };
   run(async () => {
-    await store().upsert("plantings", [planting]);
-    state().plantings.push(planting);
+    let planting = empty;
+    if (planting && crop) {
+      planting.crop_id = crop.id;
+      planting.crop_name = crop.name;
+      await store().upsert("plantings", [planting]);
+    } else if (!planting) {
+      planting = await newPlanting(sel.target, crop?.name || "", crop?.id || null);
+    }
     sel.plantingId = planting.id;
+    await fillPlanting(planting, timing);
   });
 }
 
-function deletePlanting() {
-  const planting = state().plantings.find((item) => item.id === sel.plantingId);
+function deletePlanting(id) {
+  const planting = state().plantings.find((item) => item.id === id);
   if (!planting || !confirm(`作付 ${planting.seq}${planting.crop_name ? `（${planting.crop_name}）` : ""}と、その作業を削除します。`)) {
     return;
   }
@@ -571,20 +663,40 @@ function deletePlanting() {
     await store().remove("plantings", [planting.id]);
     state().plantings = state().plantings.filter((item) => item.id !== planting.id);
     state().works = state().works.filter((work) => work.planting_id !== planting.id);
-    sel.plantingId = null;
+    folded.delete(planting.id);
+    if (sel.plantingId === planting.id) {
+      sel.plantingId = null;
+    }
   });
 }
 
-function addWork() {
-  const works = currentWorks();
+// 作付の品目を選び直す。cropId が空なら「登録していない品目」（名前は残す）
+function changeCrop(plantingId, cropId) {
+  const planting = state().plantings.find((item) => item.id === plantingId);
+  const crop = state().crops.find((item) => item.id === cropId);
+  planting.crop_id = crop?.id || null;
+  if (crop) {
+    planting.crop_name = crop.name;
+  }
+  run(async () => {
+    await store().upsert("plantings", [planting]);
+    // まだ作業のない作付なら、選んだ品目のひな形で作業を入れる。作業があれば、そのままにする
+    if (crop && !plantingWorks(planting.id).length) {
+      await fillPlanting(planting);
+    }
+  });
+}
+
+function addWork(owner) {
+  const works = worksOf(owner);
   const last = works.at(-1);
-  const first = state().workTypes.find((type) => (type.scope || "block") === scope()) || state().workTypes[0];
-  const work = newWork(currentOwner(), first.code, works.length + 1);
+  const first = state().workTypes.find((type) => (type.scope || "block") === kindOf(owner)) || state().workTypes[0];
+  const work = newWork(owner, first.code, works.length + 1);
   if (last && last.plan_end) {
     work.plan_start = addDays(last.plan_end, 1 + (typeOf(last.work_type)?.min_gap_days || 0));
     work.plan_end = addDays(work.plan_start, first.default_days - 1);
   }
-  run(() => replaceWorks(currentOwner(), [...works, work]));
+  run(() => replaceWorks(owner, [...works, work]));
 }
 
 function changeWork(id, field, value) {
@@ -604,10 +716,11 @@ function changeWork(id, field, value) {
 }
 
 function workAction(id, action) {
-  const works = currentWorks();
+  const owner = ownerOf(state().works.find((work) => work.id === id));
+  const works = worksOf(owner);
   const index = works.findIndex((work) => work.id === id);
   if (action === "delete") {
-    run(() => replaceWorks(currentOwner(), works.filter((work) => work.id !== id)));
+    run(() => replaceWorks(owner, works.filter((work) => work.id !== id)));
     return;
   }
   const other = action === "up" ? index - 1 : index + 1;
@@ -615,7 +728,85 @@ function workAction(id, action) {
     return;
   }
   [works[index], works[other]] = [works[other], works[index]];
-  run(() => replaceWorks(currentOwner(), works));
+  run(() => replaceWorks(owner, works));
+}
+
+// 「作業の計画」の欄の中の操作。欄は描くたびに作り直すので、外側でまとめて受ける
+function initEditor() {
+  const root = $("editorSections");
+  const ownerAt = (element) => {
+    const section = element.closest(".work-section");
+    return section ? (section.dataset.block ? { block_id: section.dataset.block } : { planting_id: section.dataset.planting }) : null;
+  };
+
+  root.addEventListener("click", (event) => {
+    const owner = ownerAt(event.target);
+    if (!owner) {
+      return;
+    }
+    // 触った作付を、貼り付けの入れ先などに使う「いまの作付」にする
+    if (owner.planting_id && sel.plantingId !== owner.planting_id) {
+      sel.plantingId = owner.planting_id;
+      root.querySelectorAll(".work-section").forEach((section) => section.classList.toggle("is-current", section.dataset.planting === sel.plantingId));
+    }
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    const row = event.target.closest("tr[data-id]");
+    const section = event.target.closest(".work-section");
+    const field = (name) => section.querySelector(`[data-field="${name}"]`).value;
+    if (action === "fold") {
+      if (!folded.delete(owner.planting_id)) {
+        folded.add(owner.planting_id);
+      }
+      renderSchedule();
+    } else if (action === "delete-planting") {
+      deletePlanting(owner.planting_id);
+    } else if (action === "arrange") {
+      arrange(owner, field("arrange-mode"), field("arrange-date"));
+    } else if (action === "template") {
+      applyTemplate(owner.block_id);
+    } else if (action === "add-work") {
+      addWork(owner);
+    } else if (row && action) {
+      workAction(row.dataset.id, action);
+    }
+  });
+
+  root.addEventListener("change", (event) => {
+    const owner = ownerAt(event.target);
+    const name = event.target.dataset.field;
+    const row = event.target.closest("tr[data-id]");
+    if (!owner || !name) {
+      return;
+    }
+    if (row) {
+      changeWork(row.dataset.id, name, event.target.value);
+    } else if (name === "crop") {
+      changeCrop(owner.planting_id, event.target.value);
+    } else if (name === "crop_name") {
+      const planting = state().plantings.find((item) => item.id === owner.planting_id);
+      planting.crop_name = event.target.value.trim();
+      run(() => store().upsert("plantings", [planting]));
+    } else if (name === "arrange-mode") {
+      // 基準を変えたら、日もその基準の初期値に入れ直す
+      const date = arrangeDefault(owner, event.target.value);
+      arrangeChoice.set(ownerKey(owner), { mode: event.target.value, date });
+      event.target.closest(".work-section").querySelector('[data-field="arrange-date"]').value = date;
+    } else if (name === "arrange-date") {
+      arrangeChoice.set(ownerKey(owner), { ...arrangeFor(owner), date: event.target.value });
+    } else if (name === "template") {
+      template.key = event.target.value;
+    } else if (name === "template-start") {
+      template.start = event.target.value;
+    }
+  });
+
+  root.addEventListener("focusin", (event) => {
+    // 開始日を動かす前の日数を覚えておく
+    const row = event.target.closest("tr[data-id]");
+    if (row && event.target.dataset.field === "plan_start") {
+      daysBeforeEdit = { id: row.dataset.id, days: workDays(state().works.find((item) => item.id === row.dataset.id)) };
+    }
+  });
 }
 
 // ---- 工程表の上での操作 ----
@@ -656,13 +847,13 @@ function sortOwner(owner) {
   return works;
 }
 
-async function newPlanting(bedId, cropName) {
+async function newPlanting(bedId, cropName, cropId = null) {
   const planting = {
     id: crypto.randomUUID(),
     plan_id: state().plan.id,
     bed_id: bedId,
     seq: (bedPlantings(bedId).at(-1)?.seq || 0) + 1,
-    crop_id: null,
+    crop_id: cropId,
     crop_name: cropName || "",
     note: "",
   };
@@ -939,6 +1130,17 @@ export function initSchedule(context) {
     ...context,
     selection: () => sel,
     refresh: renderSchedule,
+    // 足した畝に、品目を決めた作付を 1 つずつ作り、ひな形の作業を入れる
+    assignCrop: (beds, cropId) => {
+      const crop = state().crops.find((item) => item.id === cropId);
+      if (crop && beds.length) {
+        run(async () => {
+          for (const bed of beds) {
+            await fillPlanting(await newPlanting(bed.id, crop.name, crop.id));
+          }
+        });
+      }
+    },
     flagged: (kind, id) => problems.some((problem) => (kind === "block" ? problem.block_id === id : problemBed(problem) === id)),
     open: (kind, id) => {
       openInSchedule(kind, id);
@@ -954,10 +1156,7 @@ export function initSchedule(context) {
     Object.assign(sel, { target: event.target.value, plantingId: null });
     renderSchedule();
   });
-  $("plantingSelect").addEventListener("change", (event) => {
-    sel.plantingId = event.target.value;
-    renderSchedule();
-  });
+  initEditor();
   initGanttEditing();
   // 工程表の帯にマウスを乗せると、開始日と終了日を出す
   const tip = $("ganttTip");
@@ -978,45 +1177,18 @@ export function initSchedule(context) {
     tip.hidden = true;
   });
   $("addPlantingBtn").addEventListener("click", addPlanting);
-  $("deletePlantingBtn").addEventListener("click", deletePlanting);
-  $("cropName").addEventListener("change", (event) => {
-    const planting = state().plantings.find((item) => item.id === sel.plantingId);
-    planting.crop_name = event.target.value.trim();
-    run(() => store().upsert("plantings", [planting]));
-  });
-  $("applyTemplateBtn").addEventListener("click", applyTemplate);
-  $("arrangeBtn").addEventListener("click", arrange);
-  $("arrangeMode").addEventListener("change", () => {
-    $("arrangeDate").value = arrangeDefault();
-  });
+  for (const id of ["newCropSelect", "newPlantingMode"]) {
+    $(id).addEventListener("change", () => {
+      $("newPlantingDate").value = newPlantingDefault();
+    });
+  }
   $("problemList").addEventListener("click", (event) => {
     const item = event.target.closest("li[data-id]");
     if (item) {
       openInSchedule(item.dataset.kind, item.dataset.id);
       renderSchedule();
-      $("workTable").scrollIntoView({ block: "center", behavior: "smooth" });
-    }
-  });
-  $("copyWorksBtn").addEventListener("click", copyWorks);
-  $("addWorkBtn").addEventListener("click", addWork);
-
-  $("workRows").addEventListener("focusin", (event) => {
-    // 開始日を動かす前の日数を覚えておく
-    const row = event.target.closest("tr[data-id]");
-    if (row && event.target.dataset.field === "plan_start") {
-      daysBeforeEdit = { id: row.dataset.id, days: workDays(state().works.find((item) => item.id === row.dataset.id)) };
-    }
-  });
-  $("workRows").addEventListener("change", (event) => {
-    const row = event.target.closest("tr[data-id]");
-    if (row && event.target.dataset.field) {
-      changeWork(row.dataset.id, event.target.dataset.field, event.target.value);
-    }
-  });
-  $("workRows").addEventListener("click", (event) => {
-    const row = event.target.closest("tr[data-id]");
-    if (row && event.target.dataset.action) {
-      workAction(row.dataset.id, event.target.dataset.action);
+      const section = $("editorSections").querySelector(`[data-planting="${sel.plantingId}"]`) || $("editorSections");
+      section.scrollIntoView({ block: "center", behavior: "smooth" });
     }
   });
   $("typeRows").addEventListener("change", (event) => {

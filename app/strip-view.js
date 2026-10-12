@@ -1,5 +1,7 @@
 // 日程の画面の「区画と畝」。区画を畝の端の側から見た横長の図で、畝の下に、その畝の作業を縦に並べる。
 // 横は実寸に比例する。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わる。
+import { cropLabel, plantingNumbers } from "./crops.js";
+import { notify } from "./dialog.js";
 import { edgeAngles } from "./geometry.js";
 import { WORK_COLORS, existsOn, harvestEnd } from "./schedule.js";
 
@@ -46,6 +48,24 @@ function workItems(works) {
     .join("")}</ul>`;
 }
 
+// 作付の苗数と肥料の量。品目を登録していない作付には出さない
+function numbersLine(bed, planting) {
+  const crop = ctx.state.crops.find((item) => item.id === planting.crop_id);
+  if (!crop) {
+    return "";
+  }
+  const fertilizer = ctx.state.fertilizers.find((item) => item.id === crop.fertilizer_id);
+  const numbers = plantingNumbers(bed.shape, crop, fertilizer);
+  const parts = [];
+  if (numbers.seedlings !== null) {
+    parts.push(`苗 ${numbers.seedlings.toLocaleString("ja-JP")}`);
+  }
+  if (numbers.fertilizerKg !== null) {
+    parts.push(`${escapeHtml(fertilizer.name)} ${numbers.fertilizerKg.toFixed(2)} kg`);
+  }
+  return parts.length ? `<p class="strip-numbers">${parts.join("<br>")}</p>` : "";
+}
+
 // 畝の並ぶ向き（畝の長い辺に直角な向き）の軸を決め、畝を左から順の「列」にまとめる。
 // 同じ列に、前後に並んだ畝が複数入ることがある
 function measure(block, beds) {
@@ -88,6 +108,11 @@ export function renderStrip() {
   const sel = ctx.selection();
   const block = state.blocks.find((item) => item.id === sel.blockId);
   $("stripDate").value = state.viewDate;
+  const chosen = $("stripCrop").value;
+  $("stripCrop").innerHTML =
+    '<option value="">品目を決めずに足す</option>' +
+    state.crops.map((crop) => `<option value="${crop.id}">${escapeHtml(cropLabel(crop))}</option>`).join("");
+  $("stripCrop").value = state.crops.some((crop) => crop.id === chosen) ? chosen : "";
   // なくす、消すは、畝を選んでいるときだけ
   const onBed = sel.target !== "block" && state.beds.some((bed) => bed.id === sel.target);
   $("stripRemoveBtn").disabled = !onBed;
@@ -161,6 +186,7 @@ export function renderStrip() {
               const end = harvestEnd(works);
               return (
                 `<div class="strip-planting"><div class="strip-crop">${planting.seq}. ${escapeHtml(planting.crop_name || "品目なし")}</div>` +
+                `${numbersLine(bed, planting)}` +
                 `${workItems(works)}${end ? "" : '<p class="strip-empty">収穫完了は未定</p>'}</div>`
               );
             })
@@ -230,7 +256,7 @@ function setDimension(key) {
   }
   const value = Number(answer.replace(/[,，\s]/g, ""));
   if (!Number.isFinite(value) || value < (kind === "width" ? MIN_WIDTH_M * 100 : 0)) {
-    alert(kind === "width" ? "10 以上の数を入れてください。" : "0 以上の数を入れてください。");
+    notify(kind === "width" ? "10 以上の数を入れてください。" : "0 以上の数を入れてください。");
     return;
   }
   const delta = value / 100 - current;
@@ -247,7 +273,7 @@ function toolSizes() {
   const width = Number($("stripWidth").value);
   const aisle = Number($("stripAisle").value);
   if (!(width > 0) || !(aisle >= 0)) {
-    alert("畝幅には 0 より大きい数を、隙間には 0 以上の数を入れてください。");
+    notify("畝幅には 0 より大きい数を、隙間には 0 以上の数を入れてください。");
     return null;
   }
   return { width: width / 100, aisle: aisle / 100 };
@@ -263,7 +289,7 @@ function insertAt(index) {
   }
   const blockId = view.block.id;
   if (!view.strips.length) {
-    ctx.appendBeds(blockId, sizes.width * 100, sizes.aisle * 100, 1);
+    ctx.assignCrop(ctx.appendBeds(blockId, sizes.width * 100, sizes.aisle * 100, 1), $("stripCrop").value);
     ctx.refresh();
     return;
   }
@@ -278,6 +304,7 @@ function insertAt(index) {
     change(following.flatMap((strip) => strip.beds), null, short);
   }
   const created = ctx.createBeds(blockId, shapes);
+  ctx.assignCrop(created, $("stripCrop").value);
   const order = [...view.strips.slice(0, index).flatMap((strip) => strip.beds), ...created, ...following.flatMap((strip) => strip.beds)];
   ctx.renumberBeds(order.map((bed) => bed.id));
   ctx.refresh();
@@ -349,11 +376,21 @@ export function initStrip(context) {
       return;
     }
     if (!(count >= 1)) {
-      alert("本数には 1 以上の数を入れてください。");
+      notify("本数には 1 以上の数を入れてください。");
       return;
     }
-    ctx.appendBeds(ctx.selection().blockId, sizes.width * 100, sizes.aisle * 100, count);
+    ctx.assignCrop(ctx.appendBeds(ctx.selection().blockId, sizes.width * 100, sizes.aisle * 100, count), $("stripCrop").value);
     ctx.refresh();
+  });
+  // 品目を選ぶと、その品目の畝幅と隙間を入れる
+  $("stripCrop").addEventListener("change", (event) => {
+    const crop = ctx.state.crops.find((item) => item.id === event.target.value);
+    if (crop?.bed_width_cm) {
+      $("stripWidth").value = crop.bed_width_cm;
+    }
+    if (crop && crop.aisle_width_cm != null) {
+      $("stripAisle").value = crop.aisle_width_cm;
+    }
   });
   $("stripRemoveBtn").addEventListener("click", () => {
     ctx.removeBed(ctx.selection().target);

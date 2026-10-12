@@ -1,3 +1,4 @@
+import { rectSize } from "./geometry.js";
 // 工程の日程の計算。日付は "YYYY-MM-DD" の文字列で扱う。
 
 // DB の field.work_types と同じ初期値（DB を使わないモードで使う）
@@ -15,9 +16,10 @@ export const DEFAULT_WORK_TYPES = [
   { code: "mulch", label: "マルチ張り", sort: 100, default_days: 2, min_gap_days: 0, scope: "bed" },
   { code: "plant", label: "定植・播種", sort: 110, default_days: 3, min_gap_days: 0, scope: "bed" },
   { code: "harvest", label: "収穫", sort: 120, default_days: 30, min_gap_days: 0, scope: "bed" },
+  { code: "residue", label: "残渣処理", sort: 130, default_days: 1, min_gap_days: 0, scope: "bed" },
 ];
 
-// 工程のひな形。区画は畝立ての前まで（「両方」は学校で習った順序）、畝は畝立てから収穫まで
+// 工程のひな形。区画は畝立ての前まで（「両方」は学校で習った順序）、畝は畝立てから収穫と残渣処理まで
 export const TEMPLATES = {
   block: {
     green: { label: "緑肥のみ", codes: ["subsoil", "rotary", "green_sow", "mow", "amend", "incorporate"] },
@@ -28,8 +30,8 @@ export const TEMPLATES = {
     plain: { label: "緑肥、太陽熱消毒なし", codes: ["subsoil", "rotary", "amend", "rotary"] },
   },
   bed: {
-    mulch: { label: "マルチあり", codes: ["ridge", "mulch", "plant", "harvest"] },
-    bare: { label: "マルチなし（裸地）", codes: ["ridge", "plant", "harvest"] },
+    mulch: { label: "マルチあり", codes: ["ridge", "mulch", "plant", "harvest", "residue"] },
+    bare: { label: "マルチなし（裸地）", codes: ["ridge", "plant", "harvest", "residue"] },
   },
 };
 
@@ -47,6 +49,7 @@ export const WORK_COLORS = {
   mulch: "#455a64",
   plant: "#0b6b72",
   harvest: "#d81b60",
+  residue: "#6d4c41",
 };
 
 const HARVEST = "harvest";
@@ -74,7 +77,7 @@ export function existsOn(start, end, date) {
   return (!start || start <= date) && (!end || date < end);
 }
 
-// 期間そのものに意味がある作業（太陽熱消毒など）は、目安より短いと警告する
+// 期間そのものに意味がある作業（太陽熱消毒など）は、目安より短いと警告する。収穫は、短くても無理ではないので見ない
 const LONG_WORK_DAYS = 7;
 
 const toUtc = (iso) => {
@@ -149,6 +152,27 @@ export function scheduleForward(works, workTypes, startDate) {
   return result;
 }
 
+// 品目に合わせた、作業の種類の目安。
+// 品目に「定植・播種から収穫開始まで」の日数があれば、定植・播種のあとにあける日数をそこから決め、
+// 「収穫の日数」があれば、収穫の標準の日数に使う。works は、その作付の作業（定植・播種の日数を見る）
+export function typesForCrop(workTypes, crop, works = []) {
+  if (!crop) {
+    return workTypes;
+  }
+  const planted = works.find((work) => work.work_type === "plant");
+  const base = workTypes.find((type) => type.code === "plant");
+  const plantDays = (planted && workDays(planted) > 0 ? workDays(planted) : base?.default_days) || 1;
+  return workTypes.map((type) => {
+    if (type.code === "plant" && crop.grow_days != null) {
+      return { ...type, min_gap_days: Math.max(crop.grow_days - plantDays, 0) };
+    }
+    if (type.code === HARVEST && crop.harvest_days != null) {
+      return { ...type, default_days: crop.harvest_days };
+    }
+    return type;
+  });
+}
+
 const monthDay = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
 
 // 1 つの区画、または 1 つの作付の作業の並びから、無理を探す。index は works の中の位置
@@ -166,7 +190,7 @@ export function sequenceProblems(works, workTypes) {
     const type = types.get(work.work_type);
     if (days < 1) {
       problems.push({ index, message: "終了日が開始日より前です。" });
-    } else if (type && type.default_days >= LONG_WORK_DAYS && days < type.default_days) {
+    } else if (type && type.code !== HARVEST && type.default_days >= LONG_WORK_DAYS && days < type.default_days) {
       problems.push({ index, message: `${type.label}は ${type.default_days} 日が目安です（いま ${days} 日）。` });
     }
     if (previous) {
@@ -186,15 +210,15 @@ export function sequenceProblems(works, workTypes) {
 // プラン全体から、日程の無理を探す。
 // 並びの無理に加えて、区画の作業と畝の作業のつながり、作付どうしの重なり、区画や畝がある期間とのずれを見る。
 // 戻り値は { block_id または planting_id, work_id（特定の作業でなければ null）, message }
-export function planProblems({ blocks, beds, plantings, works, workTypes }) {
+export function planProblems({ blocks, beds, plantings, works, workTypes, crops = [] }) {
   const types = typeMap(workTypes);
   const label = (work) => types.get(work.work_type)?.label || work.work_type;
   const bySeq = (a, b) => a.seq - b.seq;
   const problems = [];
   const add = (owner, work, message) => problems.push({ block_id: null, planting_id: null, ...owner, work_id: work?.id || null, message });
   // 並びの中の指摘を入れる。日付のない作業は、1 つずつ挙げずに件数だけにする
-  const addSequence = (owner, list) => {
-    const found = sequenceProblems(list, workTypes);
+  const addSequence = (owner, list, localTypes = workTypes) => {
+    const found = sequenceProblems(list, localTypes);
     const dated = found.filter((problem) => list[problem.index].plan_start && list[problem.index].plan_end);
     dated.forEach((problem) => add(owner, list[problem.index], problem.message));
     if (found.length > dated.length) {
@@ -221,7 +245,15 @@ export function planProblems({ blocks, beds, plantings, works, workTypes }) {
       for (const planting of plantings.filter((item) => item.bed_id === bed.id).sort(bySeq)) {
         const mine = { planting_id: planting.id };
         const own = works.filter((work) => work.planting_id === planting.id).sort(bySeq);
-        addSequence(mine, own);
+        // 品目を登録してある作付は、その品目の日数で見る
+        const crop = crops.find((item) => item.id === planting.crop_id);
+        addSequence(mine, own, typesForCrop(workTypes, crop, own));
+        if (crop && crop.bed_width_cm > 0) {
+          const width = Math.round(rectSize(bed.shape).width * 100);
+          if (Math.abs(width - crop.bed_width_cm) >= 1) {
+            add(mine, null, `畝幅が、品目の設定（${crop.bed_width_cm} cm）と違います（いま ${width} cm）。`);
+          }
+        }
         const span = worksRange(own);
         if (span) {
           const first = own.find((work) => work.plan_start === span.start);
@@ -238,6 +270,9 @@ export function planProblems({ blocks, beds, plantings, works, workTypes }) {
             add(mine, first, "前の作付の収穫完了予定日が決まっていません。");
           } else if (previous && span.start <= previous.end) {
             add(mine, first, `前の作付の収穫完了予定日（${monthDay(previous.end)}）より前に始まっています。`);
+          } else if (previous && previous.last && span.start <= previous.last) {
+            // 収穫のあとの残渣処理などが、まだ終わっていない
+            add(mine, first, `前の作付の作業が終わる日（${monthDay(previous.last)}）より前に始まっています。`);
           }
           if (bed.start_date && span.start < bed.start_date) {
             add(mine, null, `畝ができる日（${monthDay(bed.start_date)}）より前に作業があります。`);
@@ -246,7 +281,7 @@ export function planProblems({ blocks, beds, plantings, works, workTypes }) {
             add(mine, null, `畝をなくす日（${monthDay(bed.removed_on)}）以降に作業があります。`);
           }
         }
-        previous = { end: harvestEnd(own) };
+        previous = { end: harvestEnd(own), last: span?.end || null };
       }
     }
   }

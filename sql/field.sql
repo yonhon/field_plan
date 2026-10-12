@@ -50,11 +50,11 @@ create table if not exists field.plans (
   created_at timestamptz not null default now()
 );
 
--- 区域。有効圃場（耕起する場所）と、耕起しない場所（物置、井戸、通路など）
+-- 区域。有効圃場（耕起する場所）と、耕起しない場所（物置、井戸、通路、残渣処理場など）
 create table if not exists field.zones (
   id uuid primary key default gen_random_uuid(),
   plan_id uuid not null references field.plans (id) on delete cascade,
-  kind text not null check (kind in ('tillable', 'shed', 'well', 'path', 'other')),
+  kind text not null check (kind in ('tillable', 'shed', 'well', 'path', 'residue', 'other')),
   name text not null default '',
   shape jsonb not null,
   note text not null default '',
@@ -96,7 +96,8 @@ insert into field.work_types (code, label, sort, default_days, min_gap_days, sco
   ('ridge',         '畝立て',                 90,  2,  0, 'bed'),
   ('mulch',         'マルチ張り',            100,  2,  0, 'bed'),
   ('plant',         '定植・播種',            110,  3,  0, 'bed'),
-  ('harvest',       '収穫',                  120, 30,  0, 'bed')
+  ('harvest',       '収穫',                  120, 30,  0, 'bed'),
+  ('residue',       '残渣処理',              130,  1,  0, 'bed')
 on conflict (code) do nothing;
 
 -- 肥料の銘柄。成分は % で持つ
@@ -108,20 +109,22 @@ create table if not exists field.fertilizers (
   k_pct numeric not null default 0
 );
 
--- 品目ごとの設定値。畝に割り当てると、この値から苗数と施肥量を計算する（画面はこれから作る）
+-- 品目ごとの設定値。作付に割り当てると、畝の寸法とこの値から苗数と施肥量を計算する。空の値は計算に使わない
 create table if not exists field.crops (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   variety text not null default '',
-  bed_width_cm int not null,           -- 畝幅
-  aisle_width_cm int not null,         -- 通路幅
-  row_count int not null,              -- 条数
+  bed_width_cm int,                    -- 畝幅
+  aisle_width_cm int,                  -- 左右の隙間（通路幅）
+  row_count int,                       -- 条数
   row_gap_cm int,                      -- 条間
-  plant_gap_cm numeric not null,       -- 株間
+  plant_gap_cm numeric,                -- 株間
   staggered boolean not null default false,  -- 千鳥植え
   mulch boolean not null default false,
   n_kg_per_10a numeric,                -- 基肥の窒素量
   fertilizer_id uuid references field.fertilizers (id) on delete set null,
+  grow_days int,                       -- 定植・播種から収穫開始までの日数
+  harvest_days int,                    -- 収穫の日数
   note text not null default ''
 );
 

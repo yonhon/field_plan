@@ -251,6 +251,70 @@ h3 {
   margin-top: 8px;
 }
 
+/* お知らせの窓。文をマウスで選んでコピーできる */
+.notice {
+  max-width: min(520px, 90vw);
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  box-shadow: 0 8px 30px rgba(19, 38, 42, 0.25);
+}
+
+.notice::backdrop {
+  background: rgba(19, 38, 42, 0.3);
+}
+
+.notice-text {
+  margin: 0 0 14px;
+  white-space: pre-line;
+  line-height: 1.6;
+  user-select: text;
+}
+
+.work-section {
+  padding: 8px 0 10px;
+  border-top: 1px solid var(--line);
+}
+
+.work-section:first-child {
+  border-top: 0;
+}
+
+.section-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.work-section.is-current .section-head h3 {
+  color: var(--accent);
+}
+
+.fold-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  line-height: 1;
+}
+
+.work-section > .muted {
+  margin: 4px 0;
+}
+
+/* 閲覧だけの画面（スマホ）で、入力欄の代わりに見せる文字 */
+.view-only {
+  display: none;
+}
+
+.add-planting {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
 .planting-bar .muted {
   margin-top: 4px;
 }
@@ -882,6 +946,31 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 
+.strip-numbers {
+  margin: 2px 0;
+  font-size: 11px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.crop-table input[type="number"] {
+  width: 68px;
+}
+
+.crop-table input[type="text"] {
+  min-width: 110px;
+}
+
+.crop-table th {
+  white-space: normal;
+  min-width: 56px;
+  vertical-align: bottom;
+}
+
+.summary-table {
+  max-width: 720px;
+}
+
 .strip-empty {
   margin: 2px 0;
   color: var(--muted);
@@ -1122,5 +1211,9 @@ h3 {
 
   .page-header {
     flex-wrap: wrap;
+  }
+
+  .view-only {
+    display: inline;
   }
 }

@@ -23,6 +23,8 @@ import {
   splitPolygon,
   translatePoints,
 } from "./geometry.js";
+import { initCrops, renderCrops } from "./crops-view.js";
+import { notify } from "./dialog.js";
 import { existsOn, harvestEnd, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore } from "./store.js";
@@ -35,6 +37,7 @@ const ZONE_KINDS = {
   shed: { label: "物置", color: "#9a6b3f" },
   well: { label: "井戸", color: "#2a56a8" },
   path: { label: "通路", color: "#7a8587" },
+  residue: { label: "残渣処理場", color: "#6d4c41" },
   other: { label: "その他", color: "#7d5ba6" },
 };
 const OUTLINE_COLOR = "#0b6b72";
@@ -88,6 +91,8 @@ const state = {
   plantings: [], // 作付（畝ごとの、畝立てから収穫までの 1 回ぶん）
   works: [],
   workTypes: [],
+  crops: [], // 品目の設定値（すべてのプランで共通）
+  fertilizers: [],
   viewDate: savedViewDate(), // 圃場図に出す日。区画と畝は、この日にあるものだけを描く
   mode: "select",
   selected: null, // "outline" か、区域・区画・畝の ID
@@ -747,7 +752,7 @@ function askNumber(message, initial, allowZero = false) {
   }
   const value = Number(answer.replace(/[,，\s]/g, ""));
   if (!Number.isFinite(value) || value < 0 || (value === 0 && !allowZero)) {
-    alert(allowZero ? "0 以上の数を入れてください。" : "0 より大きい数を入れてください。");
+    notify(allowZero ? "0 以上の数を入れてください。" : "0 より大きい数を入れてください。");
     return null;
   }
   return value;
@@ -764,7 +769,7 @@ function finishScale() {
 
 function scaleByArea() {
   if (state.field.outline.length < 3) {
-    alert("先に圃場の外形を描いてください。");
+    notify("先に圃場の外形を描いてください。");
     return;
   }
   const actual = askNumber("圃場の実際の面積（㎡）");
@@ -908,7 +913,7 @@ function deleteSelectedShape() {
 // 有効圃場の中に、表示日から区画を作る。作れないときは理由を出して null を返す
 function createBlock(zone, shape) {
   if (visibleBeds().some((bed) => polygonsOverlap(bed.shape, shape))) {
-    alert("表示日に畝がある場所は、新しい区画にできません。先に、その畝をなくしてください。");
+    notify("表示日に畝がある場所は、新しい区画にできません。先に、その畝をなくしてください。");
     return null;
   }
   const overlapping = state.blocks.filter((block) => block.zone_id === zone.id && polygonsOverlap(block.shape, shape));
@@ -959,7 +964,7 @@ function createBlock(zone, shape) {
 function blockFromZone(point) {
   const zone = tillableZoneAt(point);
   if (!zone) {
-    alert("有効圃場の中をクリックしてください。");
+    notify("有効圃場の中をクリックしてください。");
     return;
   }
   if (visibleBlocks().some((block) => block.zone_id === zone.id) && !confirm(`${zoneLabel(zone)}には、すでに区画があります。表示日から、全体を 1 つの区画に設定し直しますか。`)) {
@@ -986,7 +991,7 @@ function splitTarget(point) {
 function splitAt(point) {
   const target = splitTarget(point);
   if (!target) {
-    alert("区画の中をクリックしてください。区画のない有効圃場なら、そのままクリックして分けられます。");
+    notify("区画の中をクリックしてください。区画のない有効圃場なら、そのままクリックして分けられます。");
     return;
   }
   const { shape, angle } = target;
@@ -998,14 +1003,14 @@ function splitAt(point) {
     return;
   }
   if (wanted >= span) {
-    alert(`${span.toFixed(2)} m より小さい数を入れてください。`);
+    notify(`${span.toFixed(2)} m より小さい数を入れてください。`);
     return;
   }
   const shift = (fromMin ? range.min + wanted : range.max - wanted) - range.at;
   const on = [point[0] + range.normal[0] * shift, point[1] + range.normal[1] * shift];
   const parts = splitPolygon(shape, on, angle);
   if (!parts[0] || !parts[1]) {
-    alert("この位置では分けられません。");
+    notify("この位置では分けられません。");
     return;
   }
   const beds = target.block ? state.beds.filter((bed) => bed.block_id === target.block.id) : [];
@@ -1015,7 +1020,7 @@ function splitAt(point) {
     return across.min < line - 0.01 && across.max > line + 0.01;
   };
   if (beds.some(straddles)) {
-    alert("畝をまたぐ位置では分けられません。畝と畝のあいだを選んでください。");
+    notify("畝をまたぐ位置では分けられません。畝と畝のあいだを選んでください。");
     return;
   }
 
@@ -1053,7 +1058,7 @@ function splitAt(point) {
 
 function blockFromRect(zone, points) {
   if (!zone || !polygonInside(points, zone.shape)) {
-    alert("区画は、1 つの有効圃場の中に収まるように描いてください。");
+    notify("区画は、1 つの有効圃場の中に収まるように描いてください。");
     renderMap();
     return;
   }
@@ -1077,7 +1082,7 @@ function layoutSelectedBlock() {
   const length = number("bedLength");
   const count = number("bedCount");
   if (!(width > 0) || !(aisle >= 0) || !(endGap >= 0) || (length !== null && !(length > 0)) || (count !== null && !(count >= 1))) {
-    alert("畝幅と長さ、本数には 0 より大きい数を、隙間には 0 以上の数を入れてください。");
+    notify("畝幅と長さ、本数には 0 より大きい数を、隙間には 0 以上の数を入れてください。");
     return;
   }
   addBedsToBlock(block, {
@@ -1091,16 +1096,16 @@ function layoutSelectedBlock() {
   render();
 }
 
-// 区画に、いまある畝の続きから畝を足す。足した本数（列の数）を返す
+// 区画に、いまある畝の続きから畝を足す。足した畝を返す
 function addBedsToBlock(block, options) {
   const mine = state.beds.filter((bed) => bed.block_id === block.id);
   const existing = mine.filter(bedExists);
   const result = layoutBeds(block.shape, { ...options, existing: existing.map((bed) => bed.shape) });
   if (!result.beds.length) {
-    alert("この寸法の畝は入りません。区画の残りの幅か、長さが足りません。");
-    return 0;
+    notify("この寸法の畝は入りません。区画の残りの幅か、長さが足りません。");
+    return [];
   }
-  createBeds(block.id, result.beds);
+  const created = createBeds(block.id, result.beds);
   const notes = [];
   if (options.count !== null && result.strips < options.count) {
     notes.push(`${options.count} 本のうち、入ったのは ${result.strips} 本です。`);
@@ -1109,9 +1114,9 @@ function addBedsToBlock(block, options) {
     notes.push(`${result.outside} 本が区画からはみ出しています。位置を直すか、削除してください。`);
   }
   if (notes.length) {
-    alert(notes.join("\n"));
+    notify(notes.join("\n"));
   }
-  return result.strips;
+  return created;
 }
 
 // 形の決まった畝を区画に足す。番号は、いまある畝の続き。足した畝を返す
@@ -1217,7 +1222,7 @@ function removeBed(id) {
   const bed = state.beds.find((item) => item.id === id);
   const problem = removalProblem(bed);
   if (problem) {
-    alert(problem);
+    notify(problem);
     return;
   }
   if (confirm(`${formatDate(state.viewDate)} に、この畝をなくします。それより前の日を表示すると、畝は残っています。`)) {
@@ -1234,7 +1239,7 @@ function removeBlockBeds() {
   const removed = removeBeds(beds);
   render();
   if (removed < beds.length) {
-    alert(`${beds.length - removed} 本は、収穫完了予定日が未定か、表示日より後なので残しました。`);
+    notify(`${beds.length - removed} 本は、収穫完了予定日が未定か、表示日より後なので残しました。`);
   }
 }
 
@@ -1538,7 +1543,7 @@ function endPointer(event) {
     if (points) {
       addZone(points);
     } else {
-      alert("寸法には 0 より大きい数を入れてください。");
+      notify("寸法には 0 より大きい数を入れてください。");
     }
     return;
   }
@@ -1715,10 +1720,13 @@ function showView(view) {
   });
   $("appView").hidden = view !== "map";
   $("scheduleView").hidden = view !== "schedule";
+  $("cropsView").hidden = view !== "crops";
   if (view === "map") {
     render();
-  } else {
+  } else if (view === "schedule") {
     renderSchedule();
+  } else {
+    renderCrops();
   }
 }
 
@@ -1759,6 +1767,8 @@ async function startApp() {
       // 読めなければ先頭のプランを開く
     }
     state.workTypes = await state.store.loadWorkTypes();
+    state.crops = await state.store.listAll("crops");
+    state.fertilizers = await state.store.listAll("fertilizers");
     await loadPlanData(state.plans.find((plan) => plan.id === currentId) || state.plans[0]);
     state.backdrop = await state.store.loadBackdrop(field.id);
     if (state.backdrop) {
@@ -1795,6 +1805,7 @@ async function startApp() {
     },
     setStatus: (text) => ($("saveStatus").textContent = text),
   });
+  initCrops({ state, setStatus: (text) => ($("saveStatus").textContent = text) });
   // スマホは作業の確認が主なので、日程から開く
   if (window.matchMedia("(max-width: 800px)").matches) {
     showView("schedule");

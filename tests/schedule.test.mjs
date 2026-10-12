@@ -53,7 +53,13 @@ test("定植・播種の日を決めて、前は逆算、後ろは順に並べ�
   const works = scheduleAnchored(source, types, 2, "2027-07-10");
   assert.deepEqual(
     works.map((work) => `${work.work_type} ${work.plan_start} ${work.plan_end}`),
-    ["ridge 2027-07-06 2027-07-07", "mulch 2027-07-08 2027-07-09", "plant 2027-07-10 2027-07-12", "harvest 2027-07-13 2027-08-11"]
+    [
+      "ridge 2027-07-06 2027-07-07",
+      "mulch 2027-07-08 2027-07-09",
+      "plant 2027-07-10 2027-07-12",
+      "harvest 2027-07-13 2027-08-11",
+      "residue 2027-08-12 2027-08-12",
+    ]
   );
   assert.deepEqual(sequenceProblems(works, types), []);
 });
@@ -118,10 +124,15 @@ test("作付どうしの重なりと、収穫完了予定日が未定の作付",
   assert.equal(overlap[0].work_id, second[0].id);
   assert.match(overlap[0].message, /前の作付の収穫完了予定日（8\/11）より前に始まっています/);
 
-  // 翌日からなら指摘なし
-  data.works = data.works.filter((work) => work.planting_id !== "p2");
-  data.works.push(...scheduleForward(worksOf(TEMPLATES.bed.bare.codes, { planting_id: "p2" }), types, addDays(end, 1)));
-  assert.deepEqual(planProblems(data), []);
+  // 収穫完了の翌日は、まだ残渣処理をしている
+  const restart = (date) => {
+    data.works = data.works.filter((work) => work.planting_id !== "p2");
+    data.works.push(...scheduleForward(worksOf(TEMPLATES.bed.bare.codes, { planting_id: "p2" }), types, date));
+    return planProblems(data);
+  };
+  assert.match(restart(addDays(end, 1))[0].message, /前の作付の作業が終わる日（8\/12）より前に始まっています/);
+  // 残渣処理の翌日からなら指摘なし
+  assert.deepEqual(restart(addDays(end, 2)), []);
 
   // 前の作付から収穫を外すと、収穫完了予定日が決まらない
   data.works = data.works.filter((work) => !(work.planting_id === "p1" && work.work_type === "harvest"));
@@ -134,7 +145,7 @@ test("日付のない作業は、件数だけを指摘する", () => {
   const found = planProblems(data);
   assert.equal(found.length, 1);
   assert.equal(found[0].work_id, null);
-  assert.match(found[0].message, /日付の入っていない作業が 2 件あります/);
+  assert.match(found[0].message, /日付の入っていない作業が 3 件あります/);
 });
 
 test("畝をなくす日より後の作業", () => {
@@ -158,9 +169,11 @@ test("今週の作業。なければ次の作業", () => {
 
 test("作付の期間と収穫完了予定日", () => {
   const works = scheduleForward(worksOf(TEMPLATES.bed.mulch.codes), types, "2027-07-06");
-  assert.deepEqual(worksRange(works), { start: "2027-07-06", end: "2027-08-11" });
+  // 期間は残渣処理まで。収穫完了予定日は、収穫の終了日
+  assert.deepEqual(worksRange(works), { start: "2027-07-06", end: "2027-08-12" });
   assert.equal(harvestEnd(works), "2027-08-11");
   assert.equal(harvestEnd(works.slice(0, 3)), null);
+  assert.equal(works.at(-1).work_type, "residue");
   assert.equal(worksRange(worksOf(["ridge"])), null);
 });
 

@@ -69,6 +69,10 @@ export function createSupabaseStore(client) {
     async list(table, planId) {
       return check(await client.from(table).select("*").eq("plan_id", planId).order(PLAN_TABLES[table].order));
     },
+    // 品目と肥料は、すべてのプランで共通
+    async listAll(table) {
+      return check(await client.from(table).select("*").order("name"));
+    },
     async upsert(table, rows) {
       if (rows.length) {
         check(await client.from(table).upsert(rows));
@@ -101,7 +105,7 @@ export function createLocalStore() {
       return;
     }
     data[table] = (data[table] || []).filter((row) => !ids.includes(row.id));
-    for (const [child, key] of PLAN_TABLES[table].children) {
+    for (const [child, key] of PLAN_TABLES[table]?.children || []) {
       removeRows(data, child, (data[child] || []).filter((row) => ids.includes(row[key])).map((row) => row.id));
     }
   };
@@ -181,6 +185,9 @@ export function createLocalStore() {
         const known = kept.map((row) => row.id);
         data[table] = [...kept, ...rows.filter((row) => !known.includes(row.id))];
       });
+    },
+    async listAll(table) {
+      return (read()[table] || []).sort((a, b) => a.name.localeCompare(b.name, "ja"));
     },
     async remove(table, ids) {
       update((data) => removeRows(data, table, ids));
