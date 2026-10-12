@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 208 208" role="img" aria-label="いのーファーム ロゴマーク">
+  <defs><clipPath id="lagoon"><circle cx="100" cy="100" r="79"/></clipPath></defs>
+  <g fill="none" stroke="#0B6B72">
+    <circle cx="100" cy="100" r="92" stroke-width="8"/>
+    <g clip-path="url(#lagoon)" stroke-width="7">
+      <path d="M0 58 q10 -18 20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0"/>
+      <path d="M0 84 q10 -11 20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0"/>
+      <path d="M0 111 q10 -5 20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0 t20 0"/>
+      <path d="M0 139 H200"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,214 @@
+-- 圃場計画のテーブル。Supabase のプロジェクトは agri_db、inoo_farm と共用で、専用の field スキーマに置く。
+-- 読み書きするのはブラウザーの画面（Supabase Auth でログインした本人）だけ。
+--   1. field スキーマを API の公開対象に加える（Integrations > Data API > Settings > Exposed schemas）
+--   2. RLS を有効にして、field.owners に登録した利用者だけに読み書きを許す
+-- 図形はすべて、圃場の基準点を原点としたメートル座標の多角形 [[x, y], ...] で持つ（x は東、y は北）。
+-- 面積、苗数、施肥量は画面で計算し、DB には元の値だけを置く。
+-- 何度実行してもよい。
+
+create schema if not exists field;
+
+-- 読み書きを許す利用者。ログイン用の利用者を作ったあと、その ID を 1 行入れる（README を参照）
+create table if not exists field.owners (
+  user_id uuid primary key references auth.users (id) on delete cascade
+);
+
+create or replace function field.is_owner() returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from field.owners where user_id = auth.uid());
+$$;
+
+-- 圃場。数年後に増やせるよう、最上位に置く
+create table if not exists field.fields (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  outline jsonb not null default '[]',   -- 外形の多角形
+  base_lat double precision,             -- 基準点（原点）の緯度と経度。分からなければ空
+  base_lng double precision,
+  note text not null default '',
+  created_at timestamptz not null default now()
+);
+
+-- 作図の下絵（集成図や航空写真）。画像は非公開のストレージに置き、ここには位置合わせの値を持つ
+create table if not exists field.backdrops (
+  id uuid primary key default gen_random_uuid(),
+  field_id uuid not null references field.fields (id) on delete cascade,
+  storage_path text not null,
+  m_per_px double precision not null default 1,  -- 画像の 1 画素が何メートルか
+  origin_px jsonb not null default '[0, 0]',     -- 基準点が画像のどの画素にあるか
+  rotation_deg double precision not null default 0,  -- 画像の上が北から何度ずれているか（時計回り）
+  created_at timestamptz not null default now()
+);
+
+-- プラン。圃場の外形と下絵は共通で、区域の配置を何通りか作って比べられる
+create table if not exists field.plans (
+  id uuid primary key default gen_random_uuid(),
+  field_id uuid not null references field.fields (id) on delete cascade,
+  name text not null,
+  note text not null default '',
+  created_at timestamptz not null default now()
+);
+
+-- 区域。有効圃場（耕起する場所）と、耕起しない場所（物置、井戸、通路など）
+create table if not exists field.zones (
+  id uuid primary key default gen_random_uuid(),
+  plan_id uuid not null references field.plans (id) on delete cascade,
+  kind text not null check (kind in ('tillable', 'shed', 'well', 'path', 'other')),
+  name text not null default '',
+  shape jsonb not null,
+  note text not null default '',
+  created_at timestamptz not null default now()
+);
+
+-- 耕起対象区画。有効圃場を線で分けて作る。畝立ての前までの作業は、この区画ごとに計画する。
+-- 畝をなくしたあとの場所を、あとの日付から別の区画に設定し直せるよう、始まる日となくなる日を持つ
+create table if not exists field.blocks (
+  id uuid primary key default gen_random_uuid(),
+  plan_id uuid not null references field.plans (id) on delete cascade,
+  zone_id uuid not null references field.zones (id) on delete cascade,
+  name text not null default '',
+  shape jsonb not null,
+  start_date date,                     -- この日から区画がある。空なら最初から
+  end_date date,                       -- この日に区画がなくなる（別の区画に置き換わる）。空ならずっと
+  created_at timestamptz not null default now()
+);
+
+-- 作業の種類。標準の日数と、次の作業までに空ける日数は、日付の自動入力と（今後の）逆算、警告に使う
+create table if not exists field.work_types (
+  code text primary key,
+  label text not null,
+  sort int not null,
+  default_days int not null default 1,    -- 作業そのものにかかる標準の日数
+  min_gap_days int not null default 0,    -- 終わってから次の作業までに空ける最低の日数
+  scope text not null default 'block' check (scope in ('block', 'bed'))  -- ふつう区画に付けるか、畝に付けるか
+);
+
+insert into field.work_types (code, label, sort, default_days, min_gap_days, scope) values
+  ('subsoil',       '心土破砕',               10,  1,  0, 'block'),
+  ('rotary',        'ロータリー',             20,  1,  0, 'block'),
+  ('solar_prep',    '太陽熱消毒の用意',       30,  2,  0, 'block'),
+  ('solar',         '太陽熱消毒',             40, 28,  0, 'block'),
+  ('green_sow',     '緑肥の播種',             50,  1, 50, 'block'),
+  ('mow',           '緑肥の伐採（モア）',     60,  1,  0, 'block'),
+  ('amend',         '堆肥・石灰・基肥',       70,  1,  0, 'block'),
+  ('incorporate',   'すき込み（ロータリー）', 80,  1, 21, 'block'),
+  ('ridge',         '畝立て',                 90,  2,  0, 'bed'),
+  ('mulch',         'マルチ張り',            100,  2,  0, 'bed'),
+  ('plant',         '定植・播種',            110,  3,  0, 'bed'),
+  ('harvest',       '収穫',                  120, 30,  0, 'bed')
+on conflict (code) do nothing;
+
+-- 肥料の銘柄。成分は % で持つ
+create table if not exists field.fertilizers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  n_pct numeric not null,
+  p_pct numeric not null default 0,
+  k_pct numeric not null default 0
+);
+
+-- 品目ごとの設定値。畝に割り当てると、この値から苗数と施肥量を計算する（画面はこれから作る）
+create table if not exists field.crops (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  variety text not null default '',
+  bed_width_cm int not null,           -- 畝幅
+  aisle_width_cm int not null,         -- 通路幅
+  row_count int not null,              -- 条数
+  row_gap_cm int,                      -- 条間
+  plant_gap_cm numeric not null,       -- 株間
+  staggered boolean not null default false,  -- 千鳥植え
+  mulch boolean not null default false,
+  n_kg_per_10a numeric,                -- 基肥の窒素量
+  fertilizer_id uuid references field.fertilizers (id) on delete set null,
+  note text not null default ''
+);
+
+-- 畝。区画の中に置く四角形。まわりの隙間が通路になる。
+-- 収穫が終わったあとの日付でなくせるよう、なくなる日を持つ
+create table if not exists field.beds (
+  id uuid primary key default gen_random_uuid(),
+  plan_id uuid not null references field.plans (id) on delete cascade,
+  block_id uuid not null references field.blocks (id) on delete cascade,
+  seq int not null,                    -- 区画の中の番号
+  shape jsonb not null,
+  start_date date,                     -- この日から畝がある。空なら区画と同じ
+  removed_on date,                     -- この日に畝がなくなる。空ならずっと
+  created_at timestamptz not null default now()
+);
+
+-- 作付。1 本の畝で、畝立てから収穫までの 1 回ぶん。収穫が終わったあとに、同じ畝へ次の作付を置ける。
+-- 条数などは、値が空なら品目の設定値を使い、入っていればその作付だけ上書きする
+create table if not exists field.plantings (
+  id uuid primary key default gen_random_uuid(),
+  plan_id uuid not null references field.plans (id) on delete cascade,
+  bed_id uuid not null references field.beds (id) on delete cascade,
+  seq int not null,                    -- その畝で何回目の作付か
+  crop_id uuid references field.crops (id) on delete set null,
+  crop_name text not null default '',  -- 品目の名前（品目の設定値を作るまでは、これだけを使う）
+  row_count int,
+  row_gap_cm int,
+  plant_gap_cm numeric,
+  staggered boolean,
+  mulch boolean,
+  n_kg_per_10a numeric,
+  fertilizer_id uuid references field.fertilizers (id) on delete set null,
+  note text not null default ''
+);
+
+-- 作業。畝立ての前までは区画に、畝立てから後は作付に付ける（どちらか一方）
+create table if not exists field.works (
+  id uuid primary key default gen_random_uuid(),
+  plan_id uuid not null references field.plans (id) on delete cascade,
+  block_id uuid references field.blocks (id) on delete cascade,
+  planting_id uuid references field.plantings (id) on delete cascade,
+  work_type text not null references field.work_types (code),
+  seq int not null,                    -- 区画または作付の中の順番
+  plan_start date,
+  plan_end date,
+  actual_start date,
+  actual_end date,
+  note text not null default '',
+  check ((block_id is null) <> (planting_id is null))
+);
+
+create index if not exists works_plan_start_idx on field.works (plan_start);
+
+-- 権限。ログインした利用者にだけスキーマを見せ、行は field.owners の利用者にだけ許す
+revoke all on schema field from public, anon;
+revoke all on all tables in schema field from public, anon;
+alter default privileges in schema field revoke all on tables from public, anon;
+
+grant usage on schema field to authenticated;
+grant select, insert, update, delete on all tables in schema field to authenticated;
+revoke all on field.owners from authenticated;
+revoke all on function field.is_owner() from public, anon;
+grant execute on function field.is_owner() to authenticated;
+
+alter table field.owners enable row level security;
+
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'fields', 'backdrops', 'plans', 'zones', 'blocks', 'work_types',
+    'fertilizers', 'crops', 'beds', 'plantings', 'works'
+  ] loop
+    execute format('alter table field.%I enable row level security', t);
+    execute format('drop policy if exists owner_all on field.%I', t);
+    execute format(
+      'create policy owner_all on field.%I for all to authenticated '
+      'using (field.is_owner()) with check (field.is_owner())', t);
+  end loop;
+end $$;
+
+-- 下絵の画像の置き場。地番や氏名が写っていることがあるので、非公開にする
+insert into storage.buckets (id, name, public) values ('field-plan', 'field-plan', false)
+on conflict (id) do nothing;
+
+drop policy if exists field_plan_owner_all on storage.objects;
+create policy field_plan_owner_all on storage.objects for all to authenticated
+  using (bucket_id = 'field-plan' and field.is_owner())
+  with check (bucket_id = 'field-plan' and field.is_owner());

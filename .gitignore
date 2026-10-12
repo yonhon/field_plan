@@ -1,0 +1,14 @@
+# 下絵の画像など、圃場ごとの資料。Git には入れない
+data/
+
+.venv/
+__pycache__/
+*.pyc
+.env
+
+.claude/settings.local.json
+Thumbs.db
+desktop.ini
+
+# Supabase CLI の作業用ファイル
+supabase/.temp/
