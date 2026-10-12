@@ -2,7 +2,8 @@
 // 横は実寸に比例する。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わる。
 import { cropLabel, plantingNumbers } from "./crops.js";
 import { notify } from "./dialog.js";
-import { edgeAngles } from "./geometry.js";
+import { edgeAngles, rectSize } from "./geometry.js";
+import { record } from "./journal.js";
 import { WORK_COLORS, existsOn, harvestEnd } from "./schedule.js";
 
 const $ = (id) => document.getElementById(id);
@@ -265,6 +266,13 @@ function setDimension(key) {
   }
   const following = view.strips.slice(kind === "width" ? index + 1 : index).flatMap((item) => item.beds);
   change(following, null, delta);
+  record({
+    kind: kind === "width" ? "bed.width" : "bed.gap",
+    target: ["bed", strip.beds[0].id],
+    text: `${view.block.name} 畝${strip.beds[0].seq}の${kind === "width" ? "畝幅" : "手前の隙間"}を変更${following.length && kind === "width" ? "（後ろの畝もずらした）" : ""}`,
+    before: `${Math.round(current * 100)} cm`,
+    after: `${value} cm`,
+  });
   renderStrip();
 }
 
@@ -346,12 +354,19 @@ export function initStrip(context) {
     if (!drag) {
       return;
     }
-    const { bed, moved } = drag;
+    const { bed, moved, edge, original } = drag;
     drag = null;
     if (event.type === "pointercancel") {
       renderStrip();
     } else if (moved) {
       ctx.queueSave(`bed:${bed.id}`);
+      const name = `${view.block.name} 畝${bed.seq}`;
+      const widthOf = (shape) => `${Math.round(rectSize(shape).width * 100)} cm`;
+      if (edge) {
+        record({ kind: "bed.width", target: ["bed", bed.id], text: `${name}の畝幅を変更`, before: widthOf(original), after: widthOf(bed.shape) });
+      } else {
+        record({ kind: "bed.move", target: ["bed", bed.id], text: `${name}を移動` });
+      }
       renderStrip();
     } else {
       ctx.open("bed", bed.id);

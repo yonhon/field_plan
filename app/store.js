@@ -86,6 +86,24 @@ export function createSupabaseStore(client) {
     async loadWorkTypes() {
       return check(await client.from("work_types").select("*").order("sort"));
     },
+    // 変更の記録。新しい順に、最近の 1,000 件
+    async listChanges(fieldId) {
+      return check(await client.from("changes").select("*").eq("field_id", fieldId).order("no", { ascending: false }).limit(1000));
+    },
+    // 記録を足す。番号は DB が振るので、それを返す
+    async addChange(entry) {
+      const { no, ...row } = entry;
+      return check(await client.from("changes").insert(row).select("no").single()).no;
+    },
+    async saveChange(entry) {
+      check(await client.from("changes").upsert(entry));
+    },
+    async listNotes(fieldId) {
+      return check(await client.from("day_notes").select("*").eq("field_id", fieldId));
+    },
+    async saveNote(note) {
+      check(await client.from("day_notes").upsert(note));
+    },
     async saveWorkType(type) {
       check(await client.from("work_types").upsert(type));
     },
@@ -194,6 +212,30 @@ export function createLocalStore() {
     },
     async loadWorkTypes() {
       return read().workTypes || DEFAULT_WORK_TYPES.map((type) => ({ ...type }));
+    },
+    async listChanges() {
+      return (read().changes || []).sort((a, b) => b.no - a.no);
+    },
+    async addChange(entry) {
+      let no = 0;
+      update((data) => {
+        no = Math.max(0, ...(data.changes || []).map((item) => item.no)) + 1;
+        data.changes = [...(data.changes || []), { ...entry, no }];
+      });
+      return no;
+    },
+    async saveChange(entry) {
+      update((data) => {
+        data.changes = (data.changes || []).map((item) => (item.id === entry.id ? entry : item));
+      });
+    },
+    async listNotes() {
+      return read().notes || [];
+    },
+    async saveNote(note) {
+      update((data) => {
+        data.notes = [...(data.notes || []).filter((item) => item.day !== note.day), note];
+      });
     },
     async saveWorkType(type) {
       update((data) => {

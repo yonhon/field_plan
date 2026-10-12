@@ -26,6 +26,7 @@
         <button class="tab-btn is-active" data-view="map">圃場図</button>
         <button class="tab-btn" data-view="schedule">日程</button>
         <button class="tab-btn" data-view="crops">品目</button>
+        <button class="tab-btn" data-view="journal">記録</button>
       </nav>
       <div class="header-right">
         <span id="saveStatus" class="muted" role="status"></span>
@@ -328,6 +329,11 @@
       </section>
     </main>
 
+    <main id="journalView" class="schedule" hidden>
+      <p class="muted">計画を変えるたびに、何を変えたかが自動で残ります。番号は全体の通し番号です。同じ相手への同じ操作が 30 分のうちに続いたときは、1 行にまとまります。行をクリックすると、その区画や畝を開きます。アプリそのものの更新は、「アプリ」の札と A の付いた番号で、同じ日の欄に並びます。</p>
+      <div id="journalDays" class="schedule-body"></div>
+    </main>
+
     <div id="ganttTip" class="gantt-tip" role="tooltip" hidden></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -335,7 +341,7 @@
     <script type="module">
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // 読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js"];
       try {
         await Promise.all(parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })));
         await import("./app.js");

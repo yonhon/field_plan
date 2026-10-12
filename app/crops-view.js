@@ -1,5 +1,6 @@
 // 「品目」の画面。品目ごとの設定値と、肥料の銘柄を登録する。どちらもすべてのプランで共通。
 import { notify } from "./dialog.js";
+import { record } from "./journal.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -116,6 +117,18 @@ function bind(tableId, storeTable, fields, rowsOf, afterDelete) {
       renderCrops();
       return;
     }
+    // 記録には、変える前の名前と、読める形の値を書く
+    const shown = (item) =>
+      field[2] === "check" ? (item ? "あり" : "なし") : field[2] === "fertilizer" ? ctx.state.fertilizers.find((entry) => entry.id === item)?.name || "なし" : item === null || item === "" ? "空" : item;
+    const what = storeTable === "crops" ? "品目" : "肥料";
+    record({
+      kind: `${storeTable}.${field[0]}`,
+      target: [storeTable === "crops" ? "crop" : "fertilizer", row.id],
+      plan: false,
+      text: field[0] === "name" ? `${what}の名前を変更` : `${what}「${row.name}」の${field[1]}を変更`,
+      before: shown(row[field[0]]),
+      after: shown(value),
+    });
     row[field[0]] = value;
     run(async () => {
       await ctx.state.store.upsert(storeTable, [row]);
@@ -151,6 +164,7 @@ export function initCrops(context) {
         planting.crop_id = null;
       });
       await state.store.upsert("plantings", used);
+      record({ kind: "crops.delete", plan: false, text: `品目「${crop.name}」を削除` });
       await state.store.remove("crops", [crop.id]);
       state.crops = state.crops.filter((item) => item.id !== crop.id);
     });
@@ -165,6 +179,7 @@ export function initCrops(context) {
         crop.fertilizer_id = null;
       });
       await state.store.upsert("crops", used);
+      record({ kind: "fertilizers.delete", plan: false, text: `肥料「${fertilizer.name}」を削除` });
       await state.store.remove("fertilizers", [fertilizer.id]);
       state.fertilizers = state.fertilizers.filter((item) => item.id !== fertilizer.id);
     });
@@ -191,6 +206,7 @@ export function initCrops(context) {
     run(async () => {
       await state.store.upsert("crops", [crop]);
       state.crops.push(crop);
+      record({ kind: "crops.add", target: ["crop", crop.id], plan: false, text: `品目「${crop.name}」を追加` });
     });
   });
   $("addFertilizerBtn").addEventListener("click", () => {
@@ -198,6 +214,7 @@ export function initCrops(context) {
     run(async () => {
       await state.store.upsert("fertilizers", [fertilizer]);
       state.fertilizers.push(fertilizer);
+      record({ kind: "fertilizers.add", target: ["fertilizer", fertilizer.id], plan: false, text: `肥料「${fertilizer.name}」を追加` });
     });
   });
 }

@@ -25,6 +25,7 @@ import {
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
 import { notify } from "./dialog.js";
+import { initJournal, record, renderJournal } from "./journal.js";
 import { existsOn, harvestEnd, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore } from "./store.js";
@@ -93,6 +94,8 @@ const state = {
   workTypes: [],
   crops: [], // 品目の設定値（すべてのプランで共通）
   fertilizers: [],
+  changes: [], // 変更の記録（新しい順。プランによらず 1 本）
+  notes: [], // 日ごとのメモ
   viewDate: savedViewDate(), // 圃場図に出す日。区画と畝は、この日にあるものだけを描く
   mode: "select",
   selected: null, // "outline" か、区域・区画・畝の ID
@@ -271,6 +274,34 @@ function findOutside() {
     blocks: visibleBlocks().filter((block) => !polygonInside(block.shape, zoneOf(block).shape)),
     beds: visibleBeds().filter((bed) => !polygonInside(bed.shape, blockOf(bed).shape)),
   };
+}
+
+// 変更の記録に書く、図形の呼び名と大きさ
+function shapeName(key) {
+  if (key === "outline") {
+    return "圃場の外形";
+  }
+  const { kind, item } = findShape(key);
+  return kind === "zone" ? `区域「${zoneLabel(item)}」` : kind === "block" ? item.name : `${blockOf(item).name} 畝${item.seq}`;
+}
+
+const sizeText = (key) => `${polygonArea(shapePoints(key)).toFixed(1)} ㎡`;
+
+function recordMove(key) {
+  const { kind } = findShape(key);
+  record({ kind: `${kind}.move`, target: [kind, key], text: `${shapeName(key)}を移動` });
+}
+
+function recordShape(key, was) {
+  const kind = key === "outline" ? "outline" : findShape(key).kind;
+  record({
+    kind: `${kind}.shape`,
+    target: key === "outline" ? [] : [kind, key],
+    plan: key === "outline" ? false : undefined,
+    text: `${shapeName(key)}の大きさを変更`,
+    before: was,
+    after: sizeText(key),
+  });
 }
 
 // 選択中の図形から、それを囲んでいる図形の各辺と、隣の図形までのすき間を求める。
@@ -681,6 +712,7 @@ function finishDraft() {
     state.field.outline = points;
     queueSave("field");
     setMode("select");
+    record({ kind: "outline.draw", plan: false, text: "圃場の外形を描いた", after: sizeText("outline") });
     select("outline");
   } else {
     addZone(points);
@@ -699,6 +731,7 @@ function addZone(points) {
   };
   state.zones.push(zone);
   queueSave(`zone:${zone.id}`);
+  record({ kind: "zone.add", target: ["zone", zone.id], text: `区域「${zoneLabel(zone)}」を追加`, after: sizeText(zone.id) });
   setMode("select");
   select(zone.id);
 }
@@ -741,6 +774,7 @@ function applyScale(factor) {
   const { x, y, w, h } = state.view;
   setView({ x: x * factor, y: y * factor, w: w * factor, h: h * factor });
   persist(() => transformShapes((points) => scalePoints(points, factor)));
+  record({ kind: "field.scale", plan: false, text: "縮尺を合わせ直した（すべての図形の大きさが変わる）" });
   render();
 }
 
@@ -783,6 +817,7 @@ function setRotation(degrees) {
   state.backdrop.rotation_deg = degrees;
   queueSave("backdrop");
   persist(() => transformShapes((points) => rotatePoints(points, delta)));
+  record({ kind: "field.rotation", plan: false, text: "下絵の向きを合わせ直した", after: `${degrees} 度` });
   render();
 }
 
@@ -794,6 +829,7 @@ function setGap(gap) {
   }
   const shift = (gap.distance - target) / gap.distance;
   translateShape(state.selected, (gap.to[0] - gap.from[0]) * shift, (gap.to[1] - gap.from[1]) * shift);
+  recordMove(state.selected);
   render();
 }
 
@@ -814,6 +850,7 @@ function moveEdge(index, delta) {
 
 // 辺の長さを数値で決める。辺の始まりの頂点は動かさず、終わりの側（次の辺）を辺の向きにずらす
 function setEdgeLength(index) {
+  const was = sizeText(state.selected);
   const points = shapePoints(state.selected).map((point) => [...point]);
   const a = points[index];
   const b = points[(index + 1) % points.length];
@@ -829,6 +866,7 @@ function setEdgeLength(index) {
     point[1] += shift[1];
   }
   setShapePoints(state.selected, points);
+  recordShape(state.selected, was);
   render();
 }
 
@@ -842,6 +880,7 @@ function nudgeSelected(arrow, step) {
   const axes = [u, [-u[0], -u[1]], [-u[1], u[0]], [u[1], -u[0]]];
   const best = axes.reduce((a, b) => (b[0] * arrow[0] + b[1] * arrow[1] > a[0] * arrow[0] + a[1] * arrow[1] ? b : a));
   translateShape(state.selected, best[0] * step, best[1] * step);
+  recordMove(state.selected);
   render();
 }
 
@@ -880,6 +919,7 @@ function deleteSelectedShape() {
     if (confirm("圃場の外形を削除します。")) {
       state.field.outline = [];
       queueSave("field");
+      record({ kind: "outline.delete", plan: false, text: "圃場の外形を削除" });
       select(null);
     }
     return;
@@ -895,6 +935,10 @@ function deleteSelectedShape() {
   if (!confirm(message)) {
     return;
   }
+  record({
+    kind: `${kind}.delete`,
+    text: `${shapeName(id)}を削除${kind !== "bed" && beds.length ? `（中の畝 ${beds.length} 本と日程も）` : ""}`,
+  });
   if (kind === "zone") {
     forgetBlocks(blocks.map((block) => block.id));
     state.zones = state.zones.filter((zone) => zone.id !== id);
@@ -951,6 +995,12 @@ function createBlock(zone, shape) {
     end_date: null,
     created_at: new Date().toISOString(),
   };
+  record({
+    kind: "block.add",
+    target: ["block", block.id],
+    text: `${block.name}を作成（${zoneLabel(zone)}の中${block.start_date ? `、${formatDate(block.start_date)} から` : ""}）`,
+    after: `${polygonArea(shape).toFixed(1)} ㎡`,
+  });
   state.blocks.push(block);
   persist(async () => {
     await state.store.upsert("blocks", [...ended, block]);
@@ -1047,6 +1097,12 @@ function splitAt(point) {
   });
   const copies = state.works.filter((work) => work.block_id === first.id).map((work) => ({ ...work, id: crypto.randomUUID(), block_id: second.id }));
   state.works.push(...copies);
+  record({
+    kind: "block.split",
+    target: ["block", second.id],
+    text: `${first.name}を線で分けて、${second.name}を作成`,
+    after: `${polygonArea(first.shape).toFixed(1)} ㎡ と ${polygonArea(second.shape).toFixed(1)} ㎡`,
+  });
   persist(async () => {
     await state.store.upsert("blocks", [first, second]);
     await state.store.upsert("beds", moved);
@@ -1140,6 +1196,12 @@ function createBeds(blockId, shapes) {
     };
   });
   state.beds.push(...beds);
+  const made = state.blocks.find((block) => block.id === blockId);
+  record({
+    kind: "bed.add",
+    target: ["block", blockId],
+    text: `${made.name}に畝を ${beds.length} 本追加（幅 ${Math.round(rectSize(shapes[0]).width * 100)} cm、長さ ${rectSize(shapes[0]).length.toFixed(1)} m）`,
+  });
   persist(() => state.store.upsert("beds", beds));
   return beds;
 }
@@ -1210,6 +1272,13 @@ function removeBeds(beds) {
   removable.forEach((bed) => {
     bed.removed_on = state.viewDate;
   });
+  if (removable.length) {
+    record({
+      kind: "bed.remove",
+      target: ["block", removable[0].block_id],
+      text: `${blockOf(removable[0]).name}の畝 ${removable.map((bed) => bed.seq).join("、")} を、${formatDate(state.viewDate)} でなくす設定にした`,
+    });
+  }
   persist(() => state.store.upsert("beds", removable));
   return removable.length;
 }
@@ -1294,6 +1363,7 @@ function newPlan() {
   persist(async () => {
     const plan = await state.store.createPlan({ field_id: state.field.id, name });
     state.plans.push(plan);
+    record({ kind: "plan.add", plan, text: `プラン「${plan.name}」を作成` });
     await openPlan(plan);
   });
 }
@@ -1305,7 +1375,9 @@ function renamePlan() {
   }
   persist(async () => {
     await state.store.renamePlan(state.plan.id, name);
+    const was = state.plan.name;
     state.plan.name = name;
+    record({ kind: "plan.name", text: "プランの名前を変更", before: was, after: name });
     renderPlans();
   });
 }
@@ -1338,6 +1410,7 @@ function copyPlan() {
       });
       await state.store.upsert(table, rows);
     }
+    record({ kind: "plan.copy", plan, text: `プラン「${state.plan.name}」をコピーして、プラン「${plan.name}」を作成` });
     state.plans.push(plan);
     await openPlan(plan);
   });
@@ -1351,6 +1424,7 @@ function deletePlan() {
     clearTimeout(saveTimer);
     [...pendingSaves].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
     const id = state.plan.id;
+    record({ kind: "plan.delete", plan: false, text: `プラン「${state.plan.name}」を削除` });
     await state.store.deletePlan(id);
     state.plans = state.plans.filter((plan) => plan.id !== id);
     await openPlan(state.plans[0]);
@@ -1405,11 +1479,11 @@ map.addEventListener("pointerdown", (event) => {
   const target = event.target;
   if (state.mode === "select" && target.dataset.vertex !== undefined) {
     state.selectedVertex = Number(target.dataset.vertex);
-    gesture = { kind: "vertex", index: state.selectedVertex, moved: false };
+    gesture = { kind: "vertex", index: state.selectedVertex, moved: false, was: sizeText(state.selected) };
     render();
   } else if (state.mode === "select" && target.dataset.mid !== undefined && state.selected !== "outline") {
     // 区域と区画: 辺を平行に動かして、大きさを変える
-    gesture = { kind: "edge", index: Number(target.dataset.mid), last: clientToWorld(event) };
+    gesture = { kind: "edge", index: Number(target.dataset.mid), last: clientToWorld(event), was: sizeText(state.selected) };
   } else if (state.mode === "select" && target.dataset.mid !== undefined) {
     // 圃場の外形: 辺の途中に頂点を足す
     const index = Number(target.dataset.mid) + 1;
@@ -1417,7 +1491,7 @@ map.addEventListener("pointerdown", (event) => {
     points.splice(index, 0, clientToWorld(event));
     setShapePoints(state.selected, points);
     state.selectedVertex = index;
-    gesture = { kind: "vertex", index, moved: true };
+    gesture = { kind: "vertex", index, moved: true, was: sizeText(state.selected) };
     render();
   } else if (state.mode === "rect" || state.mode === "blockrect") {
     // 区域は圃場の外形の辺に、区画は有効圃場の辺に平行に描く
@@ -1528,7 +1602,15 @@ function endPointer(event) {
     }
     return;
   }
+  if (finished && finished.kind === "vertex" && finished.moved) {
+    recordShape(state.selected, finished.was);
+  }
   if (finished && (finished.kind === "move" || finished.kind === "edge")) {
+    if (finished.kind === "edge") {
+      recordShape(state.selected, finished.was);
+    } else if (finished.moved) {
+      recordMove(state.selected);
+    }
     state.selectedVertex = null;
     render();
     return;
@@ -1670,20 +1752,29 @@ $("fieldName").addEventListener("input", (event) => {
 });
 for (const [input, kind] of [["zoneName", "zone"], ["blockName", "block"]]) {
   $(input).addEventListener("input", (event) => {
-    findShape(state.selected).item.name = event.target.value;
+    const { item } = findShape(state.selected);
+    const was = item.name;
+    item.name = event.target.value;
+    record({ kind: `${kind}.name`, target: [kind, item.id], text: `${kind === "zone" ? "区域" : "区画"}の名前を変更`, before: was || "（名前なし）", after: item.name || "（名前なし）" });
     queueSave(`${kind}:${state.selected}`);
     render();
   });
 }
 for (const [input, key] of [["blockStart", "start_date"], ["blockEnd", "end_date"]]) {
   $(input).addEventListener("change", (event) => {
-    findShape(state.selected).item[key] = event.target.value || null;
+    const block = findShape(state.selected).item;
+    const was = blockPeriod(block);
+    block[key] = event.target.value || null;
+    record({ kind: "block.period", target: ["block", block.id], text: `${block.name}がある期間を変更`, before: was, after: blockPeriod(block) });
     queueSave(`block:${state.selected}`);
     render();
   });
 }
 $("zoneKindEdit").addEventListener("change", (event) => {
-  findShape(state.selected).item.kind = event.target.value;
+  const zone = findShape(state.selected).item;
+  const was = ZONE_KINDS[zone.kind].label;
+  zone.kind = event.target.value;
+  record({ kind: "zone.kind", target: ["zone", zone.id], text: `区域「${zoneLabel(zone)}」の種類を変更`, before: was, after: ZONE_KINDS[zone.kind].label });
   queueSave(`zone:${state.selected}`);
   render();
 });
@@ -1721,18 +1812,49 @@ function showView(view) {
   $("appView").hidden = view !== "map";
   $("scheduleView").hidden = view !== "schedule";
   $("cropsView").hidden = view !== "crops";
+  $("journalView").hidden = view !== "journal";
   if (view === "map") {
     render();
   } else if (view === "schedule") {
     renderSchedule();
-  } else {
+  } else if (view === "crops") {
     renderCrops();
+  } else {
+    renderJournal();
   }
 }
 
 document.querySelectorAll(".tab-btn").forEach((button) => {
   button.addEventListener("click", () => showView(button.dataset.view));
 });
+
+// 記録の行をクリックしたときに、その相手を開く。もうないものは開けない
+function openTarget(entry) {
+  const status = (text) => {
+    $("saveStatus").textContent = text;
+  };
+  if (entry.plan_id && entry.plan_id !== state.plan.id) {
+    status(`プラン「${entry.plan_name}」での変更です。プランを切り替えると開けます。`);
+    return;
+  }
+  const kind = entry.target_kind;
+  const id = entry.target_id;
+  if (kind === "crop" || kind === "fertilizer") {
+    showView("crops");
+  } else if (kind === "planting" && state.plantings.some((item) => item.id === id)) {
+    openInSchedule("planting", id);
+    showView("schedule");
+  } else if (kind === "work" && state.works.some((item) => item.id === id)) {
+    const work = state.works.find((item) => item.id === id);
+    openInSchedule(work.block_id ? "block" : "planting", work.block_id || work.planting_id);
+    showView("schedule");
+  } else if (["zone", "block", "bed"].includes(kind) && findShape(id)) {
+    showView("map");
+    select(id);
+  } else if (kind) {
+    status("この記録の相手は、もうありません。");
+  }
+}
 
 // ---- 起動 ----
 
@@ -1806,6 +1928,11 @@ async function startApp() {
     setStatus: (text) => ($("saveStatus").textContent = text),
   });
   initCrops({ state, setStatus: (text) => ($("saveStatus").textContent = text) });
+  try {
+    await initJournal({ state, openTarget, setStatus: (text) => ($("saveStatus").textContent = text) });
+  } catch (error) {
+    $("saveStatus").textContent = `変更の記録を読み込めませんでした: ${error.message}`;
+  }
   // スマホは作業の確認が主なので、日程から開く
   if (window.matchMedia("(max-width: 800px)").matches) {
     showView("schedule");
