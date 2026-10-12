@@ -1,0 +1,7 @@
+# Supabase CLI の設定（Edge Functions の配備に使う）。プロジェクトは agri_db、inoo_farm と共用。
+project_id = "field_plan"
+
+[functions.field-mcp]
+# claude.ai のコネクタは Supabase の JWT を送れないので、JWT 検証は無効にする。
+# 代わりに、URL の末尾の合言葉（FIELD_MCP_TOKEN）を関数の中で確かめる。
+verify_jwt = false

@@ -205,6 +205,20 @@ create table if not exists field.day_notes (
   primary key (field_id, day)
 );
 
+-- MCP サーバー（field-mcp）への呼び出しの記録。合言葉が違う呼び出しも残るので、URL が漏れていないかを確かめられる。
+-- 画面からは読み書きしない（許可を作らない）
+create table if not exists field.mcp_access_log (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  method text not null,
+  status int not null,
+  authorized boolean not null,
+  rpc_method text,
+  tool text,
+  accept text,
+  user_agent text
+);
+
 create index if not exists works_plan_start_idx on field.works (plan_start);
 
 -- 権限。ログインした利用者にだけスキーマを見せ、行は field.owners の利用者にだけ許す
@@ -215,10 +229,12 @@ alter default privileges in schema field revoke all on tables from public, anon;
 grant usage on schema field to authenticated;
 grant select, insert, update, delete on all tables in schema field to authenticated;
 revoke all on field.owners from authenticated;
+revoke all on field.mcp_access_log from authenticated;
 revoke all on function field.is_owner() from public, anon;
 grant execute on function field.is_owner() to authenticated;
 
 alter table field.owners enable row level security;
+alter table field.mcp_access_log enable row level security;
 
 do $$
 declare

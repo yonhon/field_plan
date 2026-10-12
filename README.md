@@ -56,7 +56,9 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `app/journal.js` | 変更の記録と、記録の画面 |
 | `app/updates.json` | アプリの更新の一覧（記録の画面に出る） |
 | `app/store.js` | データの読み書き |
-| `tests/` | 図形、日程、苗数と施肥量の計算のテスト |
+| `supabase/functions/field-mcp/` | 計画を Claude.ai から読むための MCP サーバー（Supabase Edge Function） |
+| `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
+| `tests/` | 図形、日程、苗数と施肥量の計算と、MCP サーバーのテスト |
 | `data/` | 下絵の画像など、圃場ごとの資料。**Git の対象外** |
 
 画面のコードは公開されますが、データはログインした本人しか読めません。
@@ -275,7 +277,66 @@ work_types（作業の種類と目安の日数）、crops（品目の設定値�
 push のたびに、できるようになったことごとに 1 件ずつ足します。
 このファイルは公開されるので、圃場の場所、面積、実際の品目や時期は書きません。
 
-## 10. 手元での確認
+## 10. MCP サーバー（Claude.ai から計画を読む）
+
+計画の内容を、Claude.ai のコネクタから読むためのサーバーです。読むだけで、書き換えはできません。
+
+| 機能 | 内容 |
+|---|---|
+| `list_plans` | プランの一覧と、それぞれの規模、最後に変更のあった日 |
+| `get_plan` | 1 つのプランの全体。区域、耕起対象区画、畝、作付（品目、苗数、肥料の量、作業の日付）、集計、日程の無理の指摘 |
+| `get_schedule` | 期間を決めた作業の一覧。同じ日の同じ作業は、場所をまとめる |
+| `get_changes` | 日ごとの、計画の変更（# の番号）、メモ、アプリの更新（A の番号） |
+| `get_crops` | 品目の設定値と、肥料の銘柄 |
+
+サーバーは、DB にある内容をすべて返します。区域の名前、面積、時期も含みます。
+記事にするときに出さない情報は、Claude.ai の側で指定します。
+
+### コネクタ URL の作り方
+
+コネクタの URL は、関数の URL の末尾に「合言葉」を付けたものです。合言葉が違う呼び出しには、サーバーは何も返しません。
+
+```
+https://byhthaiwbutqstrqbwwc.supabase.co/functions/v1/field-mcp/<合言葉>
+```
+
+合言葉を作って Supabase に登録し、URL を表示します。PowerShell で、このリポジトリのフォルダーから実行します。
+
+```powershell
+$t = python -c "import secrets; print(secrets.token_urlsafe(32))"
+bun x supabase secrets set "FIELD_MCP_TOKEN=$t" --project-ref byhthaiwbutqstrqbwwc
+"https://byhthaiwbutqstrqbwwc.supabase.co/functions/v1/field-mcp/$t"
+```
+
+3 行目が表示した URL を控えます。合言葉はあとから取り出せないので、控え忘れたら作り直してください。
+
+### Claude.ai に登録する
+
+1. Claude.ai の「設定 > コネクタ」で、カスタムコネクタを追加します。
+2. 上で表示された URL を入力します。
+3. 認証は「No sign-in」を選びます。
+
+### URL の扱い
+
+**URL そのものが鍵です。** 人に見せたり、公開の場所や会話に貼ったりしないでください。
+漏れた疑いがあるときは、「コネクタ URL の作り方」をもう一度実行します。合言葉が入れ替わり、古い URL は使えなくなります。
+
+呼び出しは `field.mcp_access_log` に残ります。合言葉が違う呼び出し（`authorized` が false）が続いていないかを、ここで確かめられます。
+
+### サーバーを配備する
+
+画面と同じ計算をするために、`app/` の部品（`geometry.js`、`schedule.js`、`crops.js`、`updates.json`）の写しを、サーバーのフォルダーの `lib/` に置いています。
+`app/` の側か `supabase/functions/field-mcp/` を変えたら、写してから、テストして配備します。合言葉は変わらないので、コネクタの登録はそのまま使えます。
+
+```powershell
+node scripts/sync-mcp-lib.mjs
+node --test "tests/*.test.mjs"
+bun x supabase functions deploy field-mcp --project-ref byhthaiwbutqstrqbwwc --no-verify-jwt
+```
+
+写しが古いままだと、テストが失敗します。
+
+## 11. 手元での確認
 
 ```
 python -m http.server 8765 --directory app
