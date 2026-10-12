@@ -1,4 +1,7 @@
 import {
+  DEFAULT_VIEW_DIRS,
+  bedAngle,
+  viewAxes,
   boundingBox,
   centroid,
   crossRange,
@@ -203,6 +206,48 @@ function translateShape(key, dx, dy) {
 
 const blockActive = (block) => existsOn(block.start_date, block.end_date, state.viewDate);
 const blockOf = (bed) => state.blocks.find((block) => block.id === bed.block_id);
+// ---- 視点 ----
+// 畝の手前・奥、左右、番号の順は、圃場の外形の辺で決めた 2 つの視点から見て決める
+
+const COMPASS = ["東", "北東", "北", "北西", "西", "南西", "南", "南東"];
+const compassOf = (degrees) => COMPASS[((Math.round(degrees / 45) % 8) + 8) % 8];
+const turnGap = (a, b) => Math.abs(((((a - b) % 360) + 540) % 360) - 180);
+
+// 多角形の i 番目の辺（頂点 i から次の頂点）が、外を向いている向き（度。東が 0、北が 90）
+function edgeOutward(points, i) {
+  const p = points[i];
+  const q = points[(i + 1) % points.length];
+  const center = centroid(points);
+  let normal = [q[1] - p[1], p[0] - q[0]];
+  if (normal[0] * ((p[0] + q[0]) / 2 - center[0]) + normal[1] * ((p[1] + q[1]) / 2 - center[1]) < 0) {
+    normal = [-normal[0], -normal[1]];
+  }
+  return (Math.atan2(normal[1], normal[0]) * 180) / Math.PI;
+}
+
+const edgeSide = (points, i) => `${compassOf(edgeOutward(points, i))}側`;
+const viewDirs = () => (state.field.view_dirs?.length === 2 ? state.field.view_dirs : DEFAULT_VIEW_DIRS);
+// 視点 k（0 か 1）が立っている、外形の辺。辺に合っていなければ -1
+const viewEdge = (k) => state.field.outline.findIndex((_, i) => turnGap(edgeOutward(state.field.outline, i) + 180, viewDirs()[k]) < 1);
+
+function setViewEdge(k, index) {
+  const outline = state.field.outline;
+  const dirs = [...viewDirs()];
+  dirs[k] = Math.round((((edgeOutward(outline, index) + 180) % 360) + 360) % 360 * 100) / 100;
+  state.field.view_dirs = dirs;
+  queueSave("field");
+  state.blocks.forEach((block) => renumberBlock(block.id));
+  record({
+    kind: "field.view",
+    plan: false,
+    text: `視点 ${k + 1} を、圃場の外形の辺 ${index + 1} → ${((index + 1) % outline.length) + 1}（${edgeSide(outline, index)}）に変更。畝の番号は、視点から見て左から順`,
+  });
+  render();
+  renderSchedule();
+}
+
+// 畝は、圃場図では選んで見るだけ。追加、移動、削除は日程の画面で行う
+const isBed = (id) => state.beds.some((bed) => bed.id === id);
 const bedExists = (bed) => blockActive(blockOf(bed)) && existsOn(bed.start_date, bed.removed_on, state.viewDate);
 const visibleBlocks = () => state.blocks.filter(blockActive);
 const visibleBeds = () => state.beds.filter(bedExists);
@@ -440,6 +485,33 @@ function renderMap() {
     });
   }
 
+  // 頂点の番号。右の「辺」の表の「1 → 2」が、どの辺かを見分ける
+  if (selectedPoints && selectedKind !== "bed") {
+    const center = centroid(selectedPoints);
+    selectedPoints.forEach((point, i) => {
+      const out = distance(point, center) || 1;
+      parts.push(label([point[0] + ((point[0] - center[0]) / out) * (16 / z), point[1] + ((point[1] - center[1]) / out) * (16 / z)], String(i + 1), fontSize * 1.15, 'font-weight="700"'));
+    });
+  }
+  // 視点の矢印。立つ場所から、見る向きへ
+  if (selectedKind === "outline") {
+    viewDirs().forEach((degrees, k) => {
+      const dir = [Math.cos((degrees * Math.PI) / 180), Math.sin((degrees * Math.PI) / 180)];
+      const edge = viewEdge(k);
+      const center = centroid(selectedPoints);
+      const reach = Math.max(...selectedPoints.map((point) => (center[0] - point[0]) * dir[0] + (center[1] - point[1]) * dir[1]));
+      const foot =
+        edge >= 0
+          ? [(selectedPoints[edge][0] + selectedPoints[(edge + 1) % selectedPoints.length][0]) / 2, (selectedPoints[edge][1] + selectedPoints[(edge + 1) % selectedPoints.length][1]) / 2]
+          : [center[0] - dir[0] * reach, center[1] - dir[1] * reach];
+      const at = (back, side = 0) => [foot[0] - dir[0] * (back / z) - dir[1] * (side / z), foot[1] - dir[1] * (back / z) + dir[0] * (side / z)];
+      const [from, tip, left, right] = [at(54), at(18), at(30, 7), at(30, -7)];
+      parts.push(`<line class="view-line" x1="${from[0]}" y1="${-from[1]}" x2="${at(28)[0]}" y2="${-at(28)[1]}" />`);
+      parts.push(`<polygon class="view-head" points="${tip[0]},${-tip[1]} ${left[0]},${-left[1]} ${right[0]},${-right[1]}" />`);
+      parts.push(label(at(72), `視点${k + 1}`, fontSize * 1.1, 'font-weight="700"'));
+    });
+  }
+
   state.gaps = state.mode === "select" ? selectedGaps() : [];
   let bedAxis = null; // 選んだ畝の長い辺の向きに、長さの 35% ぶん
   if (selectedKind === "bed") {
@@ -486,6 +558,133 @@ function renderScaleBar(z) {
   $("scaleBarLabel").textContent = `${meters} m`;
 }
 
+// 圃場図の警告。[選ぶ図形, 文] の並び。畝は本数が多いので、区画ごとにまとめる
+function mapWarnings(outside = findOutside()) {
+  const warnings = [
+    ...outside.zones.map((zone) => [zone.id, `${zoneLabel(zone)}が、圃場の外形からはみ出しています。`]),
+    ...outside.blocks.map((block) => [
+      block.id,
+      `${block.name}が、${zoneLabel(state.zones.find((zone) => zone.id === block.zone_id))}からはみ出しています。`,
+    ]),
+  ];
+  for (const block of visibleBlocks()) {
+    const strays = outside.beds.filter((bed) => bed.block_id === block.id).sort((a, b) => a.seq - b.seq);
+    if (strays.length) {
+      warnings.push([strays[0].id, `${block.name}の畝${strays.map((bed) => bed.seq).join("、")}が、区画からはみ出しています。`]);
+    }
+  }
+  return warnings;
+}
+
+// 図の上の警告と、「圃場図」のタブの件数。日程の画面で畝を動かしたときも呼ばれる
+function renderWarnings(outside = findOutside()) {
+  const warnings = mapWarnings(outside);
+  $("warnings").hidden = warnings.length === 0;
+  $("warnings").innerHTML = warnings.map(([id, text]) => `<li data-shape="${id}">${escapeHtml(text)}</li>`).join("");
+  $("mapBadge").hidden = warnings.length === 0;
+  $("mapBadge").textContent = `⚠${warnings.length}`;
+}
+
+// 右側の木の行。圃場の外形、区域、その中の区画、その中の畝の順。
+// 畝は本数が多いので、区画の ▸ を押したときと、その畝を選んでいるときだけ出す
+const openBlocks = new Set();
+
+function treeRows(outside, beds) {
+  // 畝がはみ出しているときは、その区画の行にも印を付ける
+  const strayIds = new Set([...outside.zones, ...outside.blocks, ...outside.beds].map((item) => item.id).concat(outside.beds.map((bed) => bed.block_id)));
+  const mark = (id) => (strayIds.has(id) ? '<span class="stray-mark" title="はみ出しています"></span>' : "");
+  const rows = [];
+  const add = (id, depth, color, name, detail, { away = false, toggle = '<span class="tree-slot"></span>', extra = "" } = {}) =>
+    rows.push({
+      id,
+      className: `depth-${depth}${state.selected === id ? " is-selected" : ""}${away ? " is-away" : ""}`,
+      html:
+        `<span>${toggle}<span class="swatch" style="background:${color}"></span>${escapeHtml(name)}${extra}${mark(id)}</span>` +
+        `<span>${detail}</span>`,
+    });
+  const outline = state.field.outline;
+  if (outline.length >= 3) {
+    add("outline", 0, OUTLINE_COLOR, "圃場の外形", `${polygonArea(outline).toFixed(1)} ㎡`);
+  }
+  for (const zone of state.zones) {
+    add(zone.id, 0, ZONE_KINDS[zone.kind].color, zoneLabel(zone), `${polygonArea(zone.shape).toFixed(1)} ㎡`);
+    for (const block of state.blocks.filter((item) => item.zone_id === zone.id)) {
+      const active = blockActive(block);
+      const own = beds.filter((bed) => bed.block_id === block.id).sort((p, q) => p.seq - q.seq);
+      const open = own.length > 0 && (openBlocks.has(block.id) || own.some((bed) => bed.id === state.selected));
+      add(block.id, 1, BLOCK_COLOR, block.name, active ? `${polygonArea(block.shape).toFixed(1)} ㎡${own.length ? ` / 畝 ${own.length} 本` : ""}` : `表示日にはない（${blockPeriod(block)}）`, {
+        away: !active,
+        toggle: own.length
+          ? `<button type="button" class="tree-toggle" data-toggle="${block.id}" aria-expanded="${open}" title="畝を${open ? "たたむ" : "開く"}">${open ? "▾" : "▸"}</button>`
+          : undefined,
+      });
+      for (const bed of open ? own : []) {
+        const size = rectSize(bed.shape);
+        const crop = plantingOn(bed)?.crop_name;
+        add(bed.id, 2, BED_COLOR, `畝${bed.seq}`, `${Math.round(size.width * 100)} cm × ${size.length.toFixed(1)} m`, {
+          extra: crop ? `<span class="tree-crop">${escapeHtml(crop)}</span>` : "",
+        });
+      }
+    }
+  }
+  if (!rows.length) {
+    rows.push({ id: "empty", plain: true, className: "empty", html: "まだありません" });
+  }
+  return rows;
+}
+
+// 木を描く。選んだ行のすぐ下に、内容の枠（selectionPanel）を置く。
+// 名前を打っている途中で枠を動かすと入力が切れるので、行は作り直さず、変わったところだけ直す
+let shownSelection = null;
+
+function renderTree(rows) {
+  const list = $("shapeTree");
+  const detail = $("selectionPanel");
+  const old = new Map([...list.children].filter((li) => li !== detail).map((li) => [li.dataset.shape ?? li.dataset.key, li]));
+  const wanted = [];
+  for (const row of rows) {
+    const li = old.get(row.id) || document.createElement("li");
+    old.delete(row.id);
+    li.dataset[row.plain ? "key" : "shape"] = row.id;
+    if (li.className !== row.className) {
+      li.className = row.className;
+    }
+    if (li.dataset.html !== row.html) {
+      li.innerHTML = row.html;
+      li.dataset.html = row.html;
+    }
+    wanted.push(li);
+    if (row.id === state.selected) {
+      wanted.push(detail);
+    }
+  }
+  if (!wanted.includes(detail)) {
+    wanted.push(detail);
+  }
+  old.forEach((li) => li.remove());
+  let ref = list.firstElementChild;
+  for (const li of wanted) {
+    if (li === ref) {
+      ref = ref.nextElementSibling;
+    } else {
+      list.insertBefore(li, ref);
+    }
+  }
+}
+
+// 図で図形を選んだときは、右側をその行まで送る。スマホは図から目が離れるので送らない
+function revealSelection() {
+  if (state.selected === shownSelection) {
+    return;
+  }
+  shownSelection = state.selected;
+  const row = [...$("shapeTree").children].find((li) => li.dataset.shape === state.selected);
+  if (row && !window.matchMedia("(max-width: 800px)").matches) {
+    $("selectionPanel").scrollIntoView({ block: "nearest" });
+    row.scrollIntoView({ block: "nearest" });
+  }
+}
+
 function renderPanel() {
   const outline = state.field.outline;
   const fieldArea = outline.length >= 3 ? polygonArea(outline) : 0;
@@ -502,51 +701,11 @@ function renderPanel() {
   $("areaBeds").textContent = beds.length ? `${formatArea(sumArea(beds))} / ${beds.length} 本` : "-";
 
   const outside = findOutside();
-  const warnings = [
-    ...outside.zones.map((zone) => [zone.id, `${zoneLabel(zone)}が、圃場の外形からはみ出しています。`]),
-    ...outside.blocks.map((block) => [
-      block.id,
-      `${block.name}が、${zoneLabel(state.zones.find((zone) => zone.id === block.zone_id))}からはみ出しています。`,
-    ]),
-  ];
-  // 畝は本数が多いので、区画ごとにまとめる
-  for (const block of visibleBlocks()) {
-    const strays = outside.beds.filter((bed) => bed.block_id === block.id).sort((a, b) => a.seq - b.seq);
-    if (strays.length) {
-      warnings.push([strays[0].id, `${block.name}の畝${strays.map((bed) => bed.seq).join("、")}が、区画からはみ出しています。`]);
-    }
-  }
-  $("warnings").innerHTML = warnings.map(([id, text]) => `<li data-shape="${id}">${escapeHtml(text)}</li>`).join("");
-
-  const selectedRow = (id) => (state.selected === id ? "is-selected" : "");
-  $("zoneList").innerHTML = state.zones.length
-    ? state.zones
-        .map(
-          (zone) =>
-            `<li data-shape="${zone.id}" class="${selectedRow(zone.id)}">` +
-            `<span><span class="swatch" style="background:${ZONE_KINDS[zone.kind].color}"></span>${escapeHtml(zoneLabel(zone))}</span>` +
-            `<span>${polygonArea(zone.shape).toFixed(1)} ㎡</span></li>`
-        )
-        .join("")
-    : '<li class="empty">まだありません</li>';
-  $("blockList").innerHTML = state.blocks.length
-    ? state.blocks
-        .map((block) => {
-          const active = blockActive(block);
-          const count = beds.filter((bed) => bed.block_id === block.id).length;
-          const detail = active
-            ? `${polygonArea(block.shape).toFixed(1)} ㎡${count ? ` / 畝 ${count} 本` : ""}`
-            : `表示日にはない（${blockPeriod(block)}）`;
-          return (
-            `<li data-shape="${block.id}" class="${selectedRow(block.id)}${active ? "" : " is-away"}">` +
-            `<span><span class="swatch" style="background:${BLOCK_COLOR}"></span>${escapeHtml(block.name)}</span>` +
-            `<span>${detail}</span></li>`
-          );
-        })
-        .join("")
-    : '<li class="empty">まだありません</li>';
+  renderWarnings(outside);
+  renderTree(treeRows(outside, beds));
 
   renderSelection();
+  revealSelection();
 
   $("scaleText").textContent = state.backdrop
     ? `1 画素 = ${(state.backdrop.m_per_px * 100).toFixed(2)} cm`
@@ -564,16 +723,31 @@ function renderSelection() {
   const found = state.selected === "outline" ? { kind: "outline" } : findShape(state.selected);
   const { kind, item } = found;
   $("zoneFields").hidden = kind !== "zone";
+  $("outlineFields").hidden = kind !== "outline";
   $("blockFields").hidden = kind !== "block";
   $("bedFields").hidden = kind !== "bed";
   $("edgeTable").hidden = kind === "bed";
   $("deleteVertexBtn").hidden = kind === "bed";
+  $("deleteShapeBtn").hidden = kind === "bed";
   $("openScheduleBtn").hidden = kind !== "block" && kind !== "bed";
   $("deleteShapeBtn").textContent = { outline: "外形を削除", zone: "区域を削除", block: "区画を削除", bed: "畝を完全に削除" }[kind];
   $("shapeInfo").textContent = "";
 
   if (kind === "outline") {
     $("selectionTitle").textContent = "選択中: 圃場の外形";
+    [0, 1].forEach((k) => {
+      const edge = viewEdge(k);
+      const options = points.map((_, i) => `<option value="${i}">辺 ${i + 1} → ${((i + 1) % points.length) + 1}（${edgeSide(points, i)}、${formatLength(edgeLengths(points)[i])}）</option>`);
+      if (edge < 0) {
+        options.unshift(`<option value="">${compassOf(viewDirs()[k] + 180)}側から（辺を選んでいません）</option>`);
+      }
+      $(`viewEdge${k + 1}`).innerHTML = options.join("");
+      $(`viewEdge${k + 1}`).value = edge < 0 ? "" : String(edge);
+    });
+    const square = turnGap(viewDirs()[0], viewDirs()[1]);
+    $("viewNote").textContent =
+      "その辺の外に立って、圃場を見ます。図に矢印が出ます。畝の長い辺が視点 1 の見る向きに近ければ視点 1 から、直角に近ければ視点 2 から見ます。日程の「区画と畝」の図の左右、畝の手前と奥、畝の番号（左から順）が、この視点で決まります。" +
+      (square < 45 || square > 135 ? " いまの 2 つの視点は向きが近すぎます。視点 2 には、視点 1 と直角の辺を選んでください。" : "");
   } else if (kind === "zone") {
     $("selectionTitle").textContent = `選択中: ${zoneLabel(item)}`;
     if (document.activeElement !== $("zoneName")) {
@@ -610,7 +784,7 @@ function renderSelection() {
   }
   if (kind !== "bed") {
     $("edgeRows").innerHTML = edgeLengths(points)
-      .map((length, i) => `<tr><td>${i + 1} → ${((i + 1) % points.length) + 1}</td><td>${formatLength(length)}</td></tr>`)
+      .map((length, i) => `<tr><td>${i + 1} → ${((i + 1) % points.length) + 1}（${edgeSide(points, i)}）</td><td>${formatLength(length)}</td></tr>`)
       .join("");
     $("deleteVertexBtn").disabled = state.selectedVertex === null || points.length <= 3;
   }
@@ -817,6 +991,10 @@ function setRotation(degrees) {
   const delta = degrees - state.backdrop.rotation_deg;
   state.backdrop.rotation_deg = degrees;
   queueSave("backdrop");
+  if (state.field.view_dirs) {
+    state.field.view_dirs = state.field.view_dirs.map((direction) => direction - delta);
+    queueSave("field");
+  }
   persist(() => transformShapes((points) => rotatePoints(points, delta))).then(resetHistory);
   record({ kind: "field.rotation", plan: false, text: "下絵の向きを合わせ直した", after: `${degrees} 度` });
   render();
@@ -824,6 +1002,9 @@ function setRotation(degrees) {
 
 // すき間を指定の距離にする。図形を、すき間の線の向きに動かす
 function setGap(gap) {
+  if (isBed(state.selected)) {
+    return;
+  }
   const target = askNumber("この距離を何 m にしますか（0 で端にぴったり付きます）", gap.distance.toFixed(2), true);
   if (target === null) {
     return;
@@ -1130,29 +1311,6 @@ function blockFromRect(zone, points) {
 
 // ---- 畝 ----
 
-function layoutSelectedBlock() {
-  const block = state.blocks.find((item) => item.id === state.selected);
-  const number = (id) => ($(id).value.trim() === "" ? null : Number($(id).value));
-  const width = number("bedWidth");
-  const aisle = number("bedAisle");
-  const endGap = number("bedEndGap");
-  const length = number("bedLength");
-  const count = number("bedCount");
-  if (!(width > 0) || !(aisle >= 0) || !(endGap >= 0) || (length !== null && !(length > 0)) || (count !== null && !(count >= 1))) {
-    notify("畝幅と長さ、本数には 0 より大きい数を、隙間には 0 以上の数を入れてください。");
-    return;
-  }
-  addBedsToBlock(block, {
-    angle: edgeAngles(block.shape)[$("bedSide").value],
-    width: width / 100,
-    aisle: aisle / 100,
-    endGap,
-    length,
-    count: count === null ? null : Math.floor(count),
-  });
-  render();
-}
-
 // 区画に、いまある畝の続きから畝を足す。足した畝を返す
 function addBedsToBlock(block, options) {
   const mine = state.beds.filter((bed) => bed.block_id === block.id);
@@ -1227,22 +1385,34 @@ function renumberBeds(ids) {
   }
 }
 
-// 区画の畝の番号を、いまの番号の順のまま詰め直す（畝を完全に削除したあと）
+// 区画の畝の番号を、視点から見て左から順（同じ列の中は手前から順）に振り直す
 function renumberBlock(blockId) {
-  renumberBeds(state.beds.filter((bed) => bed.block_id === blockId).sort((a, b) => a.seq - b.seq).map((bed) => bed.id));
+  const beds = state.beds.filter((bed) => bed.block_id === blockId);
+  if (!beds.length) {
+    return;
+  }
+  const { d, v } = viewAxes(bedAngle(beds[0].shape), state.field.view_dirs);
+  const low = (bed, axis) => Math.min(...bed.shape.map((point) => point[0] * axis[0] + point[1] * axis[1]));
+  const place = new Map(beds.map((bed) => [bed.id, [low(bed, v), low(bed, d)]]));
+  beds.sort((a, b) => {
+    const [across, depth] = place.get(a.id).map((value, i) => value - place.get(b.id)[i]);
+    return Math.abs(across) > 0.01 ? across : depth;
+  });
+  renumberBeds(beds.map((bed) => bed.id));
 }
 
-// 日程の画面から畝を足す。向き、長さ、前後の隙間は、いまある最後の畝に合わせる
-function appendBeds(blockId, widthCm, aisleCm, count) {
+// 日程の画面から畝を足す。向き、長さ、前後の隙間は、いまある最後の畝に合わせる。
+// 畝がまだない区画では、side（long か short）の辺に沿って、入るだけの長さで並べる
+function appendBeds(blockId, widthCm, aisleCm, count, side = "long") {
   const block = state.blocks.find((item) => item.id === blockId);
   const last = state.beds.filter((bed) => bed.block_id === blockId && bedExists(bed)).sort((a, b) => a.seq - b.seq).at(-1);
   const sizes = { width: widthCm / 100, aisle: aisleCm / 100, count };
+  // 視点から見て右へ足していく向きにする（並べる向きは、長い辺の向きの左手側）
+  const { d } = viewAxes(last ? bedAngle(last.shape) : edgeAngles(block.shape)[side], state.field.view_dirs);
+  const angle = Math.atan2(-d[1], -d[0]);
   if (!last) {
-    return addBedsToBlock(block, { ...sizes, angle: edgeAngles(block.shape).long, endGap: 0.5, length: null });
+    return addBedsToBlock(block, { ...sizes, angle, endGap: 0.5, length: null });
   }
-  const [p, q, r] = last.shape;
-  const [from, to] = distance(p, q) >= distance(q, r) ? [p, q] : [q, r];
-  const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
   const along = (point) => point[0] * Math.cos(angle) + point[1] * Math.sin(angle);
   const start = Math.min(...last.shape.map(along));
   return addBedsToBlock(block, {
@@ -1284,10 +1454,6 @@ function removeBeds(beds) {
   return removable.length;
 }
 
-function removeSelectedBed() {
-  removeBed(state.selected);
-}
-
 function removeBed(id) {
   const bed = state.beds.find((item) => item.id === id);
   const problem = removalProblem(bed);
@@ -1301,8 +1467,8 @@ function removeBed(id) {
   }
 }
 
-function removeBlockBeds() {
-  const beds = visibleBeds().filter((bed) => bed.block_id === state.selected);
+function removeBlockBeds(blockId) {
+  const beds = visibleBeds().filter((bed) => bed.block_id === blockId);
   if (!beds.length || !confirm(`${formatDate(state.viewDate)} に、この区画の畝 ${beds.length} 本をなくします。収穫が終わっていない畝は残します。`)) {
     return;
   }
@@ -1500,7 +1666,7 @@ map.addEventListener("pointerdown", (event) => {
     const zone = state.mode === "blockrect" ? tillableZoneAt(start) : null;
     const frame = zone ? zone.shape : state.field.outline;
     gesture = { kind: "rect", start, zone, angle: nearestEdgeAngle(start, frame), origin: [event.clientX, event.clientY] };
-  } else if (state.mode === "select" && state.selected !== "outline" && target.dataset.shape && target.dataset.shape === state.selected) {
+  } else if (state.mode === "select" && state.selected !== "outline" && !isBed(state.selected) && target.dataset.shape && target.dataset.shape === state.selected) {
     // 選択中の図形は、ドラッグでそのまま動かせる
     gesture = { kind: "move", moved: false, start: [event.clientX, event.clientY], last: clientToWorld(event) };
   } else {
@@ -1697,7 +1863,7 @@ document.addEventListener("keydown", (event) => {
     render();
   } else if (event.key === "Delete" && state.mode === "select") {
     deleteSelectedVertex();
-  } else if (ARROWS[event.key] && state.mode === "select" && state.selected && state.selected !== "outline") {
+  } else if (ARROWS[event.key] && state.mode === "select" && state.selected && state.selected !== "outline" && !isBed(state.selected)) {
     event.preventDefault();
     nudgeSelected(ARROWS[event.key], event.shiftKey ? NUDGE_M * 10 : NUDGE_M);
   }
@@ -1724,9 +1890,6 @@ $("copyPlanBtn").addEventListener("click", copyPlan);
 $("deletePlanBtn").addEventListener("click", deletePlan);
 $("deleteVertexBtn").addEventListener("click", deleteSelectedVertex);
 $("deleteShapeBtn").addEventListener("click", deleteSelectedShape);
-$("layoutBedsBtn").addEventListener("click", layoutSelectedBlock);
-$("removeBlockBedsBtn").addEventListener("click", removeBlockBeds);
-$("removeBedBtn").addEventListener("click", removeSelectedBed);
 $("openScheduleBtn").addEventListener("click", () => {
   openInSchedule(findShape(state.selected).kind, state.selected);
   showView("schedule");
@@ -1779,14 +1942,41 @@ $("zoneKindEdit").addEventListener("change", (event) => {
   queueSave(`zone:${state.selected}`);
   render();
 });
-for (const list of ["zoneList", "blockList", "warnings"]) {
-  $(list).addEventListener("click", (event) => {
-    const item = event.target.closest("[data-shape]");
-    if (item) {
-      select(item.dataset.shape);
+[0, 1].forEach((k) => {
+  $(`viewEdge${k + 1}`).addEventListener("change", (event) => {
+    if (event.target.value !== "") {
+      setViewEdge(k, Number(event.target.value));
     }
   });
-}
+});
+$("warnings").addEventListener("click", (event) => {
+  const item = event.target.closest("[data-shape]");
+  if (item) {
+    select(item.dataset.shape);
+  }
+});
+// 木の行を押すと選んで内容を開き、選んでいる行をもう一度押すと閉じる。▸ は畝の行の出し入れ
+$("shapeTree").addEventListener("click", (event) => {
+  const toggle = event.target.closest("[data-toggle]");
+  if (toggle) {
+    const id = toggle.dataset.toggle;
+    if (toggle.getAttribute("aria-expanded") === "true") {
+      openBlocks.delete(id);
+      // 選んでいる畝の行ごとたたむときは、選択も外す
+      if (state.beds.some((bed) => bed.id === state.selected && bed.block_id === id)) {
+        state.selected = null;
+      }
+    } else {
+      openBlocks.add(id);
+    }
+    render();
+    return;
+  }
+  const item = event.target.closest("[data-shape]");
+  if (item) {
+    select(state.selected === item.dataset.shape ? null : item.dataset.shape);
+  }
+});
 $("backdropFile").addEventListener("change", (event) => {
   const file = event.target.files[0];
   if (file) {
@@ -1922,12 +2112,19 @@ async function startApp() {
     createBeds,
     renumberBeds,
     removeBed,
+    removeBlockBeds,
     deleteBed: (id) => {
       state.selected = id;
       deleteSelectedShape();
     },
     setStatus: (text) => ($("saveStatus").textContent = text),
+    renderWarnings,
   });
+  // スマホは作業の確認が主なので、日程から開く。
+  // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）
+  if (window.matchMedia("(max-width: 800px)").matches) {
+    showView("schedule");
+  }
   initCrops({ state, setStatus: (text) => ($("saveStatus").textContent = text) });
   try {
     await initJournal({ state, openTarget, setStatus: (text) => ($("saveStatus").textContent = text) });
@@ -1955,10 +2152,6 @@ async function startApp() {
       renderJournal();
     },
   });
-  // スマホは作業の確認が主なので、日程から開く
-  if (window.matchMedia("(max-width: 800px)").matches) {
-    showView("schedule");
-  }
 }
 
 async function main() {

@@ -326,6 +326,31 @@ export function layoutBeds(block, { angle, width, aisle, endGap, length = null, 
   return { beds, strips, outside: beds.filter((bed) => !polygonInside(bed, block)).length };
 }
 
+// 四角形の畝の、長い辺の向き（ラジアン）
+export function bedAngle(rect) {
+  const [p, q, r] = rect;
+  const [from, to] = distance(p, q) >= distance(q, r) ? [p, q] : [q, r];
+  return Math.atan2(to[1] - from[1], to[0] - from[0]);
+}
+
+// 畝を見る視点。視点 1 と視点 2 が見る向き（度。東が 0、北が 90）。
+// 決めていないときは、図の下（南）から北を見る、図の左（西）から東を見る
+export const DEFAULT_VIEW_DIRS = [90, 0];
+
+// 長い辺の向きが angle（ラジアン）の畝を、どちらから見るか。
+// 長い辺に近い向きを見ている視点を使う（同じなら視点 1）。
+// d は手前から奥への向き、v は視点から見て左から右への向き
+export function viewAxes(angle, viewDirs) {
+  const u = [Math.cos(angle), Math.sin(angle)];
+  const dots = (viewDirs?.length === 2 ? viewDirs : DEFAULT_VIEW_DIRS).map((degrees) => {
+    const rad = (degrees * Math.PI) / 180;
+    return u[0] * Math.cos(rad) + u[1] * Math.sin(rad);
+  });
+  const dot = Math.abs(dots[1]) > Math.abs(dots[0]) + 1e-9 ? dots[1] : dots[0];
+  const d = dot >= 0 ? u : [-u[0], -u[1]];
+  return { d, v: [d[1], -d[0]] };
+}
+
 // 四角形の畝の、長い辺と短い辺の長さ
 export function rectSize(points) {
   const lengths = edgeLengths(points);

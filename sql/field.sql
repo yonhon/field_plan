@@ -30,6 +30,9 @@ create table if not exists field.fields (
   created_at timestamptz not null default now()
 );
 
+-- 畝を見る視点。視点 1 と視点 2 が見る向き（度。東が 0、北が 90）の 2 つ組。空なら、南からと西から
+alter table field.fields add column if not exists view_dirs jsonb;
+
 -- 作図の下絵（集成図や航空写真）。画像は非公開のストレージに置き、ここには位置合わせの値を持つ
 create table if not exists field.backdrops (
   id uuid primary key default gen_random_uuid(),

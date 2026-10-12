@@ -2,7 +2,7 @@
 // 横は実寸に比例する。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わる。
 import { cropLabel, plantingNumbers } from "./crops.js";
 import { notify } from "./dialog.js";
-import { edgeAngles, rectSize } from "./geometry.js";
+import { bedAngle, edgeAngles, rectSize, viewAxes } from "./geometry.js";
 import { record } from "./journal.js";
 import { WORK_COLORS, existsOn, harvestEnd } from "./schedule.js";
 
@@ -70,26 +70,13 @@ function numbersLine(bed, planting) {
 // 畝の並ぶ向き（畝の長い辺に直角な向き）の軸を決め、畝を左から順の「列」にまとめる。
 // 同じ列に、前後に並んだ畝が複数入ることがある
 function measure(block, beds) {
-  let angle = edgeAngles(block.shape).long;
-  if (beds.length) {
-    const [p, q, r] = beds[0].shape;
-    const long = Math.hypot(q[0] - p[0], q[1] - p[1]) >= Math.hypot(r[0] - q[0], r[1] - q[1]) ? [p, q] : [q, r];
-    angle = Math.atan2(long[1][1] - long[0][1], long[1][0] - long[0][0]);
-  }
-  const u = [Math.cos(angle), Math.sin(angle)];
-  let v = [-u[1], u[0]];
-  const across = (point) => point[0] * v[0] + point[1] * v[1];
-  const middle = (bed) => bed.shape.reduce((sum, point) => sum + across(point), 0) / bed.shape.length;
-  // 番号の小さい畝が左に来る向きにする
-  const ordered = [...beds].sort(bySeq);
-  if (ordered.length > 1 && middle(ordered[0]) > middle(ordered.at(-1))) {
-    v = [-v[0], -v[1]];
-  }
+  // 左右と手前・奥は、圃場の外形で決めた視点から見た向き
+  const { d, v } = viewAxes(beds.length ? bedAngle(beds[0].shape) : edgeAngles(block.shape).long, ctx.state.field.view_dirs);
   const range = (points) => {
     const values = points.map((point) => point[0] * v[0] + point[1] * v[1]);
     return { min: Math.min(...values), max: Math.max(...values) };
   };
-  const along = (bed) => Math.min(...bed.shape.map((point) => point[0] * u[0] + point[1] * u[1]));
+  const along = (bed) => Math.min(...bed.shape.map((point) => point[0] * d[0] + point[1] * d[1]));
   const strips = [];
   for (const bed of beds.map((item) => ({ bed: item, ...range(item.shape) })).sort((a, b) => a.min - b.min)) {
     const last = strips.at(-1);
@@ -124,6 +111,7 @@ export function renderStrip() {
   }
   const beds = state.beds.filter((bed) => bed.block_id === block.id && existsOn(bed.start_date, bed.removed_on, state.viewDate));
   view = measure(block, beds);
+  fillPlacement(sel, beds);
   // 図の左右の端。ふつうは区画の端。畝が区画からはみ出しているときは、その畝まで広げる
   const low = Math.min(view.min, ...view.strips.map((strip) => strip.min));
   const high = Math.max(view.max, ...view.strips.map((strip) => strip.max));
@@ -269,11 +257,91 @@ function setDimension(key) {
   record({
     kind: kind === "width" ? "bed.width" : "bed.gap",
     target: ["bed", strip.beds[0].id],
-    text: `${view.block.name} 畝${strip.beds[0].seq}の${kind === "width" ? "畝幅" : "手前の隙間"}を変更${following.length && kind === "width" ? "（後ろの畝もずらした）" : ""}`,
+    text: `${view.block.name} 畝${strip.beds[0].seq}の${kind === "width" ? "畝幅" : "左の隙間"}を変更${following.length && kind === "width" ? "（後ろの畝もずらした）" : ""}`,
     before: `${Math.round(current * 100)} cm`,
     after: `${value} cm`,
   });
   renderStrip();
+}
+
+// ---- 前後の位置と長さ ----
+// 畝の長い辺の向きで測る。手前は、圃場の外形で決めた視点に近い側の端
+
+const depthAxis = () => [-view.v[1], view.v[0]];
+
+function depthOf(shape) {
+  const d = depthAxis();
+  const values = shape.map((point) => point[0] * d[0] + point[1] * d[1]);
+  return { min: Math.min(...values), max: Math.max(...values) };
+}
+
+// 畝を、区画の手前の端から front（m）あけた所から、長さ length（m）にする
+function placeAlong(shape, front, length) {
+  const d = depthAxis();
+  const base = depthOf(view.block.shape).min;
+  const { min, max } = depthOf(shape);
+  return shape.map((point) => {
+    const near = point[0] * d[0] + point[1] * d[1] < (min + max) / 2;
+    const delta = near ? base + front - min : base + front + length - max;
+    return [point[0] + d[0] * delta, point[1] + d[1] * delta];
+  });
+}
+
+let placementKey = null; // 欄に入れてある畝と値。変わったときだけ、欄を入れ直す
+
+function fillPlacement(sel, beds) {
+  $("stripSide").disabled = beds.length > 0;
+  $("stripSideNote").textContent = beds.length ? "いまある畝の向きに合わせます。" : "畝がまだない区画に、最初の畝を足すときの向きです。";
+  const chosen = beds.find((bed) => bed.id === sel.target);
+  const bed = chosen || view.strips[0]?.beds[0];
+  $("stripPlaceBtn").disabled = !chosen;
+  $("stripPlaceAllBtn").disabled = !beds.length;
+  $("stripRemoveAllBtn").disabled = !beds.length;
+  if (!bed) {
+    placementKey = null;
+    $("stripFront").value = "";
+    $("stripLength").value = "";
+    $("stripBack").textContent = "";
+    return;
+  }
+  const base = depthOf(view.block.shape);
+  const own = depthOf(bed.shape);
+  const key = [bed.id, (own.min - base.min).toFixed(3), (own.max - own.min).toFixed(3)].join("|");
+  if (key !== placementKey) {
+    placementKey = key;
+    $("stripFront").value = Number((own.min - base.min).toFixed(2));
+    $("stripLength").value = Number((own.max - own.min).toFixed(2));
+  }
+  $("stripBack").textContent = `いまの畝${bed.seq}: 奥の隙間 ${(base.max - own.max).toFixed(2)} m`;
+}
+
+function placeBeds(all) {
+  const front = Number($("stripFront").value);
+  const length = Number($("stripLength").value);
+  if ($("stripFront").value.trim() === "" || !(front >= 0) || !(length > 0)) {
+    notify("手前の隙間には 0 以上の数を、畝の長さには 0 より大きい数を入れてください。");
+    return;
+  }
+  if (all && view.strips.some((strip) => strip.beds.length > 1)) {
+    notify("前後に並んだ畝がある区画では、畝を 1 本ずつ選んで入れてください。");
+    return;
+  }
+  const target = ctx.selection().target;
+  const beds = view.strips.flatMap((strip) => strip.beds).filter((bed) => all || bed.id === target);
+  if (!beds.length) {
+    return;
+  }
+  for (const bed of beds) {
+    bed.shape = placeAlong(bed.shape, front, length);
+    ctx.queueSave(`bed:${bed.id}`);
+  }
+  record({
+    kind: "bed.place",
+    target: all ? ["block", view.block.id] : ["bed", beds[0].id],
+    text: `${view.block.name}${all ? "のすべての畝" : ` 畝${beds[0].seq}`}の、前後の位置と長さを変更`,
+    after: `手前の隙間 ${front} m、長さ ${length} m`,
+  });
+  ctx.refresh();
 }
 
 // 道具の欄の畝幅と隙間（m）。入力がおかしければ知らせて null を返す
@@ -297,7 +365,7 @@ function insertAt(index) {
   }
   const blockId = view.block.id;
   if (!view.strips.length) {
-    ctx.assignCrop(ctx.appendBeds(blockId, sizes.width * 100, sizes.aisle * 100, 1), $("stripCrop").value);
+    ctx.assignCrop(ctx.appendBeds(blockId, sizes.width * 100, sizes.aisle * 100, 1, $("stripSide").value), $("stripCrop").value);
     ctx.refresh();
     return;
   }
@@ -394,7 +462,7 @@ export function initStrip(context) {
       notify("本数には 1 以上の数を入れてください。");
       return;
     }
-    ctx.assignCrop(ctx.appendBeds(ctx.selection().blockId, sizes.width * 100, sizes.aisle * 100, count), $("stripCrop").value);
+    ctx.assignCrop(ctx.appendBeds(ctx.selection().blockId, sizes.width * 100, sizes.aisle * 100, count, $("stripSide").value), $("stripCrop").value);
     ctx.refresh();
   });
   // 品目を選ぶと、その品目の畝幅と隙間を入れる
@@ -415,6 +483,12 @@ export function initStrip(context) {
     ctx.deleteBed(ctx.selection().target);
     ctx.refresh();
   });
+  $("stripRemoveAllBtn").addEventListener("click", () => {
+    ctx.removeBlockBeds(ctx.selection().blockId);
+    ctx.refresh();
+  });
+  $("stripPlaceBtn").addEventListener("click", () => placeBeds(false));
+  $("stripPlaceAllBtn").addEventListener("click", () => placeBeds(true));
 
   $("stripDate").addEventListener("change", (event) => {
     // 表示日は圃場図と共通。圃場図の側の入力欄を通して変える

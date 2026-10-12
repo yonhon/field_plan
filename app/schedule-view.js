@@ -149,6 +149,7 @@ export function renderSchedule() {
   renderWeek();
   problems = planProblems(state());
   renderProblems();
+  ctx.renderWarnings();
   renderSummary();
   if (!blocks.length) {
     return;
@@ -221,6 +222,8 @@ function renderProblems() {
     groups.get(key).items.push(problem);
   }
   $("problemCount").textContent = `${problems.length} 件`;
+  $("scheduleBadge").hidden = problems.length === 0;
+  $("scheduleBadge").textContent = `⚠${problems.length}`;
   $("problemList").innerHTML = [...groups.values()]
     .map(({ text, items }) => {
       const first = items[0];

@@ -2,6 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  bedAngle,
+  viewAxes,
   centroid,
   crossRange,
   cutSegment,
@@ -163,4 +165,36 @@ test("区画の中に畝を並べる", () => {
 
   // 入らない寸法では 1 本も並ばない
   assert.equal(layoutBeds(block, { ...options, width: 12 }).beds.length, 0);
+});
+
+const nearPair = (actual, expected) => actual.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) < 1e-9, `${actual} != ${expected}`));
+
+test("viewAxes: 南から見る視点では、南北の畝の手前は南、左は西", () => {
+  // 視点 1 は北を見る（南に立つ）、視点 2 は東を見る（西に立つ）
+  for (const angle of [Math.PI / 2, -Math.PI / 2]) {
+    const { d, v } = viewAxes(angle, [90, 0]);
+    nearPair(d, [0, 1]);
+    nearPair(v, [1, 0]);
+  }
+});
+
+test("viewAxes: 視点 1 と直角の畝は、視点 2 から見る", () => {
+  for (const angle of [0, Math.PI]) {
+    const { d, v } = viewAxes(angle, [90, 0]);
+    nearPair(d, [1, 0]); // 西に立って東を見る
+    nearPair(v, [0, -1]); // 左が北、右が南
+  }
+  // 視点 2 を東側に変えると、手前と左右が入れ替わる
+  nearPair(viewAxes(0, [90, 180]).d, [-1, 0]);
+  nearPair(viewAxes(0, [90, 180]).v, [0, 1]);
+});
+
+test("viewAxes: 決めていないときは、南と西から見る", () => {
+  nearPair(viewAxes(Math.PI / 2, null).d, [0, 1]);
+  nearPair(viewAxes(0, undefined).d, [1, 0]);
+});
+
+test("bedAngle: 長い辺の向き", () => {
+  const angle = bedAngle([[0, 0], [1, 0], [1, 10], [0, 10]]);
+  assert.ok(Math.abs(Math.abs(Math.sin(angle)) - 1) < 1e-9);
 });

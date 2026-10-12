@@ -23,8 +23,8 @@
         <h1>圃場計画</h1>
       </div>
       <nav id="viewTabs" class="control-group" aria-label="画面の切り替え" hidden>
-        <button class="tab-btn is-active" data-view="map">圃場図</button>
-        <button class="tab-btn" data-view="schedule">日程</button>
+        <button class="tab-btn is-active" data-view="map">圃場図<span id="mapBadge" class="tab-badge" hidden></span></button>
+        <button class="tab-btn" data-view="schedule">日程<span id="scheduleBadge" class="tab-badge" hidden></span></button>
         <button class="tab-btn" data-view="crops">品目</button>
         <button class="tab-btn" data-view="journal">記録</button>
       </nav>
@@ -94,6 +94,7 @@
           </span>
         </div>
         <p id="hint" class="hint edit-only"></p>
+        <ul id="warnings" class="map-warnings" hidden></ul>
         <div class="map-frame">
           <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="圃場図"></svg>
           <div class="map-overlay">
@@ -116,21 +117,11 @@
         </section>
 
         <section class="panel">
-          <h2>圃場</h2>
-          <label class="edit-only">名前<input id="fieldName" type="text" /></label>
-          <dl class="figures">
-            <div><dt>圃場の面積</dt><dd id="areaField">-</dd></div>
-            <div class="total"><dt>有効圃場</dt><dd id="areaTillable">-</dd></div>
-            <div><dt>物置・井戸・通路・残渣処理場など</dt><dd id="areaZones">-</dd></div>
-            <div><dt>どの区域でもない部分</dt><dd id="areaRest">-</dd></div>
-            <div class="total"><dt>耕起対象区画（表示日）</dt><dd id="areaBlocks">-</dd></div>
-            <div><dt>畝（表示日）</dt><dd id="areaBeds">-</dd></div>
-          </dl>
-          <ul id="warnings" class="error warning-list"></ul>
-        </section>
-
-        <section class="panel" id="selectionPanel" hidden>
-          <h2 id="selectionTitle">選択中</h2>
+          <h2>区域と区画</h2>
+          <p class="muted">行を押すと、その場で内容が開きます。もう一度押すと閉じます。</p>
+          <ul id="shapeTree" class="zone-list shape-tree">
+            <li id="selectionPanel" class="tree-detail" hidden>
+          <h2 id="selectionTitle" hidden>選択中</h2>
           <div id="zoneFields" class="edit-only">
             <label>名前<input id="zoneName" type="text" /></label>
             <label>種類
@@ -144,6 +135,12 @@
               </select>
             </label>
           </div>
+          <div id="outlineFields" class="edit-only">
+            <h3>畝を見る視点</h3>
+            <label>視点 1（立つ側の辺）<select id="viewEdge1"></select></label>
+            <label>視点 2（視点 1 と直角の辺）<select id="viewEdge2"></select></label>
+            <p id="viewNote" class="muted"></p>
+          </div>
           <p id="shapeInfo" class="muted"></p>
           <div id="blockFields" class="edit-only">
             <label>名前<input id="blockName" type="text" /></label>
@@ -152,31 +149,10 @@
               <label>なくなる日<input id="blockEnd" type="date" /></label>
             </div>
             <p class="muted">空なら、最初から・ずっとある区画です。</p>
-            <h3>畝を並べる</h3>
-            <div class="form-grid">
-              <label>畝の向き
-                <select id="bedSide">
-                  <option value="long">長い辺に沿う</option>
-                  <option value="short">短い辺に沿う</option>
-                </select>
-              </label>
-              <label>本数<input id="bedCount" type="number" min="1" placeholder="入るだけ" /></label>
-              <label>畝幅（cm）<input id="bedWidth" type="number" min="1" value="70" /></label>
-              <label>左右の隙間（cm）<input id="bedAisle" type="number" min="0" value="60" /></label>
-              <label>畝の長さ（m）<input id="bedLength" type="number" min="0.1" step="0.1" placeholder="入るだけ" /></label>
-              <label>前後の隙間（m）<input id="bedEndGap" type="number" min="0" step="0.1" value="0.5" /></label>
-            </div>
-            <p class="muted">いまある畝の続きに並べます。幅の違う畝は、分けて足してください。</p>
-            <div class="row">
-              <button id="layoutBedsBtn" class="primary-btn">畝を並べる</button>
-              <button id="removeBlockBedsBtn" class="text-btn">表示日で畝をすべてなくす</button>
-            </div>
           </div>
           <div id="bedFields">
             <ul id="bedPlantings" class="zone-list"></ul>
-            <div class="row edit-only">
-              <button id="removeBedBtn" class="text-btn">表示日で畝をなくす</button>
-            </div>
+            <p class="muted edit-only">畝の追加、移動、削除は、日程の「区画と畝」で行います。</p>
           </div>
           <table id="edgeTable" class="edges">
             <thead><tr><th>辺</th><th>長さ</th></tr></thead>
@@ -187,16 +163,21 @@
             <button id="deleteVertexBtn" class="text-btn edit-only">頂点を削除</button>
             <button id="deleteShapeBtn" class="text-btn danger edit-only">図形を削除</button>
           </div>
+        </li>
+          </ul>
         </section>
 
         <section class="panel">
-          <h2>区域</h2>
-          <ul id="zoneList" class="zone-list"></ul>
-        </section>
-
-        <section class="panel">
-          <h2>耕起対象区画</h2>
-          <ul id="blockList" class="zone-list"></ul>
+          <h2>圃場</h2>
+          <label class="edit-only">名前<input id="fieldName" type="text" /></label>
+          <dl class="figures">
+            <div><dt>圃場の面積</dt><dd id="areaField">-</dd></div>
+            <div class="total"><dt>有効圃場</dt><dd id="areaTillable">-</dd></div>
+            <div><dt>物置・井戸・通路・残渣処理場など</dt><dd id="areaZones">-</dd></div>
+            <div><dt>どの区域でもない部分</dt><dd id="areaRest">-</dd></div>
+            <div class="total"><dt>耕起対象区画（表示日）</dt><dd id="areaBlocks">-</dd></div>
+            <div><dt>畝（表示日）</dt><dd id="areaBeds">-</dd></div>
+          </dl>
         </section>
 
         <section class="panel edit-only">
@@ -240,7 +221,7 @@
               <label class="inline-field">表示日<input id="stripDate" type="date" /></label>
             </div>
           </div>
-          <p class="muted edit-only">畝や区画の作業をクリックすると、下で編集できます。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わります。数字をクリックすると、畝幅や隙間を cm で指定できます。図の中の「＋」を押すと、その場所に下の畝幅と隙間で畝を足します。</p>
+          <p class="muted edit-only">畝や区画の作業をクリックすると、下で編集できます。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わります。数字をクリックすると、畝幅や隙間を cm で指定できます。図の中の「＋」を押すと、その場所に下の畝幅と隙間で畝を足します。畝の追加、移動、削除は、この図だけで行います。</p>
           <div class="row edit-only strip-tools">
             <select id="stripCrop" aria-label="足す畝の品目"></select>
             <label class="inline-field">畝幅（cm）<input id="stripWidth" type="number" min="1" value="70" /></label>
@@ -249,7 +230,28 @@
             <button id="stripAddBtn" class="chip-btn">右端に追加</button>
             <button id="stripRemoveBtn" class="text-btn">選んだ畝を表示日でなくす</button>
             <button id="stripDeleteBtn" class="text-btn danger">選んだ畝を完全に削除</button>
+            <button id="stripRemoveAllBtn" class="text-btn">この区画の畝をすべて表示日でなくす</button>
           </div>
+          <details class="strip-detail edit-only">
+            <summary>くわしい設定（畝の向き、長さ、前後の位置）</summary>
+            <div class="row strip-tools">
+              <label class="inline-field">最初の畝の向き
+                <select id="stripSide">
+                  <option value="long">区画の長い辺に沿う</option>
+                  <option value="short">区画の短い辺に沿う</option>
+                </select>
+              </label>
+              <span id="stripSideNote" class="muted"></span>
+            </div>
+            <div class="row strip-tools">
+              <label class="inline-field">手前の隙間（m）<input id="stripFront" type="number" min="0" step="0.1" /></label>
+              <label class="inline-field">畝の長さ（m）<input id="stripLength" type="number" min="0.1" step="0.1" /></label>
+              <button id="stripPlaceBtn" class="chip-btn">選んだ畝に入れる</button>
+              <button id="stripPlaceAllBtn" class="chip-btn">この区画のすべての畝に入れる</button>
+              <span id="stripBack" class="muted"></span>
+            </div>
+            <p class="muted">手前は、圃場図の「圃場の外形」で決めた視点に近い側の端です。この図の左右も、その視点から見た左右です。手前の隙間は、区画の手前の端から畝の端までの距離です。足した畝の長さと前後の位置は、いまある最後の畝に合わせて入ります。</p>
+          </details>
           <div class="strip-scroll"><div id="strip" class="strip"></div></div>
         </section>
 

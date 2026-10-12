@@ -572,6 +572,49 @@ h3 {
   font-size: 12px;
 }
 
+/* 区域 ⊃ 区画 ⊃ 畝 の木。選んだ行のすぐ下に、その内容が開く */
+.shape-tree > li.depth-1 {
+  padding-left: 20px;
+}
+
+.shape-tree > li.depth-2 {
+  padding-left: 44px;
+  font-size: 13px;
+}
+
+.tree-slot {
+  display: inline-block;
+  width: 18px;
+}
+
+.tree-toggle {
+  width: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-crop {
+  margin-left: 8px;
+  color: var(--muted);
+}
+
+.zone-list > li.tree-detail {
+  display: block;
+  margin: 2px 0 10px;
+  padding: 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: #f3f8f7;
+  cursor: default;
+}
+
 .zone-list .empty {
   color: var(--muted);
   cursor: default;
@@ -596,8 +639,42 @@ h3 {
   stroke-dasharray: 3 3;
 }
 
-#warnings li {
+/* 圃場図の上に出す、はみ出しの警告。右側をどこまで送っていても見える */
+.map-warnings {
+  margin: 0 0 8px;
+  padding: 4px 10px;
+  list-style: none;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.map-warnings li {
+  padding: 2px 0;
   cursor: pointer;
+}
+
+.map-warnings li::before,
+.zone-list .stray-mark::before {
+  content: "⚠ ";
+}
+
+.zone-list .stray-mark {
+  margin-left: 4px;
+  color: var(--danger);
+}
+
+/* タブに付ける、警告の件数 */
+.tab-badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .shape.bed {
@@ -626,6 +703,19 @@ h3 {
   paint-order: stroke;
   text-anchor: middle;
   dominant-baseline: middle;
+  pointer-events: none;
+}
+
+/* 圃場の外形を選んだときに出す、視点の矢印 */
+.view-line {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.view-head {
+  fill: var(--accent);
   pointer-events: none;
 }
 
@@ -721,8 +811,7 @@ h3 {
   gap: 10px;
 }
 
-.week-list,
-.warning-list {
+.week-list {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -747,10 +836,6 @@ h3 {
 
 .week-work {
   font-weight: 700;
-}
-
-.warning-list li {
-  padding: 2px 0;
 }
 
 .problem-panel {
@@ -864,6 +949,20 @@ h3 {
 
 .strip-tools input {
   width: 64px;
+}
+
+.strip-tools select {
+  width: auto;
+}
+
+.strip-detail {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.strip-detail summary {
+  cursor: pointer;
+  color: var(--accent);
 }
 
 .strip-scroll {

@@ -21,7 +21,7 @@ let timers = [];
 
 function snapshot() {
   const { state } = ctx;
-  const data = { planId: state.plan.id, outline: state.field.outline, workTypes: state.workTypes };
+  const data = { planId: state.plan.id, outline: state.field.outline, viewDirs: state.field.view_dirs ?? null, workTypes: state.workTypes };
   for (const table of [...PLAN_TABLES, ...SHARED_TABLES]) {
     data[table] = state[table];
   }
@@ -98,12 +98,13 @@ async function restore(text) {
   const tables = [...SHARED_TABLES, ...PLAN_TABLES]; // 親から子の順
 
   state.field.outline = target.outline;
+  state.field.view_dirs = target.viewDirs ?? null;
   state.workTypes = target.workTypes;
   for (const table of tables) {
     state[table] = target[table];
   }
 
-  if (JSON.stringify(before.outline) !== JSON.stringify(target.outline)) {
+  if (JSON.stringify([before.outline, before.viewDirs]) !== JSON.stringify([target.outline, target.viewDirs ?? null])) {
     await store.saveField(state.field);
   }
   // 写しにない行を消す。子から先に消す（親を消すと、DB の側で子も消える）

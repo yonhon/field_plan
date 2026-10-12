@@ -33,7 +33,7 @@ export function createSupabaseStore(client) {
     },
     async saveField(field) {
       const { id, name, outline, note } = field;
-      check(await client.from("fields").update({ name, outline, note }).eq("id", id));
+      check(await client.from("fields").update({ name, outline, note, view_dirs: field.view_dirs ?? null }).eq("id", id));
     },
     async loadBackdrop(fieldId) {
       const rows = check(
