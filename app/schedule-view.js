@@ -905,14 +905,15 @@ async function newPlanting(bedId, cropName, cropId = null) {
 }
 
 // 工程表の行に作業を入れるときの入れ先。畝の行なら、その日が入る作付、
-// なければその日より前に始まる最後の作付、それもなければ最初の作付。作付がなければ作る
-async function ownerForRow(row, date, cropName) {
+// なければその日より前に始まる最後の作付、それもなければ最初の作付。作付がなければ作る。
+// source は、作業の元の作付。新しく作る作付は、その品目を引き継ぐ
+async function ownerForRow(row, date, source) {
   if (row.dataset.block) {
     return { block_id: row.dataset.block };
   }
   const plantings = bedPlantings(row.dataset.bed).map((planting) => ({ planting, range: worksRange(plantingWorks(planting.id)) }));
   if (!plantings.length) {
-    return { planting_id: (await newPlanting(row.dataset.bed, cropName)).id };
+    return { planting_id: (await newPlanting(row.dataset.bed, source?.crop_name, source?.crop_id || null)).id };
   }
   const hit =
     plantings.find(({ range }) => range && date && range.start <= date && date <= range.end) ||
@@ -995,8 +996,8 @@ function pastePicked() {
   run(async () => {
     let owner = currentOwner();
     if (sel.target !== "block" && !sel.plantingId) {
-      const crop = state().plantings.find((planting) => planting.id === works[0].planting_id)?.crop_name;
-      sel.plantingId = (await newPlanting(sel.target, crop)).id;
+      const source = state().plantings.find((planting) => planting.id === works[0].planting_id);
+      sel.plantingId = (await newPlanting(sel.target, source?.crop_name, source?.crop_id || null)).id;
       owner = { planting_id: sel.plantingId };
     }
     if (cut) {
@@ -1124,10 +1125,10 @@ function initGanttEditing() {
     if (target) {
       run(async () => {
         const first = works.map((work) => addDays(work.plan_start, drag.days)).sort()[0];
-        const crop = state().plantings.find((planting) => planting.id === works[0].planting_id)?.crop_name;
+        const source = state().plantings.find((planting) => planting.id === works[0].planting_id);
         const from = ownerName(ownerOf(works[0]));
         const names = works.map((work) => typeLabel(work.work_type)).join("、");
-        const owner = await ownerForRow(target, first, crop);
+        const owner = await ownerForRow(target, first, source);
         await transferWorks(works, owner, drag.days, event.ctrlKey);
         record({ kind: "work.transfer", text: `${from}の作業 ${works.length} 件（${names}）を、${ownerName(owner)}へ${event.ctrlKey ? "コピー" : "移動"}` });
       });
