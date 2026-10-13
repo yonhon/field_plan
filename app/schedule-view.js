@@ -18,6 +18,7 @@ import {
 import { cropLabel, plantingNumbers, summarize } from "./crops.js";
 import { notify } from "./dialog.js";
 import { record } from "./journal.js";
+import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
 
 const $ = (id) => document.getElementById(id);
@@ -298,6 +299,23 @@ function renderGantt() {
   // 初めて描くときは、今日が左から少し入った位置に来るように送る。描き直しでは位置を保つ
   $("gantt").querySelector(".gantt-scroll").scrollLeft = previous ?? (mark ? Math.max(x(today) - 60, 0) : 0);
   renderPickTools();
+}
+
+// 工程表の全体を、横向きの紙の幅に収まる倍率で印刷に回す
+function printGantt() {
+  const inner = $("gantt").querySelector(".gantt-inner");
+  if (!inner) {
+    notify("日付の入った作業がまだありません。");
+    return;
+  }
+  const copy = $("gantt").cloneNode(true);
+  copy.querySelectorAll(".is-picked, .is-open").forEach((element) => element.classList.remove("is-picked", "is-open"));
+  printPage({
+    name: "工程表",
+    title: `工程表　プラン: ${$("schedulePlanName").textContent}　出力日: ${fullDay(localToday())}`,
+    body: `<div style="zoom:${Math.min(1, PAGE_PX.landscape[0] / inner.offsetWidth).toFixed(4)}">${copy.innerHTML}</div>`,
+    landscape: true,
+  });
 }
 
 // 作付の寸法、苗数、肥料の量を 1 行にする
@@ -1249,6 +1267,7 @@ export function initSchedule(context) {
       $("newPlantingDate").value = newPlantingDefault();
     });
   }
+  $("ganttPdfBtn").addEventListener("click", printGantt);
   $("problemList").addEventListener("click", (event) => {
     const item = event.target.closest("li[data-id]");
     if (item) {

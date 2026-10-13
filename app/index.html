@@ -97,6 +97,7 @@
         <ul id="warnings" class="map-warnings" hidden></ul>
         <div class="map-frame">
           <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="圃場図"></svg>
+          <button id="mapPdfBtn" class="chip-btn map-pdf" title="圃場の全体を、下絵なしで PDF にします">PDF出力</button>
           <div class="map-overlay">
             <div class="scale-bar"><span id="scaleBarLine"></span><span id="scaleBarLabel"></span></div>
             <button id="fitBtn" class="chip-btn">全体を表示</button>
@@ -279,7 +280,10 @@
         <section class="panel">
           <div class="panel-heading">
             <h2>工程表</h2>
-            <p class="muted">プラン: <span id="schedulePlanName"></span></p>
+            <div class="row">
+              <p class="muted">プラン: <span id="schedulePlanName"></span></p>
+              <button id="ganttPdfBtn" class="chip-btn" title="工程表の全体を PDF にします">PDF出力</button>
+            </div>
           </div>
           <div class="row edit-only gantt-tools">
             <span id="pickInfo" class="muted"></span>
@@ -345,7 +349,7 @@
     <script type="module">
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // 読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js"];
       try {
         await Promise.all(parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })));
         await import("./app.js");

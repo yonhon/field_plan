@@ -30,6 +30,7 @@ import { initCrops, renderCrops } from "./crops-view.js";
 import { notify } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal } from "./journal.js";
+import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore } from "./store.js";
@@ -153,6 +154,50 @@ function fitView() {
     y: -box.maxY - margin,
     w: box.maxX - box.minX + margin * 2,
     h: box.maxY - box.minY + margin * 2,
+  });
+}
+
+// ---- PDF 出力 ----
+
+// 圃場の全体を、下絵なし、選択の印なしで描いて、印刷に回す。
+// 範囲は、圃場の外形（なければ区域）がちょうど入る四角形に、3% の余白を足したもの。向きは画面と同じ（上が北）
+function printMap() {
+  const points = state.field.outline.length >= 3 ? state.field.outline : state.zones.flatMap((zone) => zone.shape);
+  if (points.length < 3) {
+    notify("圃場の外形か区域を描くと、PDF にできます。");
+    return;
+  }
+  const box = boundingBox(points);
+  const margin = Math.max(box.maxX - box.minX, box.maxY - box.minY) * 0.03;
+  const view = { x: box.minX - margin, y: -box.maxY - margin, w: box.maxX - box.minX + margin * 2, h: box.maxY - box.minY + margin * 2 };
+  const landscape = view.w >= view.h;
+  const [pageWidth, pageHeight] = PAGE_PX[landscape ? "landscape" : "portrait"];
+  const z = Math.min(pageWidth / view.w, pageHeight / view.h);
+
+  const kept = { selected: state.selected, vertex: state.selectedVertex, backdrop: state.backdropVisible, draft: state.draft };
+  Object.assign(state, { selected: null, selectedVertex: null, backdropVisible: false, draft: [] });
+  renderMap(z);
+  const shapes = map.innerHTML;
+  Object.assign(state, { selected: kept.selected, selectedVertex: kept.vertex, backdropVisible: kept.backdrop, draft: kept.draft });
+  renderMap();
+
+  // 縮尺の線と、北の印を、余白の帯に書く
+  const meters = [100, 50, 20, 10, 5, 2, 1].find((value) => value <= view.w * 0.2) || 1;
+  const bottom = view.y + view.h - margin * 0.4;
+  const left = view.x + margin * 0.4;
+  const text = (x, y, value, anchor) =>
+    `<text class="map-label" x="${x}" y="${y}" font-size="${11 / z}" stroke-width="${3 / z}" style="text-anchor:${anchor}">${value}</text>`;
+  const extras =
+    `<line class="print-scale" x1="${left}" y1="${bottom}" x2="${left + meters}" y2="${bottom}" />` +
+    text(left + meters + 6 / z, bottom, `${meters} m`, "start") +
+    text(view.x + view.w - margin * 0.4, view.y + margin * 0.5, "↑ 北", "end");
+  printPage({
+    name: "圃場図",
+    title: `圃場図　${state.field.name}　プラン: ${state.plan.name}　表示日: ${formatDate(state.viewDate)}`,
+    body:
+      `<svg class="print-map" xmlns="http://www.w3.org/2000/svg" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" ` +
+      `style="height:${pxToMm(Math.min(pageHeight, (pageWidth / view.w) * view.h)).toFixed(1)}mm">${shapes}${extras}</svg>`,
+    landscape,
   });
 }
 
@@ -385,8 +430,11 @@ const svgPoints = (points) => points.map(([x, y]) => `${x},${-y}`).join(" ");
 const escapeHtml = (text) =>
   String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-function renderMap() {
-  const z = zoom();
+// scale は、印刷用に描くときの倍率（1 m あたりの px）。ふだんは画面の倍率を使う
+function renderMap(scale) {
+  const printing = typeof scale === "number";
+  const z = printing ? scale : zoom();
+  const lengthLabels = []; // PDF に書く、辺の長さ。ほかの図形に隠れないように、最後に足す
   const fontSize = 12 / z;
   const parts = [];
 
@@ -411,6 +459,23 @@ function renderMap() {
       `<polygon class="shape${selectedClass("outline")}" data-shape="outline" ` +
         `points="${svgPoints(outline)}" fill="${OUTLINE_COLOR}" fill-opacity="0.08" stroke="${OUTLINE_COLOR}" />`
     );
+  }
+  // PDF では、圃場の外形と有効圃場の各辺の長さを、辺の外側に、辺に沿って書く
+  if (printing) {
+    for (const points of [outline, ...state.zones.filter((zone) => zone.kind === "tillable").map((zone) => zone.shape)]) {
+      points.forEach((point, i) => {
+        const next = points[(i + 1) % points.length];
+        const length = distance(point, next);
+        if (points.length < 3 || length * z < 48) {
+          return;
+        }
+        const out = (edgeOutward(points, i) * Math.PI) / 180;
+        const at = [(point[0] + next[0]) / 2 + Math.cos(out) * (11 / z), (point[1] + next[1]) / 2 + Math.sin(out) * (11 / z)];
+        let degrees = (-Math.atan2(next[1] - point[1], next[0] - point[0]) * 180) / Math.PI;
+        degrees = degrees > 90 ? degrees - 180 : degrees <= -90 ? degrees + 180 : degrees;
+        lengthLabels.push(label(at, formatLength(length), fontSize, `transform="rotate(${degrees} ${at[0]} ${-at[1]})"`));
+      });
+    }
   }
   const blocks = visibleBlocks();
   const beds = visibleBeds();
@@ -443,15 +508,16 @@ function renderMap() {
       `<polygon class="shape bed${selectedClass(bed.id)}" data-shape="${bed.id}" ` +
         `points="${svgPoints(bed.shape)}" fill="${color}" fill-opacity="0.8" stroke="${color}" />`
     );
-    // 畝の番号と品目は、畝の向きに沿って書く。画面で小さい畝には書かない
+    // 畝の番号と品目は、畝の向きに沿って書く。画面で小さい畝には書かない。
+    // 幅の狭い畝（70 cm など）でも読めるように、文字は 9px より小さくしない（畝から少しはみ出してよい）
     const size = rectSize(bed.shape);
-    if (size.length * z > 50 && size.width * z > 9) {
+    if (size.length * z > 50 && size.width * z > 4) {
       const [a, b] = distance(bed.shape[0], bed.shape[1]) >= distance(bed.shape[1], bed.shape[2]) ? [bed.shape[0], bed.shape[1]] : [bed.shape[1], bed.shape[2]];
       let degrees = (-Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
       degrees = degrees > 90 ? degrees - 180 : degrees <= -90 ? degrees + 180 : degrees;
       const center = centroid(bed.shape);
       const text = `${bed.seq}${name ? ` ${name}` : ""}`;
-      parts.push(label(center, text, Math.min(fontSize, size.width * 0.85), `transform="rotate(${degrees} ${center[0]} ${-center[1]})"`));
+      parts.push(label(center, text, Math.min(fontSize, Math.max(size.width * 0.85, 9 / z)), `transform="rotate(${degrees} ${center[0]} ${-center[1]})"`));
     }
   }
 
@@ -546,7 +612,7 @@ function renderMap() {
     }
   }
 
-  map.innerHTML = parts.join("");
+  map.innerHTML = parts.join("") + lengthLabels.join("");
   renderScaleBar(z);
 }
 
@@ -1949,6 +2015,7 @@ $("zoneKindEdit").addEventListener("change", (event) => {
     }
   });
 });
+$("mapPdfBtn").addEventListener("click", printMap);
 $("warnings").addEventListener("click", (event) => {
   const item = event.target.closest("[data-shape]");
   if (item) {

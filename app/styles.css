@@ -1404,3 +1404,75 @@ h3 {
     display: inline;
   }
 }
+
+/* ---- PDF 出力（印刷） ---- */
+
+.map-pdf {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+#printArea {
+  display: none;
+}
+
+@media print {
+  html,
+  body.is-printing {
+    height: auto;
+  }
+
+  body.is-printing {
+    display: block;
+    background: #fff;
+  }
+
+  body.is-printing > :not(#printArea) {
+    display: none !important;
+  }
+
+  body.is-printing #printArea {
+    display: block;
+  }
+
+  #printArea,
+  #printArea * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-title {
+    margin: 0 0 3mm;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .print-map {
+    display: block;
+    width: 100%;
+  }
+
+  .print-map .print-scale {
+    stroke: var(--text);
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+  }
+
+  #printArea .gantt-scroll {
+    overflow: visible;
+  }
+
+  #printArea .gantt-row {
+    break-inside: avoid;
+    cursor: default;
+  }
+
+  #printArea .gantt-name {
+    position: static;
+  }
+
+  #printArea .gantt-legend {
+    break-inside: avoid;
+  }
+}
