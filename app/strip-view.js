@@ -11,9 +11,12 @@ const escapeHtml = (text) =>
   String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const BOX_TOP = 8;
-const BOX_HEIGHT = 52;
-const DIM_TOP = 66;
-const COLUMN_TOP = 88;
+const BOX_HEIGHT = 84; // 畝の名前、株の印（〇）、条間と株間の文字が入る高さ
+const DIM_TOP = BOX_TOP + BOX_HEIGHT + 6;
+const COLUMN_TOP = DIM_TOP + 22;
+const PLANT_ROWS_TOP = 26; // 株の印の 1 段目（畝の上の端から）
+const PLANT_STEP = 14; // 株の印の、段の間（株間は実寸ではなく、この間隔で 2 株ぶんを描く）
+const MIN_ROW_PX = 9; // 条の印どうしを、これより近づけない
 const MIN_BED_PX = 112; // いちばん細い畝でも、下に作業の文字が入る幅にする
 const MAX_PX_PER_M = 240;
 const MIN_WIDTH_M = 0.1;
@@ -65,6 +68,30 @@ function numbersLine(bed, planting) {
     parts.push(`${escapeHtml(fertilizer.name)} ${numbers.fertilizerKg.toFixed(2)} kg`);
   }
   return parts.length ? `<p class="strip-numbers">${parts.join("<br>")}</p>` : "";
+}
+
+// 畝の中に、株の並び方の見本を描く（圃場計画の資料と同じく、〇を条の数 × 2 株ぶん）。
+// 条は実寸の条間で横に並べ、株間は印の段の間で表す。千鳥なら、1 つおきの条を半分ずらす。
+// 下に「条間」「株間」を cm で書く。品目に条数がなければ描かない
+function plantMarks(crop, widthPx, heightPx) {
+  const rows = crop?.row_count;
+  if (!(rows >= 1) || heightPx < BOX_HEIGHT - 1) {
+    return "";
+  }
+  const gapPx = Math.max(((crop.row_gap_cm || 0) / 100) * view.scale, MIN_ROW_PX);
+  const marks = [];
+  for (let i = 0; i < rows; i += 1) {
+    const left = widthPx / 2 + (i - (rows - 1) / 2) * gapPx;
+    const shift = crop.staggered && i % 2 ? PLANT_STEP / 2 : 0;
+    for (const step of [0, 1]) {
+      marks.push(`<span class="strip-plant" style="left:${left}px;top:${PLANT_ROWS_TOP + shift + step * PLANT_STEP}px"></span>`);
+    }
+  }
+  const lines = [
+    rows > 1 && crop.row_gap_cm ? `条間${crop.row_gap_cm}cm` : `${rows}条`,
+    crop.plant_gap_cm ? `株間${crop.plant_gap_cm}cm${crop.staggered ? "（千鳥）" : ""}` : "",
+  ].filter(Boolean);
+  return marks.join("") + `<span class="strip-spacing">${lines.join("<br>")}</span>`;
 }
 
 // 畝の並ぶ向き（畝の長い辺に直角な向き）の軸を決め、畝を左から順の「列」にまとめる。
@@ -158,13 +185,16 @@ export function renderStrip() {
     strip.beds.forEach((bed, row) => {
       const plantings = state.plantings.filter((planting) => planting.bed_id === bed.id).sort(bySeq);
       const names = plantings.map((planting) => planting.crop_name).filter(Boolean);
-      const current = ctx.plantingOn(bed)?.crop_name;
+      const shown = ctx.plantingOn(bed);
+      const current = shown?.crop_name;
       const height = BOX_HEIGHT / strip.beds.length;
+      const marks = plantMarks(state.crops.find((crop) => crop.id === shown?.crop_id), width, height);
       boxes.push(
-        `<div class="strip-bed${sel.target === bed.id ? " is-selected" : ""}" data-bed="${bed.id}" ` +
+        `<div class="strip-bed${sel.target === bed.id ? " is-selected" : ""}${marks ? " has-plants" : ""}" data-bed="${bed.id}" ` +
           `style="left:${x(strip.min)}px;width:${width}px;top:${BOX_TOP + row * height}px;height:${height}px;` +
           `background:${current ? ctx.cropColor(current) : "#8a5a2b"}">` +
           `<span class="strip-bed-label">${bed.seq}${names.length ? ` ${escapeHtml(names.join(" → "))}` : ""}</span>` +
+          marks +
           (editable ? '<span class="strip-handle min" data-edge="min"></span><span class="strip-handle max" data-edge="max"></span>' : "") +
           `</div>`
       );

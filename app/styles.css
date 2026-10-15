@@ -1031,6 +1031,34 @@ h3 {
   pointer-events: none;
 }
 
+/* 株の並び方の見本がある畝は、名前を上に寄せる */
+.strip-bed.has-plants {
+  align-items: flex-start;
+  padding-top: 4px;
+}
+
+.strip-plant {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  transform: translateX(-50%);
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.strip-spacing {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  font-size: 10px;
+  line-height: 12px;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .strip-handle {
   position: absolute;
   top: 0;
