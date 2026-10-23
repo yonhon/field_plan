@@ -69,6 +69,16 @@ export function boundingBox(points) {
   return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
 }
 
+// 下絵の縮尺と向きを合わせ直すと、図形にも同じ倍率と回転がかかる。
+// later（あとから読み込んだ下絵）でかかった分を打ち消す倍率と回転を求める。
+// どの下絵も、読み込んだときは仮の縮尺 start（1 画素が何メートルか）と向き 0 から始まる
+export function backdropUndo(later, start) {
+  return later.reduce(
+    (undo, backdrop) => ({ factor: (undo.factor * start) / backdrop.m_per_px, degrees: undo.degrees - backdrop.rotation_deg }),
+    { factor: 1, degrees: 0 }
+  );
+}
+
 // 下絵の画素を圃場の座標に直す。rotation_deg は、画像の上が北から時計回りに何度ずれているか
 export function imageToWorld(backdrop, pixel) {
   const dx = (pixel[0] - backdrop.origin_px[0]) * backdrop.m_per_px;

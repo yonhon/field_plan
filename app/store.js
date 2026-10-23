@@ -44,6 +44,13 @@ export function createSupabaseStore(client) {
     async saveBackdrop(backdrop) {
       check(await client.from("backdrops").upsert(backdrop));
     },
+    // 読み込んだ下絵の記録。新しい順
+    async listBackdrops(fieldId) {
+      return check(await client.from("backdrops").select("*").eq("field_id", fieldId).order("created_at", { ascending: false }));
+    },
+    async removeBackdrops(ids) {
+      check(await client.from("backdrops").delete().in("id", ids));
+    },
     async uploadImage(fieldId, file) {
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${fieldId}/${crypto.randomUUID()}.${ext}`;
@@ -152,6 +159,11 @@ export function createLocalStore() {
         data.backdrop = backdrop;
       });
     },
+    // ローカルでは、いまの下絵しか持たない
+    async listBackdrops() {
+      return read().backdrop ? [read().backdrop] : [];
+    },
+    async removeBackdrops() {},
     async uploadImage(fieldId, file) {
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();

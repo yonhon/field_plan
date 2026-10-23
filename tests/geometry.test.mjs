@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  backdropUndo,
   bedAngle,
   viewAxes,
   centroid,
@@ -197,4 +198,11 @@ test("viewAxes: 決めていないときは、南と西から見る", () => {
 test("bedAngle: 長い辺の向き", () => {
   const angle = bedAngle([[0, 0], [1, 0], [1, 10], [0, 10]]);
   assert.ok(Math.abs(Math.abs(Math.sin(angle)) - 1) < 1e-9);
+});
+
+test("backdropUndo は、あとから読み込んだ下絵で図形にかかった倍率と回転を打ち消す", () => {
+  assert.deepEqual(backdropUndo([], 0.1), { factor: 1, degrees: 0 });
+  const undo = backdropUndo([{ m_per_px: 0.05, rotation_deg: 3 }, { m_per_px: 0.4, rotation_deg: -1 }], 0.1);
+  assert.ok(Math.abs(undo.factor - 0.5) < 1e-12);
+  assert.equal(undo.degrees, -2);
 });
