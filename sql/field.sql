@@ -210,14 +210,6 @@ create table if not exists field.changes (
 
 create index if not exists changes_day_idx on field.changes (field_id, day);
 
--- 日ごとのメモ（圃場ごと）。開発日誌のメモは、すべての圃場で共通の dev_notes に移した。この表は使わないが、消さずに残す
-create table if not exists field.day_notes (
-  field_id uuid not null references field.fields (id) on delete cascade,
-  day date not null,
-  body text not null default '',
-  primary key (field_id, day)
-);
-
 -- 開発日誌のメモ。日ごとに 1 つ、なぜそうしたかを手で書く。アプリの開発日誌なので、すべての圃場で共通
 create table if not exists field.dev_notes (
   day date primary key,
@@ -225,10 +217,8 @@ create table if not exists field.dev_notes (
   updated_at timestamptz not null default now()
 );
 
--- 圃場ごとだったころのメモを写す（圃場が 1 つだったころの分なので、日はぶつからない）
-insert into field.dev_notes (day, body)
-select day, body from field.day_notes
-on conflict (day) do nothing;
+-- 圃場ごとだったころのメモの表。中身を dev_notes に写したあと、2026-10-24 に消した
+drop table if exists field.day_notes;
 
 -- MCP サーバー（field-mcp）への呼び出しの記録。合言葉が違う呼び出しも残るので、URL が漏れていないかを確かめられる。
 -- 画面からは読み書きしない（許可を作らない）
@@ -332,7 +322,7 @@ declare
 begin
   foreach t in array array[
     'fields', 'backdrops', 'plans', 'zones', 'blocks', 'work_types',
-    'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'day_notes', 'dev_notes'
+    'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'dev_notes'
   ] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists owner_all on field.%I', t);
