@@ -1,6 +1,7 @@
 // データの読み書き。通常は Supabase の field スキーマ。
 // URL に ?local=1 を付けると、DB を使わずにこのブラウザーの中だけに保存する（動作確認用）。
 import { DEFAULT_WORK_TYPES } from "./schedule.js";
+import { uploadWithProgress } from "./upload.js";
 
 const BUCKET = "field-plan";
 const LOCAL_KEY = "field_plan_local";
@@ -15,7 +16,8 @@ const PLAN_TABLES = {
   works: { order: "seq", children: [] },
 };
 
-export function createSupabaseStore(client) {
+// options: { url, anonKey }。画像を、進み具合を知らせながら上げるのに使う
+export function createSupabaseStore(client, options) {
   const check = ({ data, error }) => {
     if (error) {
       throw error;
@@ -43,11 +45,34 @@ export function createSupabaseStore(client) {
     async saveBackdrop(backdrop) {
       check(await client.from("backdrops").upsert(backdrop));
     },
-    async uploadImage(fieldId, file) {
+    // onProgress(送った量, 全体の量) で、進み具合を知らせる
+    async uploadImage(fieldId, file, onProgress) {
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
       const path = `${fieldId}/${crypto.randomUUID()}.${ext}`;
-      check(await client.storage.from(BUCKET).upload(path, file, { contentType: file.type }));
+      const { data } = await client.auth.getSession();
+      await uploadWithProgress({
+        url: `${options.url}/storage/v1/object/${BUCKET}/${path}`,
+        headers: {
+          apikey: options.anonKey,
+          authorization: `Bearer ${data.session?.access_token ?? options.anonKey}`,
+          "content-type": file.type || "application/octet-stream",
+          "x-upsert": "false",
+        },
+        body: file,
+        onProgress,
+      });
       return path;
+    },
+    // 圃場を消す。下絵・プランと、その中の区域・区画・畝・日程は DB の側で一緒に消える。
+    // 開発日誌の記録は残る。下絵の画像は、消せなかったものの数を返す（圃場の削除は取り消さない）
+    async deleteField(id) {
+      const paths = check(await client.from("backdrops").select("storage_path").eq("field_id", id)).map((row) => row.storage_path);
+      check(await client.from("fields").delete().eq("id", id));
+      if (!paths.length) {
+        return 0;
+      }
+      const { data, error } = await client.storage.from(BUCKET).remove(paths);
+      return error ? paths.length : paths.length - (data?.length ?? 0);
     },
     async imageUrl(path) {
       return check(await client.storage.from(BUCKET).createSignedUrl(path, 3600)).signedUrl;
@@ -161,6 +186,19 @@ export function createLocalStore() {
     },
     async loadBackdrop(fieldId) {
       return read().backdrops?.[fieldId] || null;
+    },
+    async deleteField(id) {
+      update((data) => {
+        const plans = (data.plans || []).filter((plan) => plan.field_id === id).map((plan) => plan.id);
+        data.fields = data.fields.filter((field) => field.id !== id);
+        data.plans = (data.plans || []).filter((plan) => plan.field_id !== id);
+        for (const table of Object.keys(PLAN_TABLES)) {
+          data[table] = (data[table] || []).filter((row) => !plans.includes(row.plan_id));
+        }
+        delete data.backdrops?.[id];
+        delete data.images?.[id];
+      });
+      return 0;
     },
     async saveBackdrop(backdrop) {
       update((data) => {

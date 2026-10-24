@@ -35,7 +35,7 @@ import {
 import { initCrops, renderCrops } from "./crops-view.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
-import { initJournal, record, renderJournal } from "./journal.js";
+import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule } from "./schedule-view.js";
@@ -1765,7 +1765,35 @@ function newField() {
     const field = await state.store.createField({ name });
     state.fields.push(field);
     await openField(field);
-    record({ kind: "field.add", plan: false, text: `圃場「${field.name}」を作成` });
+    record({ kind: "field.add", plan: false, target: ["field", field.id], text: `圃場「${field.name}」を作成` });
+  });
+}
+
+// 圃場を消す。確認の窓に名前を出した圃場だけを消し、残った圃場の先頭を開く
+async function deleteField() {
+  const field = state.field;
+  if (state.planBusy || state.fields.length <= 1 || $("fieldSelect").value !== field.id) {
+    return;
+  }
+  const ok = await confirmDelete(
+    `この圃場を削除します。外形、下絵、プラン ${state.plans.length} つ（区域、区画、畝、日程）がすべて消えます。開発日誌の記録とメモは残ります。`,
+    `圃場「${field.name}」`
+  );
+  if (!ok || state.field.id !== field.id) {
+    return;
+  }
+  planTask(async () => {
+    // 消す圃場の図形の保存は、もう要らない。記録は、圃場があるうちに保存しておく
+    clearTimeout(saveTimer);
+    pendingSaves.clear();
+    await saveJournalNow();
+    const imagesLeft = await state.store.deleteField(field.id);
+    state.fields = state.fields.filter((item) => item.id !== field.id);
+    await openField(state.fields[0]);
+    record({ kind: "field.delete", plan: false, target: ["field", field.id], text: `圃場「${field.name}」を削除` });
+    if (imagesLeft) {
+      notify(`圃場は消しましたが、下絵の画像 ${imagesLeft} 枚を、画像の置き場から消せませんでした。`);
+    }
   });
 }
 
@@ -1779,10 +1807,11 @@ function renderPlans() {
   renderPlanButtons();
 }
 
-const PLAN_CONTROLS = ["fieldSelect", "newFieldBtn", "planSelect", "newPlanBtn", "copyPlanBtn", "renamePlanBtn", "deletePlanBtn"];
+const PLAN_CONTROLS = ["fieldSelect", "newFieldBtn", "deleteFieldBtn", "planSelect", "newPlanBtn", "copyPlanBtn", "renamePlanBtn", "deletePlanBtn"];
 
 function renderPlanButtons() {
   PLAN_CONTROLS.forEach((id) => ($(id).disabled = state.planBusy));
+  $("deleteFieldBtn").disabled = state.planBusy || state.fields.length <= 1;
   $("deletePlanBtn").disabled = state.planBusy || state.plans.length <= 1;
   document.body.classList.toggle("plan-busy", state.planBusy);
 }
@@ -1847,7 +1876,7 @@ function newPlan() {
   planTask(async () => {
     const plan = await state.store.createPlan({ field_id: state.field.id, name });
     state.plans.push(plan);
-    record({ kind: "plan.add", plan, text: `プラン「${plan.name}」を作成` });
+    record({ kind: "plan.add", plan, target: ["plan", plan.id], text: `プラン「${plan.name}」を作成` });
     await openPlan(plan);
   });
 }
@@ -1861,7 +1890,7 @@ function renamePlan() {
     await state.store.renamePlan(state.plan.id, name);
     const was = state.plan.name;
     state.plan.name = name;
-    record({ kind: "plan.name", text: "プランの名前を変更", before: was, after: name });
+    record({ kind: "plan.name", target: ["plan", state.plan.id], text: "プランの名前を変更", before: was, after: name });
     renderPlans();
   });
 }
@@ -1894,7 +1923,7 @@ function copyPlan() {
       });
       await state.store.upsert(table, rows);
     }
-    record({ kind: "plan.copy", plan, text: `プラン「${state.plan.name}」をコピーして、プラン「${plan.name}」を作成` });
+    record({ kind: "plan.copy", plan, target: ["plan", plan.id], text: `プラン「${state.plan.name}」をコピーして、プラン「${plan.name}」を作成` });
     state.plans.push(plan);
     await openPlan(plan);
   });
@@ -1913,7 +1942,7 @@ async function deletePlan() {
   planTask(async () => {
     clearTimeout(saveTimer);
     [...pendingSaves].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
-    record({ kind: "plan.delete", plan: false, text: `プラン「${plan.name}」を削除` });
+    record({ kind: "plan.delete", plan: false, target: ["plan", plan.id], text: `プラン「${plan.name}」を削除` });
     await state.store.deletePlan(plan.id);
     state.plans = state.plans.filter((item) => item.id !== plan.id);
     await openPlan(state.plans[0]);
@@ -1968,9 +1997,12 @@ async function loadBackdropFile(file) {
       fitted: await fieldHasShapes(),
     };
   }
-  $("saveStatus").textContent = "画像を保存中…";
+  const mb = (bytes) => (bytes / 1024 / 1024).toFixed(1);
+  $("saveStatus").textContent = `画像を保存中…（${mb(file.size)} MB）`;
   try {
-    const path = await state.store.uploadImage(state.field.id, file);
+    const path = await state.store.uploadImage(state.field.id, file, (loaded, total) => {
+      $("saveStatus").textContent = `画像を保存中… ${Math.floor((loaded / (total || 1)) * 100)}%（${mb(loaded)} / ${mb(total)} MB）`;
+    });
     const url = await state.store.imageUrl(path);
     state.backdrop = { id: crypto.randomUUID(), field_id: state.field.id, storage_path: path, ...placement, size };
     state.backdropUrl = url;
@@ -2255,6 +2287,7 @@ $("fieldSelect").addEventListener("change", (event) => {
   planTask(() => openField(state.fields.find((field) => field.id === event.target.value)));
 });
 $("newFieldBtn").addEventListener("click", newField);
+$("deleteFieldBtn").addEventListener("click", deleteField);
 $("planSelect").addEventListener("change", (event) => {
   planTask(() => openPlan(state.plans.find((plan) => plan.id === event.target.value)));
 });
@@ -2396,10 +2429,38 @@ document.querySelectorAll(".tab-btn").forEach((button) => {
 });
 
 // 記録の行をクリックしたときに、その相手を開く。もうないものは開けない
+function openPlace(entry) {
+  const fieldId = entry.target_kind === "field" ? entry.target_id : entry.field_id;
+  const field = state.fields.find((item) => item.id === fieldId);
+  if (!field) {
+    $("saveStatus").textContent = "この圃場は、もうありません。";
+    return;
+  }
+  showView("map");
+  planTask(async () => {
+    if (field.id !== state.field.id) {
+      await openField(field);
+    }
+    if (entry.target_kind === "plan") {
+      const plan = state.plans.find((item) => item.id === entry.target_id);
+      if (!plan) {
+        notify("このプランは、もうありません。");
+      } else if (plan.id !== state.plan.id) {
+        await openPlan(plan);
+      }
+    }
+  });
+}
+
 function openTarget(entry) {
   const status = (text) => {
     $("saveStatus").textContent = text;
   };
+  // 圃場やプランの作成・削除などの行: その圃場とプランを開く（ほかの圃場のものでも）
+  if (entry.target_kind === "plan" || entry.target_kind === "field") {
+    openPlace(entry);
+    return;
+  }
   if (entry.field_id !== state.field.id) {
     const field = state.fields.find((item) => item.id === entry.field_id);
     status(`圃場「${field?.name || "（もうない圃場）"}」での変更です。圃場を切り替えると開けます。`);
@@ -2536,7 +2597,7 @@ async function main() {
   }
 
   state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, { db: { schema: "field" } });
-  state.store = createSupabaseStore(state.client);
+  state.store = createSupabaseStore(state.client, { url: config.supabaseUrl, anonKey: config.supabaseAnonKey });
 
   $("loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();

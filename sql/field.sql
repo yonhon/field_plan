@@ -208,6 +208,12 @@ create table if not exists field.changes (
   after text
 );
 
+-- 圃場を消しても、開発日誌の記録は残す（圃場の欄が空になる）
+alter table field.changes alter column field_id drop not null;
+alter table field.changes drop constraint if exists changes_field_id_fkey;
+alter table field.changes add constraint changes_field_id_fkey
+  foreign key (field_id) references field.fields (id) on delete set null;
+
 create index if not exists changes_day_idx on field.changes (field_id, day);
 
 -- 開発日誌のメモ。日ごとに 1 つ、なぜそうしたかを手で書く。アプリの開発日誌なので、すべての圃場で共通

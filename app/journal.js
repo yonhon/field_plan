@@ -100,6 +100,15 @@ async function flush() {
   }
 }
 
+// まだ保存していない記録を、いま保存する（圃場を消す前など。消したあとでは、その圃場の記録を保存できない）
+export async function saveJournalNow() {
+  clearTimeout(saveTimer);
+  while (saving) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await flush();
+}
+
 // ---- 「記録」の画面 ----
 
 function dayTitle(iso) {
