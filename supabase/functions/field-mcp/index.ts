@@ -4,11 +4,14 @@
 // SUPABASE_DB_URL は Edge Functions の実行環境に自動で設定される。
 // 画面と同じ計算をするために、lib/ に app/ の部品の写しを置いている（scripts/sync-mcp-lib.mjs で写す）。
 import postgres from "npm:postgres@3.4.5";
-import { createDataSource } from "./data.js";
+import { createDataSource, loadUpdates } from "./data.js";
 import { createMcpHandler } from "./mcp.js";
 import updates from "./lib/updates.json" with { type: "json" };
 
 const sql = postgres(Deno.env.get("SUPABASE_DB_URL") ?? "", { max: 1, prepare: false });
+
+// アプリの更新の一覧は、GitHub Pages で公開しているアプリのものを読む（app/ がサイトの一番上）
+const UPDATES_URL = Deno.env.get("FIELD_UPDATES_URL") ?? "https://yonhon.github.io/field_plan/updates.json";
 
 // 表を、行ごとの JSON にして読む。日付は "YYYY-MM-DD"、数は数、図形は配列で届く
 const rows = async (table: string, order: string) =>
@@ -29,7 +32,7 @@ const source = createDataSource({
       fertilizers: await rows("fertilizers", "name"),
       changes: await rows("changes", "no desc"),
       notes: await rows("dev_notes", "day desc"),
-      updates,
+      updates: await loadUpdates({ url: UPDATES_URL, bundled: updates }),
     };
   },
 });

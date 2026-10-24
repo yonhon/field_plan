@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP, LIB, SHARED } from "../scripts/sync-mcp-lib.mjs";
-import { createDataSource } from "../supabase/functions/field-mcp/data.js";
+import { createDataSource, loadUpdates } from "../supabase/functions/field-mcp/data.js";
 import { createMcpHandler } from "../supabase/functions/field-mcp/mcp.js";
 
 const TOKEN = "t".repeat(40);
@@ -252,4 +252,22 @@ test("データは短いあいだだけ覚えておく", async () => {
   clock = 31_000;
   await source.getData();
   assert.equal(reads, 2);
+});
+
+test("アプリの更新の一覧は、公開しているものを読む。読めなければ、配備したときの写し", async () => {
+  const bundled = [{ no: 1, date: "2026-10-11", title: "古い写し" }];
+  const published = [...bundled, { no: 2, date: "2026-10-24", title: "公開した新しい項目" }];
+  const respond = (status, body) => async () => ({ ok: status === 200, status, json: async () => body });
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    assert.deepEqual(await loadUpdates({ url: "u", bundled, fetch: respond(200, published) }), published);
+    // 読めない、形が違う、写しより短い（古いものがためてあった）ときは写し
+    assert.equal(await loadUpdates({ url: "u", bundled, fetch: respond(404, null) }), bundled);
+    assert.equal(await loadUpdates({ url: "u", bundled, fetch: async () => { throw new Error("offline"); } }), bundled);
+    assert.equal(await loadUpdates({ url: "u", bundled, fetch: respond(200, { not: "list" }) }), bundled);
+    assert.equal(await loadUpdates({ url: "u", bundled: published, fetch: respond(200, bundled) }), published);
+  } finally {
+    console.error = quiet;
+  }
 });

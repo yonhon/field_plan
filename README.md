@@ -397,6 +397,8 @@ bun x supabase functions deploy field-mcp --project-ref byhthaiwbutqstrqbwwc --n
 
 写しが古いままだと、テストが失敗します。
 
+アプリの更新の一覧（`updates.json`）だけは、サーバーが呼ばれるたびに、公開しているアプリ（`https://yonhon.github.io/field_plan/updates.json`）から読みます。そのため、一覧を足したときは、アプリを公開するだけで Claude.ai にも届きます（GitHub Pages が最大 10 分ためておくので、少し遅れることがあります）。読めないときや、公開しているものが配備したときの写しより短いときは、写しを使います。
+
 ## 11. 手元での確認
 
 ```
