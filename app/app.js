@@ -1053,56 +1053,6 @@ function scaleByArea() {
   }
 }
 
-// 前に読み込んだ下絵と、その縮尺と向きに戻す。あとから読み込んだ下絵で合わせ直した分は、
-// 図形にもかかっているので打ち消し、その下絵の記録は消す（画像のファイルは残る）
-async function restoreBackdrop() {
-  const all = await state.store.listBackdrops(state.field.id);
-  if (all.length < 2) {
-    notify("戻せる前の下絵がありません。");
-    return;
-  }
-  const lines = all.slice(1).map(
-    (backdrop, i) =>
-      `${i + 1}: ${new Date(backdrop.created_at).toLocaleString("ja-JP")} に読み込み` +
-      `（1 画素 = ${(backdrop.m_per_px * 100).toFixed(2)} cm、向き ${backdrop.rotation_deg} 度）`
-  );
-  const answer = askNumber(`どの下絵に戻しますか。番号を入れてください。\n${lines.join("\n")}`, "1");
-  if (answer === null) {
-    return;
-  }
-  if (!Number.isInteger(answer) || answer >= all.length) {
-    notify(`1 から ${all.length - 1} までの番号を入れてください。`);
-    return;
-  }
-  const target = all[answer];
-  const later = all.slice(0, answer);
-  const { factor, degrees } = backdropUndo(later, config.defaultMetersPerPixel);
-  if (!confirm(`図形の大きさを ${factor.toFixed(4)} 倍、向きを ${(-degrees).toFixed(1)} 度戻して、その下絵に戻します。あとから読み込んだ ${later.length} 枚の下絵の記録は消えます。`)) {
-    return;
-  }
-  $("saveStatus").textContent = "保存中…";
-  try {
-    const url = await state.store.imageUrl(target.storage_path);
-    const size = await imageSize(url).catch(() => null);
-    pendingSaves.delete("backdrop");
-    await state.store.removeBackdrops(later.map((backdrop) => backdrop.id));
-    state.backdrop = { ...target, size };
-    state.backdropUrl = url;
-    if (state.field.view_dirs) {
-      state.field.view_dirs = state.field.view_dirs.map((direction) => direction - degrees);
-    }
-    await transformShapes((points) => rotatePoints(scalePoints(points, factor), degrees));
-    await flushSaves();
-  } catch (error) {
-    $("saveStatus").textContent = `保存に失敗しました: ${error.message}`;
-    return;
-  }
-  resetHistory();
-  record({ kind: "field.backdrop", plan: false, text: "前の下絵に戻した（すべての図形の大きさと向きが戻る）" });
-  fitView();
-  render();
-}
-
 function setRotation(degrees) {
   const delta = degrees - state.backdrop.rotation_deg;
   state.backdrop.rotation_deg = degrees;
@@ -1997,7 +1947,6 @@ $("fitBtn").addEventListener("click", () => {
   renderMap();
 });
 $("scaleByAreaBtn").addEventListener("click", scaleByArea);
-$("restoreBackdropBtn").addEventListener("click", restoreBackdrop);
 $("planSelect").addEventListener("change", (event) => {
   persist(() => openPlan(state.plans.find((plan) => plan.id === event.target.value)));
 });
