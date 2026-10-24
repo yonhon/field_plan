@@ -1558,10 +1558,13 @@ function renderPlans() {
 }
 
 async function loadPlanData(plan) {
-  state.plan = plan;
+  const loaded = {};
   for (const table of ["zones", "blocks", "beds", "plantings", "works"]) {
-    state[table] = await state.store.list(table, plan.id);
+    loaded[table] = await state.store.list(table, plan.id);
   }
+  // 読み終えてから、プランと中身を一度に入れ替える。読み込みの途中で「元に戻す」の写しを取られると、
+  // 新しいプランに前のプランの中身（空のことがある）が付いた写しができ、それに戻すと中身が消える
+  Object.assign(state, { plan }, loaded);
   // 畝の番号を、決まりどおり（左から順、なくした畝の番号は欠番）に揃える。
   // 番号を詰め直す仕組みを入れる前に削除した畝の跡も、ここで詰まる
   state.blocks.forEach((block) => renumberBlock(block.id));
@@ -1582,6 +1585,7 @@ async function openPlan(plan) {
   renderPlans();
   render();
   renderSchedule();
+  resetHistory(); // 前のプランの履歴は使えない。開き終えた状態から数え直す
 }
 
 function askPlanName(message, initial) {

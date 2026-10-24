@@ -60,7 +60,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `app/store.js` | データの読み書き |
 | `supabase/functions/field-mcp/` | 計画を Claude.ai から読むための MCP サーバー（Supabase Edge Function） |
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
-| `tests/` | 図形、日程、苗数と施肥量の計算と、MCP サーバーのテスト |
+| `tests/` | 図形、日程、苗数と施肥量の計算、元に戻すと、MCP サーバーのテスト |
 | `data/` | 下絵の画像など、圃場ごとの資料。**Git の対象外** |
 
 画面のコードは公開されますが、データはログインした本人しか読めません。

@@ -2,6 +2,7 @@
 // 操作ごとに逆の手順を書くのではなく、操作の前後で計画のデータの写しを取っておき、戻すときはその写しに合わせる。
 // 対象は、いまのプランの区域・区画・畝・作付・作業と、圃場の外形、品目、肥料、作業の種類の目安。
 // プランの切り替え・作成・削除と、縮尺・向きの合わせ直しは対象外で、行うと履歴が空になる。
+// 戻すと多くの行が消えるときは、先に確かめる。
 import { record } from "./journal.js";
 
 const $ = (id) => document.getElementById(id);
@@ -123,6 +124,30 @@ async function restore(text) {
   }
 }
 
+// 写しに合わせたときに消える行の数。表ごとに、消える行のある表だけを返す
+export function removedRows(currentText, targetText) {
+  const current = JSON.parse(currentText);
+  const target = JSON.parse(targetText);
+  const removed = {};
+  for (const table of [...SHARED_TABLES, ...PLAN_TABLES]) {
+    const kept = new Set(target[table].map((row) => row.id));
+    const count = current[table].filter((row) => !kept.has(row.id)).length;
+    if (count) {
+      removed[table] = count;
+    }
+  }
+  return removed;
+}
+
+// 先に確かめてから消す行。区域・区画・品目・肥料は 1 件でも、畝・作付・作業はふだんの 1 回ぶん
+// （畝 1 本、作付 1 つとその作業）より多いとき
+const CONFIRM_FROM = { zones: 1, blocks: 1, crops: 1, fertilizers: 1, beds: 2, plantings: 2, works: 11 };
+const TABLE_NAMES = { zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", crops: "品目", fertilizers: "肥料" };
+
+export function needsConfirm(removed) {
+  return Object.entries(removed).some(([table, count]) => count >= CONFIRM_FROM[table]);
+}
+
 async function step(from, to, label) {
   if (busy || !from.length) {
     return;
@@ -133,7 +158,23 @@ async function step(from, to, label) {
   try {
     await ctx.flush(); // まだ送っていない保存を先に済ませる
     const current = snapshot();
-    const target = from.pop();
+    const target = from[from.length - 1];
+    // 別のプランの写しには戻さない（そのプランの中身を消してしまう）
+    if (planOf(target) !== planOf(current)) {
+      from.length = 0;
+      throw new Error("別のプランの記録なので、戻しません");
+    }
+    const removed = removedRows(current, target);
+    if (needsConfirm(removed)) {
+      const list = Object.entries(removed).map(([table, count]) => `${TABLE_NAMES[table]} ${count} 件`).join("、");
+      if (!confirm(`${label}すと、${list}が消えます。よろしいですか？`)) {
+        ctx.setStatus(`${label}すのをやめました`);
+        busy = false;
+        renderButtons();
+        return;
+      }
+    }
+    from.pop();
     to.push(current);
     await restore(target);
     last = snapshot();
