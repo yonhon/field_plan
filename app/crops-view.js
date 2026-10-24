@@ -1,5 +1,5 @@
 // 「品目」の画面。品目ごとの設定値と、肥料の銘柄を登録する。どちらもすべてのプランで共通。
-import { notify } from "./dialog.js";
+import { confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 
 const $ = (id) => document.getElementById(id);
@@ -154,9 +154,9 @@ export function initCrops(context) {
   ctx = context;
   const { state } = ctx;
 
-  bind("cropTable", "crops", CROP_FIELDS, () => state.crops, (crop) => {
+  bind("cropTable", "crops", CROP_FIELDS, () => state.crops, async (crop) => {
     const used = state.plantings.filter((planting) => planting.crop_id === crop.id);
-    if (!confirm(`品目「${crop.name}」を削除します。${used.length ? `このプランの作付 ${used.length} 件は、名前だけが残ります。` : ""}`)) {
+    if (!(await confirmDelete(`この品目を削除します。${used.length ? `このプランの作付 ${used.length} 件は、名前だけが残ります。` : ""}`, `品目「${crop.name}」`))) {
       return;
     }
     run(async () => {
@@ -169,9 +169,9 @@ export function initCrops(context) {
       state.crops = state.crops.filter((item) => item.id !== crop.id);
     });
   });
-  bind("fertilizerTable", "fertilizers", FERTILIZER_FIELDS, () => state.fertilizers, (fertilizer) => {
+  bind("fertilizerTable", "fertilizers", FERTILIZER_FIELDS, () => state.fertilizers, async (fertilizer) => {
     const used = state.crops.filter((crop) => crop.fertilizer_id === fertilizer.id);
-    if (!confirm(`肥料「${fertilizer.name}」を削除します。${used.length ? `これを使っている品目 ${used.length} 件は、肥料なしになります。` : ""}`)) {
+    if (!(await confirmDelete(`この肥料を削除します。${used.length ? `これを使っている品目 ${used.length} 件は、肥料なしになります。` : ""}`, `肥料「${fertilizer.name}」`))) {
       return;
     }
     run(async () => {

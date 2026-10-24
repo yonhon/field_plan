@@ -938,9 +938,18 @@ async function persist(action) {
 // ---- 操作 ----
 
 function setMode(mode) {
-  if (mode === "outline" && state.field.outline.length >= 3 && !confirm("外形を描き直します。いまの外形は置き換わります。")) {
+  if (mode === "outline" && state.field.outline.length >= 3) {
+    confirmAction({ message: "外形を描き直します。いまの外形は置き換わります。", name: "圃場の外形", action: "描き直す" }).then((ok) => {
+      if (ok) {
+        enterMode(mode);
+      }
+    });
     return;
   }
+  enterMode(mode);
+}
+
+function enterMode(mode) {
   state.mode = mode;
   state.draft = [];
   if (mode !== "select") {
@@ -1294,13 +1303,13 @@ function forgetBlocks(ids) {
   state.blocks = state.blocks.filter((block) => !blocks.has(block.id));
 }
 
-function deleteSelectedShape() {
+async function deleteSelectedShape() {
   if (!state.selected) {
     return;
   }
   const id = state.selected;
   if (id === "outline") {
-    if (confirm("圃場の外形を削除します。")) {
+    if ((await confirmDelete("圃場の外形を削除します。", "圃場の外形")) && state.selected === id) {
       state.field.outline = [];
       queueSave("field");
       record({ kind: "outline.delete", plan: false, text: "圃場の外形を削除" });
@@ -1316,7 +1325,8 @@ function deleteSelectedShape() {
     block: () => `区画「${item.name}」を削除します。${beds.length ? `中の畝 ${beds.length} 本と、` : ""}この区画の日程も消えます。`,
     bed: () => "この畝を、最初からなかったことにします。この畝の作付と日程も消えます。\n収穫のあとで畝をなくすだけなら、「表示日で畝をなくす」を使ってください。",
   }[kind]();
-  if (!confirm(message)) {
+  // 確かめているあいだに、選んだ図形が変わったり消えたりしていたら、何も消さない
+  if (!(await confirmDelete(message, shapeName(id))) || state.selected !== id || !findShape(id)) {
     return;
   }
   record({
@@ -1395,13 +1405,16 @@ function createBlock(zone, shape) {
   return block;
 }
 
-function blockFromZone(point) {
+async function blockFromZone(point) {
   const zone = tillableZoneAt(point);
   if (!zone) {
     notify("有効圃場の中をクリックしてください。");
     return;
   }
-  if (visibleBlocks().some((block) => block.zone_id === zone.id) && !confirm(`${zoneLabel(zone)}には、すでに区画があります。表示日から、全体を 1 つの区画に設定し直しますか。`)) {
+  if (
+    visibleBlocks().some((block) => block.zone_id === zone.id) &&
+    !(await confirmAction({ message: "この有効圃場には、すでに区画があります。表示日から、全体を 1 つの区画に設定し直しますか。", name: zoneLabel(zone), action: "設定し直す" }))
+  ) {
     return;
   }
   const block = createBlock(zone, zone.shape.map((p) => [...p]));
@@ -1656,22 +1669,34 @@ function removeBeds(beds) {
   return removable.length;
 }
 
-function removeBed(id) {
+async function removeBed(id) {
   const bed = state.beds.find((item) => item.id === id);
   const problem = removalProblem(bed);
   if (problem) {
     notify(problem);
     return;
   }
-  if (confirm(`${formatDate(state.viewDate)} に、この畝をなくします。それより前の日を表示すると、畝は残っています。`)) {
+  const ok = await confirmAction({
+    message: `${formatDate(state.viewDate)} に、この畝をなくします。それより前の日を表示すると、畝は残っています。`,
+    name: shapeName(id),
+    action: "畝をなくす",
+  });
+  if (ok && state.beds.includes(bed)) {
     removeBeds([bed]);
     select(null);
   }
 }
 
-function removeBlockBeds(blockId) {
+async function removeBlockBeds(blockId) {
   const beds = visibleBeds().filter((bed) => bed.block_id === blockId);
-  if (!beds.length || !confirm(`${formatDate(state.viewDate)} に、この区画の畝 ${beds.length} 本をなくします。収穫が終わっていない畝は残します。`)) {
+  if (
+    !beds.length ||
+    !(await confirmAction({
+      message: `${formatDate(state.viewDate)} に、この区画の畝をなくします。収穫が終わっていない畝は残します。`,
+      name: `${state.blocks.find((block) => block.id === blockId)?.name || "区画"}の畝 ${beds.length} 本`,
+      action: "畝をなくす",
+    }))
+  ) {
     return;
   }
   const removed = removeBeds(beds);

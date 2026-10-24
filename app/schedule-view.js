@@ -16,7 +16,7 @@ import {
   worksRange,
 } from "./schedule.js";
 import { cropLabel, plantingNumbers, summarize } from "./crops.js";
-import { notify } from "./dialog.js";
+import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
@@ -603,9 +603,12 @@ async function replaceWorks(owner, works) {
   await store().upsert("works", works);
 }
 
-function applyTemplate(blockId) {
+async function applyTemplate(blockId) {
   const owner = { block_id: blockId };
-  if (worksOf(owner).length && !confirm("いまの作業を、ひな形の内容に置き換えます。")) {
+  if (
+    worksOf(owner).length &&
+    !(await confirmAction({ message: "いまの作業を、ひな形の内容に置き換えます。いまの作業は消えます。", name: `${ownerName(owner)}の作業 ${worksOf(owner).length} 件`, action: "置き換える" }))
+  ) {
     return;
   }
   record({ kind: "work.template", target: ["block", blockId], text: `${ownerName(owner)}の作業を、ひな形「${TEMPLATES.block[template.key].label}」から作成` });
@@ -696,9 +699,12 @@ function addPlanting() {
   });
 }
 
-function deletePlanting(id) {
+async function deletePlanting(id) {
   const planting = state().plantings.find((item) => item.id === id);
-  if (!planting || !confirm(`作付 ${planting.seq}${planting.crop_name ? `（${planting.crop_name}）` : ""}と、その作業を削除します。`)) {
+  if (!planting || !(await confirmDelete("この作付と、その作業を削除します。", ownerName({ planting_id: planting.id })))) {
+    return;
+  }
+  if (!state().plantings.includes(planting)) {
     return;
   }
   run(async () => {
@@ -981,9 +987,9 @@ async function transferWorks(works, owner, days, copy) {
   placed.forEach((work) => picked.add(work.id));
 }
 
-function deletePicked() {
+async function deletePicked() {
   const works = pickedWorks();
-  if (!works.length || !confirm(`選んだ作業 ${works.length} 件を削除します。`)) {
+  if (!works.length || !(await confirmDelete("選んだ作業を削除します。", `${ownerName(ownerOf(works[0]))}の作業 ${works.length} 件`))) {
     return;
   }
   run(async () => {
