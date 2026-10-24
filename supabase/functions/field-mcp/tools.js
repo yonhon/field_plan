@@ -1,4 +1,5 @@
 // 計画を返す道具。data は index.ts が DB から読んだもの（表ごとの行の配列と、アプリの更新の一覧）。
+// 圃場はいくつもある。品目と肥料のほかは、どの圃場の話かを毎回 field で選ぶ。
 // 面積、苗数、肥料の量、日程の無理は、画面と同じ部品（lib/）で計算する。
 import { plantingNumbers, summarize, cropLabel } from "./lib/crops.js";
 import { polygonArea, rectSize } from "./lib/geometry.js";
@@ -56,10 +57,37 @@ function scope(data, plan) {
   return part;
 }
 
+// どの圃場の話か。名前（一部でもよい）で選ぶ。省けない
+function pickField(data, name) {
+  const names = data.fields.map((field) => field.name).join("、") || "（なし）";
+  if (name == null || name === "") {
+    throw new ToolInputError(`field で圃場を選んでください。圃場の名前: ${names}`);
+  }
+  const exact = data.fields.find((field) => field.name === name);
+  const partial = data.fields.filter((field) => field.name.includes(String(name)));
+  if (exact || partial.length === 1) {
+    return exact || partial[0];
+  }
+  throw new ToolInputError(`圃場「${name}」は${partial.length ? "複数あります" : "ありません"}。圃場の名前: ${names}`);
+}
+
+// 選んだ圃場のプランと変更の記録だけにする。区域や畝などは、プランで絞る（scope）
+function inField(data, name) {
+  const field = pickField(data, name);
+  return {
+    ...data,
+    field,
+    plans: data.plans.filter((plan) => plan.field_id === field.id),
+    changes: data.changes.filter((entry) => entry.field_id === field.id),
+  };
+}
+
+const fieldArea = (field) => (field.outline?.length >= 3 ? round(polygonArea(field.outline)) : null);
+
 // どのプランの話か。名前（一部でもよい）で選ぶ。省いたときは、最後に変更のあったプラン。それもなければ先頭
 function pickPlan(data, name) {
   if (!data.plans.length) {
-    throw new ToolInputError("プランがまだありません。");
+    throw new ToolInputError("この圃場には、プランがまだありません。");
   }
   if (name != null && name !== "") {
     const exact = data.plans.find((plan) => plan.name === name);
@@ -80,17 +108,38 @@ const workLine = (part, work) => ({
   ...(work.note ? { note: work.note } : {}),
 });
 
-const PLAN_ARG = { plan: { type: "string", description: "プランの名前（一部でもよい）。省くと、最後に変更のあったプラン。" } };
+const FIELD_ARG = { field: { type: "string", description: "圃場の名前（一部でもよい）。list_fields で確かめる。" } };
+const PLAN_ARG = { plan: { type: "string", description: "プランの名前（一部でもよい）。省くと、その圃場で最後に変更のあったプラン。" } };
 
 export const TOOLS = [
   {
-    name: "list_plans",
-    title: "プランの一覧",
-    description: "プランの一覧と、それぞれの規模（有効圃場の面積、区画と畝の数、品目、作業の期間）、最後に変更のあった日を返す。最初に呼ぶ。",
+    name: "list_fields",
+    title: "圃場の一覧",
+    description: "圃場の一覧と、それぞれの面積、プランの名前、最後に変更のあった日を返す。最初に呼ぶ。ほかの道具では、ここで確かめた圃場の名前を field に入れる。",
     inputSchema: { type: "object", properties: {} },
     run(data) {
       return {
-        field: data.field ? { name: data.field.name, area_sqm: data.field.outline?.length >= 3 ? round(polygonArea(data.field.outline)) : null } : null,
+        fields: data.fields.map((field) => {
+          const last = data.changes.find((entry) => entry.field_id === field.id);
+          return {
+            name: field.name,
+            area_sqm: fieldArea(field),
+            plans: data.plans.filter((plan) => plan.field_id === field.id).map((plan) => plan.name),
+            last_change: last ? { date: last.day, no: `#${last.no}` } : null,
+          };
+        }),
+      };
+    },
+  },
+  {
+    name: "list_plans",
+    title: "プランの一覧",
+    description: "1 つの圃場のプランの一覧と、それぞれの規模（有効圃場の面積、区画と畝の数、品目、作業の期間）、最後に変更のあった日を返す。",
+    inputSchema: { type: "object", properties: { ...FIELD_ARG }, required: ["field"] },
+    run(all, args) {
+      const data = inField(all, args.field);
+      return {
+        field: { name: data.field.name, area_sqm: fieldArea(data.field) },
         plans: data.plans.map((plan) => {
           const part = scope(data, plan);
           const range = worksRange(part.works);
@@ -117,9 +166,11 @@ export const TOOLS = [
       "1 つのプランの全体を返す。区域、耕起対象区画（区画の作業を含む）、区画ごとの畝、畝ごとの作付（品目、苗数、肥料の量、作業の日付）、品目ごとの集計、日程の無理の指摘。",
     inputSchema: {
       type: "object",
-      properties: { ...PLAN_ARG, block: { type: "string", description: "区画の名前。指定すると、その区画だけを返す。" } },
+      properties: { ...FIELD_ARG, ...PLAN_ARG, block: { type: "string", description: "区画の名前。指定すると、その区画だけを返す。" } },
+      required: ["field"],
     },
-    run(data, args) {
+    run(all, args) {
+      const data = inField(all, args.field);
       const part = scope(data, pickPlan(data, args.plan));
       const blocks = args.block ? part.blocks.filter((block) => block.name === String(args.block)) : part.blocks;
       if (args.block && !blocks.length) {
@@ -134,6 +185,7 @@ export const TOOLS = [
         return `${part.place({ planting_id: planting.id })} 作付${planting.seq}${planting.crop_name ? `（${planting.crop_name}）` : ""}`;
       };
       return {
+        field: data.field.name,
         plan: part.plan.name,
         other_plans: data.plans.filter((plan) => plan.id !== part.plan.id).map((plan) => plan.name),
         zones: part.zones.map((zone) => ({ name: part.zoneName(zone), kind: ZONE_KINDS[zone.kind], area_sqm: round(polygonArea(zone.shape)) })),
@@ -199,12 +251,15 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
+        ...FIELD_ARG,
         ...PLAN_ARG,
         from: { type: "string", description: "この日以降にかかる作業（YYYY-MM-DD）。" },
         to: { type: "string", description: "この日以前にかかる作業（YYYY-MM-DD）。" },
       },
+      required: ["field"],
     },
-    run(data, args) {
+    run(all, args) {
+      const data = inField(all, args.field);
       const part = scope(data, pickPlan(data, args.plan));
       const from = dateArg(args.from, "from");
       const to = dateArg(args.to, "to");
@@ -219,6 +274,7 @@ export const TOOLS = [
         groups.get(key).places.push(part.place(work));
       }
       return {
+        field: data.field.name,
         plan: part.plan.name,
         from,
         to,
@@ -231,17 +287,20 @@ export const TOOLS = [
     name: "get_changes",
     title: "変更の記録とメモ",
     description:
-      "日ごとの、計画の変更（#番号）、本人が書いたメモ（その日の変更の理由）、アプリの更新（A 番号）を、新しい日から順に返す。計画の変更は、すべてのプランの分を返す。期間を省くと、記録のある最近の 30 日ぶん。",
+      "日ごとの、計画の変更（#番号）、本人が書いたメモ（その日の変更の理由）、アプリの更新（A 番号）を、新しい日から順に返す。計画の変更は、選んだ圃場のすべてのプランの分を返す。メモとアプリの更新は、すべての圃場で共通。期間を省くと、記録のある最近の 30 日ぶん。",
     inputSchema: {
       type: "object",
+      required: ["field"],
       properties: {
+        ...FIELD_ARG,
         from: { type: "string", description: "この日以降（YYYY-MM-DD）。" },
         to: { type: "string", description: "この日以前（YYYY-MM-DD）。" },
         plan: { type: "string", description: "プランの名前（一部でもよい）。指定すると、計画の変更をそのプランの分に絞る。" },
         include_app_updates: { type: "boolean", description: "アプリの更新を含めるか。省くと含める。" },
       },
     },
-    run(data, args) {
+    run(all, args) {
+      const data = inField(all, args.field);
       const from = dateArg(args.from, "from");
       const to = dateArg(args.to, "to");
       const plan = args.plan != null && args.plan !== "" ? pickPlan(data, args.plan) : null;
@@ -254,6 +313,7 @@ export const TOOLS = [
       const total = days.length;
       days = days.slice(0, from || to ? MAX_CHANGE_DAYS : DEFAULT_CHANGE_DAYS);
       return {
+        field: data.field.name,
         days: days.map((day) => ({
           date: day,
           note: notes.find((note) => note.day === day)?.body || "",
@@ -272,14 +332,14 @@ export const TOOLS = [
         })),
         plans_changed: [...new Set(changes.map((entry) => entry.plan_name).filter(Boolean))],
         ...(total > days.length ? { more_days: total - days.length, hint: "from と to で期間を絞ると、残りの日を読めます。" } : {}),
-        note: "plan が「共通」の変更は、品目や縮尺など、どのプランにも効く変更です。",
+        note: "plan が「共通」の変更は、品目や縮尺など、その圃場のどのプランにも効く変更です。品目の変更は、どの圃場にも効きます。メモ（note）はすべての圃場で共通で、ほかの圃場の変更に触れていることがあります。",
       };
     },
   },
   {
     name: "get_crops",
     title: "品目の設定値と肥料",
-    description: "登録してある品目の設定値（畝幅、条数、株間、窒素量、肥料、マルチ、栽培日数）と、肥料の銘柄と成分を返す。空の項目は、まだ決めていない値。",
+    description: "登録してある品目の設定値（畝幅、条数、株間、窒素量、肥料、マルチ、栽培日数）と、肥料の銘柄と成分を返す。品目と肥料は、すべての圃場で共通。空の項目は、まだ決めていない値。plantings_in_all_plans は、すべての圃場のすべてのプランでの作付の数。",
     inputSchema: { type: "object", properties: {} },
     run(data) {
       const used = (crop) => data.plantings.filter((planting) => planting.crop_id === crop.id).length;

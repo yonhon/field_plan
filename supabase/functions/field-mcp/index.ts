@@ -16,9 +16,8 @@ const rows = async (table: string, order: string) =>
 
 const source = createDataSource({
   query: async () => {
-    const fields = await rows("fields", "created_at");
     return {
-      field: fields[0] ?? null,
+      fields: await rows("fields", "created_at"),
       plans: await rows("plans", "created_at"),
       zones: await rows("zones", "created_at"),
       blocks: await rows("blocks", "created_at"),
@@ -29,7 +28,7 @@ const source = createDataSource({
       crops: await rows("crops", "name"),
       fertilizers: await rows("fertilizers", "name"),
       changes: await rows("changes", "no desc"),
-      notes: await rows("day_notes", "day desc"),
+      notes: await rows("dev_notes", "day desc"),
       updates,
     };
   },

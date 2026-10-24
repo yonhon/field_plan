@@ -24,9 +24,8 @@ export function createSupabaseStore(client) {
   };
 
   return {
-    async loadField() {
-      const rows = check(await client.from("fields").select("*").order("created_at").limit(1));
-      return rows[0] || null;
+    async loadFields() {
+      return check(await client.from("fields").select("*").order("created_at"));
     },
     async createField(field) {
       return check(await client.from("fields").insert(field).select().single());
@@ -86,9 +85,9 @@ export function createSupabaseStore(client) {
     async loadWorkTypes() {
       return check(await client.from("work_types").select("*").order("sort"));
     },
-    // 変更の記録。新しい順に、最近の 1,000 件
-    async listChanges(fieldId) {
-      return check(await client.from("changes").select("*").eq("field_id", fieldId).order("no", { ascending: false }).limit(1000));
+    // 変更の記録。開発日誌なので、すべての圃場の分を、新しい順に最近の 1,000 件
+    async listChanges() {
+      return check(await client.from("changes").select("*").order("no", { ascending: false }).limit(1000));
     },
     // 記録を足す。番号は DB が振るので、それを返す
     async addChange(entry) {
@@ -98,11 +97,12 @@ export function createSupabaseStore(client) {
     async saveChange(entry) {
       check(await client.from("changes").upsert(entry));
     },
-    async listNotes(fieldId) {
-      return check(await client.from("day_notes").select("*").eq("field_id", fieldId));
+    // 開発日誌のメモ。すべての圃場で共通
+    async listNotes() {
+      return check(await client.from("dev_notes").select("day, body"));
     },
-    async saveNote(note) {
-      check(await client.from("day_notes").upsert(note));
+    async saveNote({ day, body }) {
+      check(await client.from("dev_notes").upsert({ day, body, updated_at: new Date().toISOString() }));
     },
     async saveWorkType(type) {
       check(await client.from("work_types").upsert(type));
@@ -118,6 +118,21 @@ export function createLocalStore() {
     change(data);
     write(data);
   };
+  // 圃場を 1 つしか持てなかったころの形を、圃場ごとの形に直す
+  update((data) => {
+    if (data.field) {
+      data.fields = [data.field];
+      if (data.backdrop) {
+        data.backdrops = { [data.field.id]: { ...data.backdrop, storage_path: `local:${data.field.id}` } };
+      }
+      if (data.image) {
+        data.images = { [data.field.id]: data.image };
+      }
+      delete data.field;
+      delete data.backdrop;
+      delete data.image;
+    }
+  });
   const removeRows = (data, table, ids) => {
     if (!ids.length) {
       return;
@@ -129,27 +144,27 @@ export function createLocalStore() {
   };
 
   return {
-    async loadField() {
-      return read().field || null;
+    async loadFields() {
+      return read().fields || [];
     },
     async createField(field) {
-      const created = { id: crypto.randomUUID(), outline: [], note: "", ...field };
+      const created = { id: crypto.randomUUID(), outline: [], note: "", created_at: new Date().toISOString(), ...field };
       update((data) => {
-        data.field = created;
+        data.fields = [...(data.fields || []), created];
       });
       return created;
     },
     async saveField(field) {
       update((data) => {
-        data.field = field;
+        data.fields = data.fields.map((item) => (item.id === field.id ? field : item));
       });
     },
-    async loadBackdrop() {
-      return read().backdrop || null;
+    async loadBackdrop(fieldId) {
+      return read().backdrops?.[fieldId] || null;
     },
     async saveBackdrop(backdrop) {
       update((data) => {
-        data.backdrop = backdrop;
+        data.backdrops = { ...data.backdrops, [backdrop.field_id]: backdrop };
       });
     },
     async uploadImage(fieldId, file) {
@@ -160,15 +175,15 @@ export function createLocalStore() {
         reader.readAsDataURL(file);
       });
       update((data) => {
-        data.image = dataUrl;
+        data.images = { ...data.images, [fieldId]: dataUrl };
       });
-      return "local";
+      return `local:${fieldId}`;
     },
-    async imageUrl() {
-      return read().image || "";
+    async imageUrl(path) {
+      return read().images?.[path.slice("local:".length)] || "";
     },
-    async loadPlans() {
-      return read().plans || [];
+    async loadPlans(fieldId) {
+      return (read().plans || []).filter((plan) => plan.field_id === fieldId);
     },
     async createPlan(plan) {
       const created = { id: crypto.randomUUID(), ...plan };

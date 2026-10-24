@@ -1,6 +1,6 @@
-// 変更の記録と、「記録」の画面。
+// 変更の記録と、「記録」の画面（アプリの開発日誌）。
 // 計画を変えるたびに、何を変えたかを 1 行ずつ残す。記録はプランから独立していて、番号は全体の通し番号。
-// 日ごとに、なぜそうしたかを書くメモを 1 つ持てる。
+// 画面には、すべての圃場の記録を並べる。日ごとに、なぜそうしたかを書くメモを 1 つ持てる（すべての圃場で共通）。
 // アプリそのものの更新（updates.json）も、同じ日の欄に並べる。こちらの番号は A12 のように A を付ける。
 import { localToday } from "./schedule.js";
 
@@ -35,6 +35,7 @@ export function record({ kind, target = [], text, before = null, after = null, p
   const recent = state.changes.find(
     (entry) =>
       entry.kind === kind &&
+      entry.field_id === state.field.id &&
       entry.target_kind === targetKind &&
       entry.target_id === targetId &&
       entry.plan_id === (owner?.id || null) &&
@@ -128,6 +129,9 @@ export function renderJournal() {
   }
   const { state } = ctx;
   const notes = new Map(state.notes.map((note) => [note.day, note.body]));
+  // 圃場が 2 つ以上あるときは、どの圃場の記録かも出す
+  const fieldName = (entry) => state.fields.find((field) => field.id === entry.field_id)?.name || "（もうない圃場）";
+  const where = (entry) => `${state.fields.length > 1 ? `${fieldName(entry)} / ` : ""}${entry.plan_name || "共通"}`;
   // 今日は、変更がなくてもメモを書けるように必ず出す
   const days = [
     ...new Set([
@@ -154,7 +158,7 @@ export function renderJournal() {
                 `<li id="change-${entry.no ?? entry.id}" data-id="${entry.id}">` +
                 `<span class="change-no">${entry.no === null ? "#…" : `#${entry.no}`}</span>` +
                 `<span class="change-time">${clock(entry.at)}</span>` +
-                `<span class="change-plan">${escapeHtml(entry.plan_name || "共通")}</span>` +
+                `<span class="change-plan">${escapeHtml(where(entry))}</span>` +
                 `<span class="change-text">${escapeHtml(changeText(entry))}</span></li>`
             )
             .join("")
@@ -186,8 +190,8 @@ export function renderJournal() {
 export async function initJournal(context) {
   ctx = context;
   const { state } = ctx;
-  state.changes = await state.store.listChanges(state.field.id);
-  state.notes = await state.store.listNotes(state.field.id);
+  state.changes = await state.store.listChanges();
+  state.notes = await state.store.listNotes();
   // アプリの更新の一覧は、読めなくても画面は使える
   updates = await fetch("./updates.json", { cache: "no-cache" })
     .then((response) => (response.ok ? response.json() : []))
@@ -203,11 +207,11 @@ export async function initJournal(context) {
     if (note) {
       note.body = body;
     } else {
-      state.notes.push({ field_id: state.field.id, day, body });
+      state.notes.push({ day, body });
     }
     ctx.setStatus("保存中…");
     state.store
-      .saveNote({ field_id: state.field.id, day, body })
+      .saveNote({ day, body })
       .then(() => ctx.setStatus("保存しました"))
       .catch((error) => ctx.setStatus(`メモを保存できませんでした: ${error.message}`));
     renderJournal();

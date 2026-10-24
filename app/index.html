@@ -107,6 +107,11 @@
 
       <aside class="side">
         <section class="panel">
+          <h2>圃場</h2>
+          <select id="fieldSelect" class="plan-select" aria-label="圃場"></select>
+          <div class="row edit-only">
+            <button id="newFieldBtn" class="text-btn">新しい圃場</button>
+          </div>
           <h2>プラン</h2>
           <select id="planSelect" class="plan-select" aria-label="プラン"></select>
           <div class="row edit-only">
@@ -169,7 +174,7 @@
         </section>
 
         <section class="panel">
-          <h2>圃場</h2>
+          <h2>圃場の名前と面積</h2>
           <label class="edit-only">名前<input id="fieldName" type="text" /></label>
           <dl class="figures">
             <div><dt>圃場の面積</dt><dd id="areaField">-</dd></div>

@@ -14,12 +14,17 @@ const work = (id, owner, type, seq, start, end) => ({
   id, plan_id: "plan1", block_id: null, planting_id: null, ...owner, work_type: type, seq, plan_start: start, plan_end: end, note: "",
 });
 
-// 有効圃場 1 つ、区画 1 つ、畝 2 本。畝 1 は品目を登録した作付、畝 2 は名前だけの作付
+// 圃場 1 に、有効圃場 1 つ、区画 1 つ、畝 2 本。畝 1 は品目を登録した作付、畝 2 は名前だけの作付。
+// 圃場 2 は、空のプランが 1 つだけ
 const DATA = {
-  field: { id: "f1", name: "圃場 1", outline: rect(0, 0, 30, 50) },
+  fields: [
+    { id: "f1", name: "圃場 1", outline: rect(0, 0, 30, 50) },
+    { id: "f2", name: "別の圃場", outline: [] },
+  ],
   plans: [
-    { id: "plan1", name: "案 A", created_at: "2026-10-01" },
-    { id: "plan2", name: "案 B", created_at: "2026-10-02" },
+    { id: "plan1", field_id: "f1", name: "案 A", created_at: "2026-10-01" },
+    { id: "plan2", field_id: "f1", name: "案 B", created_at: "2026-10-02" },
+    { id: "plan3", field_id: "f2", name: "案 C", created_at: "2026-10-03" },
   ],
   zones: [
     { id: "z1", plan_id: "plan1", kind: "tillable", name: "", shape: rect(2, 2, 12, 24) },
@@ -55,11 +60,12 @@ const DATA = {
   ],
   fertilizers: [{ id: "fz1", name: "化成 15", n_pct: 15, p_pct: 15, k_pct: 15 }],
   changes: [
-    { id: "ch3", no: 3, at: "2026-10-12T06:20:00Z", last_at: "2026-10-12T06:20:00Z", day: "2026-10-12", plan_id: "plan1", plan_name: "案 A", kind: "bed.width", target_kind: "bed", target_id: "bed2", text: "区画1 畝2の畝幅を変更", before: "70 cm", after: "100 cm" },
-    { id: "ch2", no: 2, at: "2026-10-12T06:02:00Z", last_at: "2026-10-12T06:02:00Z", day: "2026-10-12", plan_id: "plan1", plan_name: "案 A", kind: "bed.add", target_kind: "block", target_id: "b1", text: "区画1に畝を 2 本追加", before: null, after: null },
-    { id: "ch1", no: 1, at: "2026-10-11T03:00:00Z", last_at: "2026-10-11T03:00:00Z", day: "2026-10-11", plan_id: null, plan_name: "", kind: "crops.add", target_kind: "crop", target_id: "c1", text: "品目「葉ネギ」を追加", before: null, after: null },
+    { id: "ch4", no: 4, field_id: "f2", at: "2026-10-13T01:00:00Z", last_at: "2026-10-13T01:00:00Z", day: "2026-10-13", plan_id: "plan3", plan_name: "案 C", kind: "plan.add", target_kind: null, target_id: null, text: "プラン「案 C」を作成", before: null, after: null },
+    { id: "ch3", no: 3, field_id: "f1", at: "2026-10-12T06:20:00Z", last_at: "2026-10-12T06:20:00Z", day: "2026-10-12", plan_id: "plan1", plan_name: "案 A", kind: "bed.width", target_kind: "bed", target_id: "bed2", text: "区画1 畝2の畝幅を変更", before: "70 cm", after: "100 cm" },
+    { id: "ch2", no: 2, field_id: "f1", at: "2026-10-12T06:02:00Z", last_at: "2026-10-12T06:02:00Z", day: "2026-10-12", plan_id: "plan1", plan_name: "案 A", kind: "bed.add", target_kind: "block", target_id: "b1", text: "区画1に畝を 2 本追加", before: null, after: null },
+    { id: "ch1", no: 1, field_id: "f1", at: "2026-10-11T03:00:00Z", last_at: "2026-10-11T03:00:00Z", day: "2026-10-11", plan_id: null, plan_name: "", kind: "crops.add", target_kind: "crop", target_id: "c1", text: "品目「葉ネギ」を追加", before: null, after: null },
   ],
-  notes: [{ field_id: "f1", day: "2026-10-12", body: "水はけを見て、#3 で畝幅を広げた。" }],
+  notes: [{ day: "2026-10-12", body: "水はけを見て、#3 で畝幅を広げた。" }],
   updates: [
     { no: 1, date: "2026-10-11", title: "圃場図", body: "外形と区域を描ける。", reason: "紙の図面しかなかった。" },
     { no: 2, date: "2026-10-12", title: "記録の画面", body: "変更が残る。", reason: "あとで記事にしたい。" },
@@ -75,7 +81,9 @@ function setup({ token = TOKEN, data = DATA } = {}) {
     const { result } = await res.json();
     return { isError: Boolean(result.isError), text: result.content[0].text, data: result.isError ? null : JSON.parse(result.content[0].text) };
   };
-  return { handle, post, call };
+  // 圃場 1 の話として呼ぶ
+  const inField = (name, args = {}) => call(name, { field: "圃場 1", ...args });
+  return { handle, post, call, inField };
 }
 
 test("lib/ の写しは、app/ の部品と同じ内容", () => {
@@ -101,7 +109,7 @@ test("初期化と、道具の一覧", async () => {
   assert.equal(init.result.serverInfo.name, "inoo-farm-field-plan");
   assert.match(init.result.instructions, /計画で、実際に行った作業の記録ではありません/);
   const list = await (await post({ jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert.deepEqual(list.result.tools.map((tool) => tool.name), ["list_plans", "get_plan", "get_schedule", "get_changes", "get_crops"]);
+  assert.deepEqual(list.result.tools.map((tool) => tool.name), ["list_fields", "list_plans", "get_plan", "get_schedule", "get_changes", "get_crops"]);
   assert.ok(list.result.tools.every((tool) => tool.run === undefined && tool.inputSchema.type === "object"));
   // コネクタの登録時の確認（GET）には、名前だけを返す
   const probe = await handle(new Request(`${BASE}/${TOKEN}`, { method: "GET" }));
@@ -109,8 +117,28 @@ test("初期化と、道具の一覧", async () => {
   assert.equal((await post({ jsonrpc: "2.0", method: "notifications/initialized" })).status, 202);
 });
 
+test("list_fields と、圃場の選び方", async () => {
+  const { call } = setup();
+  const { data } = await call("list_fields");
+  assert.deepEqual(data.fields, [
+    { name: "圃場 1", area_sqm: 1500, plans: ["案 A", "案 B"], last_change: { date: "2026-10-12", no: "#3" } },
+    { name: "別の圃場", area_sqm: null, plans: ["案 C"], last_change: { date: "2026-10-13", no: "#4" } },
+  ]);
+  // 圃場は省けない。名前の一部でも選べる
+  for (const tool of ["list_plans", "get_plan", "get_schedule", "get_changes"]) {
+    assert.match((await call(tool)).text, /field で圃場を選んでください。圃場の名前: 圃場 1、別の圃場/);
+  }
+  assert.equal((await call("list_plans", { field: "別の" })).data.field.name, "別の圃場");
+  assert.match((await call("list_plans", { field: "圃場" })).text, /複数あります/);
+  assert.match((await call("list_plans", { field: "ない" })).text, /圃場「ない」はありません/);
+  // ほかの圃場のプランは選べない
+  assert.match((await call("get_plan", { field: "圃場 1", plan: "案 C" })).text, /ありません。プランの名前: 案 A、案 B/);
+  const other = (await call("get_plan", { field: "別の圃場" })).data;
+  assert.deepEqual([other.field, other.plan, other.other_plans, other.blocks], ["別の圃場", "案 C", [], []]);
+});
+
 test("list_plans: 規模と、最後に変更のあった日", async () => {
-  const { data } = await setup().call("list_plans");
+  const { data } = await setup().inField("list_plans");
   assert.equal(data.field.area_sqm, 1500);
   const [a, b] = data.plans;
   assert.deepEqual([a.name, a.tillable_area_sqm, a.blocks, a.beds], ["案 A", 288, 1, 2]);
@@ -121,7 +149,7 @@ test("list_plans: 規模と、最後に変更のあった日", async () => {
 });
 
 test("get_plan: 配置、作付、苗数と肥料、集計", async () => {
-  const { call } = setup();
+  const { inField: call } = setup();
   const { data } = await call("get_plan");
   // プランを省くと、最後に変更のあったプラン
   assert.equal(data.plan, "案 A");
@@ -151,7 +179,7 @@ test("get_plan: 配置、作付、苗数と肥料、集計", async () => {
 });
 
 test("get_schedule: 同じ日の同じ作業は、場所をまとめる", async () => {
-  const { call } = setup();
+  const { inField: call } = setup();
   const all = (await call("get_schedule")).data;
   assert.equal(all.undated_works, 1);
   assert.deepEqual(all.works.map((item) => `${item.start} ${item.work} ${item.places.join("+")}`), [
@@ -169,7 +197,7 @@ test("get_schedule: 同じ日の同じ作業は、場所をまとめる", async 
 });
 
 test("get_changes: 日ごとの変更、メモ、アプリの更新", async () => {
-  const { call } = setup();
+  const { inField: call } = setup();
   const { data } = await call("get_changes");
   assert.deepEqual(data.days.map((day) => day.date), ["2026-10-12", "2026-10-11"]);
   const [latest, first] = data.days;
@@ -190,6 +218,10 @@ test("get_changes: 日ごとの変更、メモ、アプリの更新", async () =
   // プランを指定すると、共通の変更は外れる（メモとアプリの更新は残る）
   const planB = (await call("get_changes", { plan: "案 B" })).data;
   assert.ok(planB.days.every((day) => day.plan_changes.length === 0));
+  // 計画の変更は選んだ圃場の分だけ。メモはすべての圃場で共通
+  const other = (await call("get_changes", { field: "別の圃場" })).data;
+  assert.deepEqual(other.days.flatMap((day) => day.plan_changes.map((entry) => entry.no)), ["#4"]);
+  assert.equal(other.days.find((day) => day.date === "2026-10-12").note, "水はけを見て、#3 で畝幅を広げた。");
 });
 
 test("get_crops: 設定値と肥料", async () => {
@@ -204,7 +236,7 @@ test("道具の名前が違う、読み込みに失敗した", async () => {
   const unknown = await (await post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "nope", arguments: {} } })).json();
   assert.equal(unknown.error.code, -32602);
   const broken = createMcpHandler({ getData: async () => { throw new Error("db down"); }, token: TOKEN });
-  const res = await broken(new Request(`${BASE}/${TOKEN}`, { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_plans" } }) }));
+  const res = await broken(new Request(`${BASE}/${TOKEN}`, { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "list_fields" } }) }));
   const { result } = await res.json();
   assert.equal(result.isError, true);
   assert.doesNotMatch(result.content[0].text, /db down/);

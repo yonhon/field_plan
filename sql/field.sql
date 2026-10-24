@@ -19,7 +19,7 @@ as $$
   select exists (select 1 from field.owners where user_id = auth.uid());
 $$;
 
--- 圃場。数年後に増やせるよう、最上位に置く
+-- 圃場。いくつも持てる。外形、下絵、プランは圃場ごと。品目、肥料、作業の種類、開発日誌のメモは共通
 create table if not exists field.fields (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -200,13 +200,25 @@ create table if not exists field.changes (
 
 create index if not exists changes_day_idx on field.changes (field_id, day);
 
--- 日ごとのメモ。なぜそうしたかを手で書く
+-- 日ごとのメモ（圃場ごと）。開発日誌のメモは、すべての圃場で共通の dev_notes に移した。この表は使わないが、消さずに残す
 create table if not exists field.day_notes (
   field_id uuid not null references field.fields (id) on delete cascade,
   day date not null,
   body text not null default '',
   primary key (field_id, day)
 );
+
+-- 開発日誌のメモ。日ごとに 1 つ、なぜそうしたかを手で書く。アプリの開発日誌なので、すべての圃場で共通
+create table if not exists field.dev_notes (
+  day date primary key,
+  body text not null default '',
+  updated_at timestamptz not null default now()
+);
+
+-- 圃場ごとだったころのメモを写す（圃場が 1 つだったころの分なので、日はぶつからない）
+insert into field.dev_notes (day, body)
+select day, body from field.day_notes
+on conflict (day) do nothing;
 
 -- MCP サーバー（field-mcp）への呼び出しの記録。合言葉が違う呼び出しも残るので、URL が漏れていないかを確かめられる。
 -- 画面からは読み書きしない（許可を作らない）
@@ -310,7 +322,7 @@ declare
 begin
   foreach t in array array[
     'fields', 'backdrops', 'plans', 'zones', 'blocks', 'work_types',
-    'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'day_notes'
+    'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'day_notes', 'dev_notes'
   ] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists owner_all on field.%I', t);

@@ -62,6 +62,7 @@ const HINTS = {
 };
 const TABLES = { zone: "zones", block: "blocks", bed: "beds" };
 const CURRENT_PLAN_KEY = "field_plan_current_plan";
+const CURRENT_FIELD_KEY = "field_plan_current_field";
 const VIEW_DATE_KEY = "field_plan_view_date";
 
 // 前に開いたときの表示日。覚えていなければ今日
@@ -86,6 +87,7 @@ const state = {
   store: null,
   planBusy: false, // プランの作成・切り替えなどの途中
   client: null,
+  fields: [],
   field: null,
   backdrop: null,
   backdropUrl: "",
@@ -1546,8 +1548,68 @@ function removeBlockBeds(blockId) {
   }
 }
 
-// ---- プラン ----
-// 圃場の外形と下絵は共通で、区域・区画・畝と日程をプランごとに持つ
+// ---- 圃場とプラン ----
+// 圃場はいくつも持てる。外形、下絵、プランは圃場ごと。品目、肥料、作業の種類、開発日誌のメモは共通。
+// 圃場の中では、外形と下絵はすべてのプランで共通で、区域・区画・畝と日程をプランごとに持つ
+
+function renderFields() {
+  $("fieldSelect").innerHTML = state.fields
+    .map((field) => `<option value="${field.id}">${escapeHtml(field.name || "（名前なし）")}</option>`)
+    .join("");
+  $("fieldSelect").value = state.field.id;
+}
+
+// 圃場のプランと下絵を読み、圃場を入れ替える。開くプラン（前に開いていたプランか、先頭）を返す。
+// プランの中身は、続けて loadPlanData で読む
+async function loadFieldData(field) {
+  let plans = await state.store.loadPlans(field.id);
+  if (!plans.length) {
+    plans = [await state.store.createPlan({ field_id: field.id, name: "プラン1" })];
+  }
+  const backdrop = await state.store.loadBackdrop(field.id);
+  let backdropUrl = "";
+  if (backdrop) {
+    backdropUrl = await state.store.imageUrl(backdrop.storage_path);
+    backdrop.size = await imageSize(backdropUrl).catch(() => null);
+  }
+  let currentId = null;
+  try {
+    currentId = localStorage.getItem(CURRENT_PLAN_KEY);
+  } catch {
+    // 読めなければ先頭のプランを開く
+  }
+  Object.assign(state, { field, plans, backdrop, backdropUrl });
+  return plans.find((plan) => plan.id === currentId) || plans[0];
+}
+
+async function openField(field) {
+  clearTimeout(saveTimer);
+  await flushSaves();
+  const plan = await loadFieldData(field);
+  try {
+    localStorage.setItem(CURRENT_FIELD_KEY, field.id);
+  } catch {
+    // 保存できなくても、次に開くときに先頭の圃場になるだけ
+  }
+  $("fieldName").value = field.name;
+  setMode("select");
+  await openPlan(plan);
+  fitView();
+  render();
+}
+
+function newField() {
+  const name = askPlanName("新しい圃場の名前", `圃場 ${state.fields.length + 1}`);
+  if (!name) {
+    return;
+  }
+  planTask(async () => {
+    const field = await state.store.createField({ name });
+    state.fields.push(field);
+    await openField(field);
+    record({ kind: "field.add", plan: false, text: `圃場「${field.name}」を作成` });
+  });
+}
 
 function renderPlans() {
   $("schedulePlanName").textContent = state.plan.name;
@@ -1555,10 +1617,11 @@ function renderPlans() {
     .map((plan) => `<option value="${plan.id}">${escapeHtml(plan.name)}</option>`)
     .join("");
   $("planSelect").value = state.plan.id;
+  renderFields();
   renderPlanButtons();
 }
 
-const PLAN_CONTROLS = ["planSelect", "newPlanBtn", "copyPlanBtn", "renamePlanBtn", "deletePlanBtn"];
+const PLAN_CONTROLS = ["fieldSelect", "newFieldBtn", "planSelect", "newPlanBtn", "copyPlanBtn", "renamePlanBtn", "deletePlanBtn"];
 
 function renderPlanButtons() {
   PLAN_CONTROLS.forEach((id) => ($(id).disabled = state.planBusy));
@@ -1566,7 +1629,7 @@ function renderPlanButtons() {
   document.body.classList.toggle("plan-busy", state.planBusy);
 }
 
-// プランの作成・コピー・名前の変更・削除・切り替えを、1 つずつ行う。
+// 圃場とプランの作成・コピー・名前の変更・削除・切り替えを、1 つずつ行う。
 // 終わるまでは、プランの操作と、図と日程の操作を受け付けない。プランの選び方の欄だけが先に
 // 新しいプランを指し、中身はまだ前のプランのまま、というときに操作されないようにする
 async function planTask(action) {
@@ -1982,6 +2045,10 @@ $("fitBtn").addEventListener("click", () => {
   renderMap();
 });
 $("scaleByAreaBtn").addEventListener("click", scaleByArea);
+$("fieldSelect").addEventListener("change", (event) => {
+  planTask(() => openField(state.fields.find((field) => field.id === event.target.value)));
+});
+$("newFieldBtn").addEventListener("click", newField);
 $("planSelect").addEventListener("change", (event) => {
   planTask(() => openPlan(state.plans.find((plan) => plan.id === event.target.value)));
 });
@@ -2013,6 +2080,7 @@ $("viewDate").addEventListener("change", (event) => {
 });
 $("fieldName").addEventListener("input", (event) => {
   state.field.name = event.target.value;
+  renderFields();
   queueSave("field");
 });
 for (const [input, kind] of [["zoneName", "zone"], ["blockName", "block"]]) {
@@ -2126,6 +2194,11 @@ function openTarget(entry) {
   const status = (text) => {
     $("saveStatus").textContent = text;
   };
+  if (entry.field_id !== state.field.id) {
+    const field = state.fields.find((item) => item.id === entry.field_id);
+    status(`圃場「${field?.name || "（もうない圃場）"}」での変更です。圃場を切り替えると開けます。`);
+    return;
+  }
   if (entry.plan_id && entry.plan_id !== state.plan.id) {
     status(`プラン「${entry.plan_name}」での変更です。プランを切り替えると開けます。`);
     return;
@@ -2166,30 +2239,20 @@ function describeLoadError(error) {
 async function startApp() {
   $("loginView").hidden = true;
   try {
-    let field = await state.store.loadField();
-    if (!field) {
-      field = await state.store.createField({ name: config.defaultFieldName });
+    state.fields = await state.store.loadFields();
+    if (!state.fields.length) {
+      state.fields = [await state.store.createField({ name: config.defaultFieldName })];
     }
-    state.field = field;
-    state.plans = await state.store.loadPlans(field.id);
-    if (!state.plans.length) {
-      state.plans = [await state.store.createPlan({ field_id: field.id, name: "プラン1" })];
-    }
-    let currentId = null;
+    let fieldId = null;
     try {
-      currentId = localStorage.getItem(CURRENT_PLAN_KEY);
+      fieldId = localStorage.getItem(CURRENT_FIELD_KEY);
     } catch {
-      // 読めなければ先頭のプランを開く
+      // 読めなければ先頭の圃場を開く
     }
     state.workTypes = await state.store.loadWorkTypes();
     state.crops = await state.store.listAll("crops");
     state.fertilizers = await state.store.listAll("fertilizers");
-    await loadPlanData(state.plans.find((plan) => plan.id === currentId) || state.plans[0]);
-    state.backdrop = await state.store.loadBackdrop(field.id);
-    if (state.backdrop) {
-      state.backdropUrl = await state.store.imageUrl(state.backdrop.storage_path);
-      state.backdrop.size = await imageSize(state.backdropUrl).catch(() => null);
-    }
+    await loadPlanData(await loadFieldData(state.fields.find((field) => field.id === fieldId) || state.fields[0]));
   } catch (error) {
     showFatal(
       error.code === "42501" || /row-level security/.test(error.message || "")
