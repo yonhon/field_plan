@@ -224,6 +224,68 @@ create table if not exists field.mcp_access_log (
 
 create index if not exists works_plan_start_idx on field.works (plan_start);
 
+-- 操作の記録。計画の表の行を足す・変える・消すたびに、DB が変える前と後の行をそのまま残す。
+-- 開発日誌のための変更の記録（changes）とは別で、事故を調べたり、消えた行を戻したりするために使う。
+-- 画面からは読み書きしない（許可を作らない）。DB が一緒に消した行（区画を消したときの畝など）も残る。
+-- 1 年より古い行は、毎日消す（下の cron.schedule）
+create table if not exists field.audit_log (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  user_id uuid,              -- 画面から変えた利用者。DB に直接つないで変えたときは空
+  db_role text not null,     -- authenticated（画面）、postgres（直接）など
+  table_name text not null,
+  op text not null check (op in ('insert', 'update', 'delete')),
+  row_id text,               -- 変えた行の ID（作業の種類は code）
+  old_row jsonb,             -- 変える前の行。足したときは空
+  new_row jsonb              -- 変えたあとの行。消したときは空
+);
+
+create index if not exists audit_log_at_idx on field.audit_log (at);
+create index if not exists audit_log_row_idx on field.audit_log (table_name, row_id);
+
+create or replace function field.write_audit_log() returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  old_row jsonb := case when tg_op <> 'INSERT' then to_jsonb(old) end;
+  new_row jsonb := case when tg_op <> 'DELETE' then to_jsonb(new) end;
+begin
+  -- 中身の変わらない上書き（画面が同じ行を保存し直したとき）は残さない
+  if tg_op = 'UPDATE' and old_row = new_row then
+    return null;
+  end if;
+  insert into field.audit_log (user_id, db_role, table_name, op, row_id, old_row, new_row)
+  values (
+    -- この関数は持ち主の権限で動くので、current_user では見分けられない。画面からは auth.role() が入る
+    auth.uid(), coalesce(auth.role(), session_user), tg_table_name, lower(tg_op),
+    coalesce(new_row ->> 'id', old_row ->> 'id', new_row ->> 'code', old_row ->> 'code'),
+    old_row, new_row
+  );
+  return null;
+end;
+$$;
+
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'fields', 'backdrops', 'plans', 'zones', 'blocks', 'beds', 'plantings', 'works',
+    'crops', 'fertilizers', 'work_types'
+  ] loop
+    execute format('drop trigger if exists write_audit_log on field.%I', t);
+    execute format(
+      'create trigger write_audit_log after insert or update or delete on field.%I '
+      'for each row execute function field.write_audit_log()', t);
+  end loop;
+end $$;
+
+-- 毎日 3:30（日本時間）に、1 年より古い操作の記録を消す。同じ名前で登録し直すと、置き換わる
+select cron.schedule(
+  'field-audit-log-purge', '30 18 * * *',
+  $$delete from field.audit_log where at < now() - interval '1 year'$$
+);
+
 -- 権限。ログインした利用者にだけスキーマを見せ、行は field.owners の利用者にだけ許す
 revoke all on schema field from public, anon;
 revoke all on all tables in schema field from public, anon;
@@ -233,11 +295,14 @@ grant usage on schema field to authenticated;
 grant select, insert, update, delete on all tables in schema field to authenticated;
 revoke all on field.owners from authenticated;
 revoke all on field.mcp_access_log from authenticated;
+revoke all on field.audit_log from authenticated;
+revoke all on function field.write_audit_log() from public, anon, authenticated;
 revoke all on function field.is_owner() from public, anon;
 grant execute on function field.is_owner() to authenticated;
 
 alter table field.owners enable row level security;
 alter table field.mcp_access_log enable row level security;
+alter table field.audit_log enable row level security;
 
 do $$
 declare
