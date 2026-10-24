@@ -3,6 +3,7 @@
 // 対象は、いまのプランの区域・区画・畝・作付・作業と、圃場の外形、品目、肥料、作業の種類の目安。
 // プランの切り替え・作成・削除と、縮尺・向きの合わせ直しは対象外で、行うと履歴が空になる。
 // 戻すと多くの行が消えるときは、先に確かめる。
+import { confirmDelete } from "./dialog.js";
 import { record } from "./journal.js";
 
 const $ = (id) => document.getElementById(id);
@@ -13,7 +14,7 @@ const MAX_STEPS = 50;
 const SETTLE_MS = 250; // 操作のあと、データが落ち着くのを待つ時間
 const LATE_MS = 1500; // 保存を待ってから変わるデータ（プランの作成など）を拾うための、遅い確認
 
-let ctx = null; // { state, flush, refresh, setStatus }
+let ctx = null; // { state, busy, flush, refresh, setStatus }
 const undoStack = [];
 const redoStack = [];
 let last = null; // 最後に確かめたときの写し
@@ -50,7 +51,7 @@ function renderButtons() {
 
 // データが変わっていたら、変わる前の写しを「元に戻す」の履歴に積む
 function check() {
-  if (busy || !ctx) {
+  if (busy || !ctx || ctx.busy()) {
     return;
   }
   if (typing()) {
@@ -149,7 +150,7 @@ export function needsConfirm(removed) {
 }
 
 async function step(from, to, label) {
-  if (busy || !from.length) {
+  if (busy || !from.length || ctx.busy()) {
     return;
   }
   busy = true;
@@ -167,7 +168,7 @@ async function step(from, to, label) {
     const removed = removedRows(current, target);
     if (needsConfirm(removed)) {
       const list = Object.entries(removed).map(([table, count]) => `${TABLE_NAMES[table]} ${count} 件`).join("、");
-      if (!confirm(`${label}すと、${list}が消えます。よろしいですか？`)) {
+      if (!(await confirmDelete(`${label}すと、次のものが消えます。`, list))) {
         ctx.setStatus(`${label}すのをやめました`);
         busy = false;
         renderButtons();

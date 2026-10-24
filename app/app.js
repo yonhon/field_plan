@@ -27,7 +27,7 @@ import {
   translatePoints,
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
-import { notify } from "./dialog.js";
+import { confirmDelete, notify } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal } from "./journal.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
@@ -84,6 +84,7 @@ const SAVE_DELAY_MS = 600;
 
 const state = {
   store: null,
+  planBusy: false, // プランの作成・切り替えなどの途中
   client: null,
   field: null,
   backdrop: null,
@@ -1554,7 +1555,32 @@ function renderPlans() {
     .map((plan) => `<option value="${plan.id}">${escapeHtml(plan.name)}</option>`)
     .join("");
   $("planSelect").value = state.plan.id;
-  $("deletePlanBtn").disabled = state.plans.length <= 1;
+  renderPlanButtons();
+}
+
+const PLAN_CONTROLS = ["planSelect", "newPlanBtn", "copyPlanBtn", "renamePlanBtn", "deletePlanBtn"];
+
+function renderPlanButtons() {
+  PLAN_CONTROLS.forEach((id) => ($(id).disabled = state.planBusy));
+  $("deletePlanBtn").disabled = state.planBusy || state.plans.length <= 1;
+  document.body.classList.toggle("plan-busy", state.planBusy);
+}
+
+// プランの作成・コピー・名前の変更・削除・切り替えを、1 つずつ行う。
+// 終わるまでは、プランの操作と、図と日程の操作を受け付けない。プランの選び方の欄だけが先に
+// 新しいプランを指し、中身はまだ前のプランのまま、というときに操作されないようにする
+async function planTask(action) {
+  if (state.planBusy) {
+    return;
+  }
+  state.planBusy = true;
+  renderPlanButtons();
+  try {
+    await persist(action);
+  } finally {
+    state.planBusy = false;
+    renderPlans();
+  }
 }
 
 async function loadPlanData(plan) {
@@ -1597,7 +1623,7 @@ function newPlan() {
   if (!name) {
     return;
   }
-  persist(async () => {
+  planTask(async () => {
     const plan = await state.store.createPlan({ field_id: state.field.id, name });
     state.plans.push(plan);
     record({ kind: "plan.add", plan, text: `プラン「${plan.name}」を作成` });
@@ -1610,7 +1636,7 @@ function renamePlan() {
   if (!name || name === state.plan.name) {
     return;
   }
-  persist(async () => {
+  planTask(async () => {
     await state.store.renamePlan(state.plan.id, name);
     const was = state.plan.name;
     state.plan.name = name;
@@ -1624,7 +1650,7 @@ function copyPlan() {
   if (!name) {
     return;
   }
-  persist(async () => {
+  planTask(async () => {
     clearTimeout(saveTimer);
     await flushSaves();
     const plan = await state.store.createPlan({ field_id: state.field.id, name });
@@ -1653,17 +1679,22 @@ function copyPlan() {
   });
 }
 
-function deletePlan() {
-  if (state.plans.length <= 1 || !confirm(`プラン「${state.plan.name}」を削除します。このプランの区域、区画、畝、日程がすべて消えます。`)) {
+async function deletePlan() {
+  // 確認の窓に出すプランと、消すプランを同じものにする
+  const plan = state.plan;
+  if (state.planBusy || state.plans.length <= 1 || $("planSelect").value !== plan.id) {
     return;
   }
-  persist(async () => {
+  const ok = await confirmDelete("このプランを削除します。区域、区画、畝、日程がすべて消えます。", `プラン「${plan.name}」`);
+  if (!ok || state.plan.id !== plan.id) {
+    return;
+  }
+  planTask(async () => {
     clearTimeout(saveTimer);
     [...pendingSaves].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
-    const id = state.plan.id;
-    record({ kind: "plan.delete", plan: false, text: `プラン「${state.plan.name}」を削除` });
-    await state.store.deletePlan(id);
-    state.plans = state.plans.filter((plan) => plan.id !== id);
+    record({ kind: "plan.delete", plan: false, text: `プラン「${plan.name}」を削除` });
+    await state.store.deletePlan(plan.id);
+    state.plans = state.plans.filter((item) => item.id !== plan.id);
     await openPlan(state.plans[0]);
   });
 }
@@ -1952,7 +1983,7 @@ $("fitBtn").addEventListener("click", () => {
 });
 $("scaleByAreaBtn").addEventListener("click", scaleByArea);
 $("planSelect").addEventListener("change", (event) => {
-  persist(() => openPlan(state.plans.find((plan) => plan.id === event.target.value)));
+  planTask(() => openPlan(state.plans.find((plan) => plan.id === event.target.value)));
 });
 $("newPlanBtn").addEventListener("click", newPlan);
 $("renamePlanBtn").addEventListener("click", renamePlan);
@@ -2204,6 +2235,8 @@ async function startApp() {
   }
   initHistory({
     state,
+    // プランを読み込んでいるあいだは、元に戻さない
+    busy: () => state.planBusy,
     setStatus: (text) => ($("saveStatus").textContent = text),
     // まだ送っていない図形の保存を、先に済ませる
     flush: async () => {

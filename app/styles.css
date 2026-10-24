@@ -360,6 +360,27 @@ h3 {
   user-select: text;
 }
 
+.notice-target {
+  margin: -6px 0 14px;
+  font-size: 1.15em;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.danger-btn {
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+}
+
+/* プランを読み込んでいるあいだは、図と日程を触れないようにする */
+body.plan-busy .map-area,
+body.plan-busy #scheduleView {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
 .work-section {
   padding: 8px 0 10px;
   border-top: 1px solid var(--line);
