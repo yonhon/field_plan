@@ -43,6 +43,10 @@ h2 {
   margin-bottom: 8px;
 }
 
+.row.wrap {
+  flex-wrap: wrap;
+}
+
 .panel h2:not(:first-child) {
   margin-top: 14px;
 }

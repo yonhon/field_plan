@@ -79,6 +79,69 @@ export function imageToWorld(backdrop, pixel) {
   return [dx * cos - dy * sin, -(dx * sin + dy * cos)];
 }
 
+// imageToWorld の逆。圃場の座標が、下絵のどの画素にあたるか
+export function worldToImage(backdrop, point) {
+  const rad = (backdrop.rotation_deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const [sx, sy] = [point[0], -point[1]];
+  return [
+    (sx * cos + sy * sin) / backdrop.m_per_px + backdrop.origin_px[0],
+    (-sx * sin + sy * cos) / backdrop.m_per_px + backdrop.origin_px[1],
+  ];
+}
+
+// 下絵の画素 pixel が、圃場の座標 point に来るように、下絵を平行移動する（基準点の画素を変える）
+export function anchorBackdrop(backdrop, pixel, point) {
+  const offset = worldToImage({ ...backdrop, origin_px: [0, 0] }, point);
+  return { ...backdrop, origin_px: [pixel[0] - offset[0], pixel[1] - offset[1]] };
+}
+
+// 下絵だけを factor 倍にする。圃場の座標 point にある下絵の画素は動かさない
+export function scaleBackdropAt(backdrop, factor, point) {
+  const pixel = worldToImage(backdrop, point);
+  return anchorBackdrop({ ...backdrop, m_per_px: backdrop.m_per_px * factor }, pixel, point);
+}
+
+// 下絵だけを時計回りに degrees 度回す。圃場の座標 point にある下絵の画素は動かさない
+export function rotateBackdropAt(backdrop, degrees, point) {
+  const pixel = worldToImage(backdrop, point);
+  return anchorBackdrop({ ...backdrop, rotation_deg: backdrop.rotation_deg + degrees }, pixel, point);
+}
+
+// 下絵の上の目印を、図形の上の点に合わせる。大きさは変えない。
+// from は、いま目印が見えている圃場の座標、to は、目印が来るべき図形の上の点。
+// 1 組なら平行移動だけ。2 組なら、1 組目を合わせたうえで、2 組目の向きにも合わせる。
+// ratio は、図形の上の 2 点の距離 ÷ 下絵の上の 2 点の距離（1 より大きければ、図形のほうが大きい）
+export function alignBackdrop(backdrop, pairs) {
+  const [[from1, to1], second] = pairs;
+  const pixel = worldToImage(backdrop, from1);
+  if (!second) {
+    return { backdrop: anchorBackdrop(backdrop, pixel, to1), ratio: null };
+  }
+  const [from2, to2] = second;
+  const angle = (p, q) => Math.atan2(q[1] - p[1], q[0] - p[0]);
+  // 下絵を時計回りに回すと、下絵の上の向きは反時計回りの角度で見て減る
+  const degrees = ((angle(from1, from2) - angle(to1, to2)) * 180) / Math.PI;
+  const turned = { ...backdrop, rotation_deg: backdrop.rotation_deg + degrees };
+  return { backdrop: anchorBackdrop(turned, pixel, to1), ratio: distance(to1, to2) / distance(from1, from2) };
+}
+
+// 同じ範囲を、解像度だけ変えて写した画像に差し替えるときの、縮尺・基準点・向き。
+// 縦と横の画素の比が 1% より違えば、同じ範囲とはみなさず null
+export function inheritBackdrop(previous, previousSize, size) {
+  const rx = previousSize[0] / size[0];
+  const ry = previousSize[1] / size[1];
+  if (Math.abs(rx - ry) / rx > 0.01) {
+    return null;
+  }
+  return {
+    m_per_px: (previous.m_per_px * (rx + ry)) / 2,
+    origin_px: [previous.origin_px[0] / rx, previous.origin_px[1] / ry],
+    rotation_deg: previous.rotation_deg,
+  };
+}
+
 export function translatePoints(points, dx, dy) {
   return points.map(([x, y]) => [x + dx, y + dy]);
 }

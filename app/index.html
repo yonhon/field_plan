@@ -191,9 +191,14 @@
           <label>画像を読み込む<input id="backdropFile" type="file" accept="image/*" /></label>
           <label class="check"><input id="backdropVisible" type="checkbox" checked />下絵を表示</label>
           <p class="muted">縮尺: <span id="scaleText">-</span></p>
+          <p id="backdropRole" class="muted"></p>
           <div class="row">
             <button class="chip-btn mode-btn" data-mode="scale">2 点の距離で合わせる</button>
             <button id="scaleByAreaBtn" class="chip-btn">面積で合わせる</button>
+          </div>
+          <div id="alignTools" class="row wrap">
+            <button class="chip-btn mode-btn" data-mode="align">図形に位置を合わせる</button>
+            <button id="fitShapesBtn" class="chip-btn">図形を下絵の縮尺に合わせる</button>
           </div>
           <label>下絵の上と北のずれ（時計回り、度）
             <input id="rotation" type="number" step="0.5" value="0" />

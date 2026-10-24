@@ -12,6 +12,12 @@ import {
   gapBetweenPolygons,
   gapToSegment,
   imageToWorld,
+  worldToImage,
+  anchorBackdrop,
+  scaleBackdropAt,
+  rotateBackdropAt,
+  alignBackdrop,
+  inheritBackdrop,
   layoutBeds,
   nearestEdgeAngle,
   pointInPolygon,
@@ -197,4 +203,63 @@ test("viewAxes: 決めていないときは、南と西から見る", () => {
 test("bedAngle: 長い辺の向き", () => {
   const angle = bedAngle([[0, 0], [1, 0], [1, 10], [0, 10]]);
   assert.ok(Math.abs(Math.abs(Math.sin(angle)) - 1) < 1e-9);
+});
+
+test("worldToImage は imageToWorld の逆", () => {
+  const backdrop = { origin_px: [300, 200], m_per_px: 0.05, rotation_deg: 23 };
+  for (const pixel of [[0, 0], [300, 200], [812, 47]]) {
+    nearPair(worldToImage(backdrop, imageToWorld(backdrop, pixel)), pixel);
+  }
+});
+
+test("下絵だけを動かす: 平行移動、縮尺、回転", () => {
+  const backdrop = { origin_px: [100, 100], m_per_px: 0.1, rotation_deg: 10 };
+  // 画素 (150, 80) を、圃場の (3, 4) に置く
+  nearPair(imageToWorld(anchorBackdrop(backdrop, [150, 80], [3, 4]), [150, 80]), [3, 4]);
+  // 縮尺を 2 倍にしても、(5, 5) にある画素は動かない。ほかの画素は (5, 5) から 2 倍離れる
+  const point = [5, 5];
+  const pixel = worldToImage(backdrop, point);
+  const scaled = scaleBackdropAt(backdrop, 2, point);
+  near(scaled.m_per_px, 0.2);
+  nearPair(imageToWorld(scaled, pixel), point);
+  const far = imageToWorld(backdrop, [0, 0]);
+  const farScaled = imageToWorld(scaled, [0, 0]);
+  nearPair([farScaled[0] - point[0], farScaled[1] - point[1]], [2 * (far[0] - point[0]), 2 * (far[1] - point[1])]);
+  // 回しても、(5, 5) にある画素は動かない
+  const turned = rotateBackdropAt(backdrop, 30, point);
+  near(turned.rotation_deg, 40);
+  nearPair(imageToWorld(turned, pixel), point);
+});
+
+test("alignBackdrop: 目印を図形の点に合わせる。大きさは変えない", () => {
+  const backdrop = { origin_px: [0, 0], m_per_px: 0.1, rotation_deg: 0 };
+  // 1 組: 平行移動だけ
+  const moved = alignBackdrop(backdrop, [[[1, 1], [4, 5]]]);
+  assert.equal(moved.ratio, null);
+  nearPair(imageToWorld(moved.backdrop, worldToImage(backdrop, [1, 1])), [4, 5]);
+  near(moved.backdrop.rotation_deg, 0);
+  // 2 組: 下絵の上の東向き 10 m を、図形の上の北向き 12 m に合わせる（反時計回りに 90 度 = 時計回りに -90 度）
+  const pixel1 = worldToImage(backdrop, [0, 0]);
+  const pixel2 = worldToImage(backdrop, [10, 0]);
+  const aligned = alignBackdrop(backdrop, [[[0, 0], [2, 2]], [[10, 0], [2, 14]]]);
+  near(aligned.backdrop.rotation_deg, -90);
+  near(aligned.backdrop.m_per_px, 0.1);
+  near(aligned.ratio, 1.2);
+  nearPair(imageToWorld(aligned.backdrop, pixel1), [2, 2]);
+  // 2 つ目の目印は、図形の点の向きに、下絵の大きさのまま（10 m）来る
+  nearPair(imageToWorld(aligned.backdrop, pixel2), [2, 12]);
+});
+
+test("inheritBackdrop: 解像度だけを変えた画像に、縮尺と基準点を引き継ぐ", () => {
+  const previous = { origin_px: [1130.5, 1582.5], m_per_px: 0.1, rotation_deg: 3 };
+  const next = inheritBackdrop(previous, [2261, 3165], [1024, 1433]);
+  near(next.rotation_deg, 3);
+  assert.ok(Math.abs(next.m_per_px - 0.22083) < 1e-4);
+  nearPair(next.origin_px, [512, 716.5]);
+  // 同じ画素が、同じ圃場の座標に来る
+  const corner = imageToWorld(previous, [2261, 0]);
+  const after = imageToWorld({ ...previous, ...next }, [1024, 0]);
+  assert.ok(Math.abs(corner[0] - after[0]) < 0.1 && Math.abs(corner[1] - after[1]) < 0.1);
+  // 縦横の比が違えば、同じ範囲とはみなさない
+  assert.equal(inheritBackdrop(previous, [2261, 3165], [768, 1024]), null);
 });

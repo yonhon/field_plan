@@ -50,15 +50,22 @@ export function notify(message) {
 // 見えないうちに OK になるので使わない。初めは「キャンセル」を選んでおき、「削除する」は
 // マウスか指で押したときだけ受け付ける。消すものの名前は太字で出す。返り値は、消してよいとき true
 export function confirmDelete(message, name) {
+  return confirmAction({ message, name, action: "削除する" });
+}
+
+// 取り返しにくい操作の確認。作りは confirmDelete と同じで、ボタンの文を選べる
+export function confirmAction({ message, name = "", action, cancel = "キャンセル" }) {
   const dialog = document.createElement("dialog");
   dialog.className = "notice";
   dialog.innerHTML =
     '<p class="notice-text"></p><p class="notice-target"></p>' +
-    '<div class="row"><button class="text-btn" data-action="cancel">キャンセル</button>' +
-    '<button class="danger-btn" data-action="delete">削除する</button></div>';
+    '<div class="row"><button class="text-btn" data-action="cancel"></button>' +
+    '<button class="danger-btn" data-action="delete"></button></div>';
   dialog.querySelector(".notice-text").textContent = message;
   dialog.querySelector(".notice-target").textContent = name;
   dialog.querySelector(".notice-target").hidden = !name;
+  dialog.querySelector('[data-action="cancel"]').textContent = cancel;
+  dialog.querySelector('[data-action="delete"]').textContent = action;
   document.body.append(dialog);
   return new Promise((resolve) => {
     dialog.addEventListener("click", (event) => {

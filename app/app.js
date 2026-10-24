@@ -1,5 +1,7 @@
 import {
   DEFAULT_VIEW_DIRS,
+  alignBackdrop,
+  anchorBackdrop,
   bedAngle,
   viewAxes,
   boundingBox,
@@ -12,6 +14,7 @@ import {
   gapBetweenPolygons,
   gapToSegment,
   imageToWorld,
+  inheritBackdrop,
   layoutBeds,
   nearestEdgeAngle,
   pointInPolygon,
@@ -21,13 +24,16 @@ import {
   rectCentered,
   rectFromDiagonal,
   rectSize,
+  rotateBackdropAt,
   rotatePoints,
+  scaleBackdropAt,
   scalePoints,
   splitPolygon,
   translatePoints,
+  worldToImage,
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
-import { confirmDelete, notify } from "./dialog.js";
+import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal } from "./journal.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
@@ -56,6 +62,8 @@ const HINTS = {
   rect: "対角の 2 点をドラッグ。四角形は、いちばん近い外形の辺に平行になります。",
   size: "寸法を入れて、置く場所をクリック。置いたあとはドラッグで動かせます。",
   scale: "実際の距離が分かっている 2 点を順にクリック。",
+  scaleFitted: "下絵の尺度の線の両端など、実際の距離が分かっている 2 点を順にクリック。下絵の縮尺だけが変わり、図形は変わりません。",
+  align: "下絵の上の目印（角や杭など）を 1 つクリック。",
   block: "有効圃場をクリックすると、その全体が 1 つの耕起対象区画になります。",
   split: "区画（または有効圃場）の中をクリックすると、その位置で 2 つに分けます。端からの距離は、クリックのあとで数値で直せます。",
   blockrect: "有効圃場の中で、対角の 2 点をドラッグ。表示日に畝がない場所を、新しい区画にします。",
@@ -89,6 +97,7 @@ const state = {
   client: null,
   fields: [],
   field: null,
+  alignment: null, // 最後に下絵を図形に 2 点で合わせたときの、下絵と図形の大きさの比（図形を下絵の縮尺に合わせるときに使う）
   backdrop: null,
   backdropUrl: "",
   backdropVisible: true,
@@ -605,7 +614,7 @@ function renderMap(scale) {
   });
 
   if (state.draft.length) {
-    const open = state.mode === "scale" || state.mode === "split";
+    const open = state.mode === "scale" || state.mode === "split" || state.mode === "align";
     const closing = !open && state.draft.length >= 3 ? ` ${svgPoints([state.draft[0]])}` : "";
     parts.push(`<polyline class="draft" points="${svgPoints(state.draft)}${closing}" />`);
     if (state.mode !== "split") {
@@ -781,6 +790,14 @@ function renderPanel() {
     : "下絵がありません";
   $("rotation").value = state.backdrop ? state.backdrop.rotation_deg : 0;
   $("rotation").disabled = !state.backdrop;
+  const fitted = Boolean(state.backdrop?.fitted);
+  $("backdropRole").textContent = !state.backdrop
+    ? ""
+    : fitted
+      ? "この下絵は、いまの図形に合わせて置いています。縮尺・向き・位置を変えても、図形は変わりません。"
+      : "この下絵の上で図形を描きます。縮尺や向きを変えると、図形も一緒に伸び縮み・回転します。";
+  $("alignTools").hidden = !fitted;
+  $("fitShapesBtn").disabled = !state.alignment;
 }
 
 function renderSelection() {
@@ -934,7 +951,7 @@ function setMode(mode) {
     button.classList.toggle("is-active", button.dataset.mode === mode);
   });
   map.classList.toggle("is-drawing", mode !== "select");
-  $("hint").textContent = HINTS[mode];
+  $("hint").textContent = HINTS[mode === "scale" && state.backdrop?.fitted ? "scaleFitted" : mode];
   $("draftTools").hidden = mode !== "outline" && mode !== "zone";
   $("sizeTools").hidden = mode !== "size";
   $("splitTools").hidden = mode !== "split";
@@ -1039,25 +1056,141 @@ function askNumber(message, initial, allowZero = false) {
 function finishScale() {
   const measured = distance(state.draft[0], state.draft[1]);
   const actual = measured > 0 ? askNumber("この 2 点の実際の距離（m）") : null;
-  if (actual) {
+  if (actual && state.backdrop?.fitted) {
+    // 図形に合わせて置いた下絵: 下絵の縮尺だけを変える。クリックした 2 点の中ほどは動かさない
+    const middle = [(state.draft[0][0] + state.draft[1][0]) / 2, (state.draft[0][1] + state.draft[1][1]) / 2];
+    setBackdrop(scaleBackdropAt(state.backdrop, actual / measured, middle));
+    record({ kind: "backdrop.scale", plan: false, text: "下絵の縮尺を、下絵の尺度で合わせた（図形は変わらない）", after: `1 画素 = ${(state.backdrop.m_per_px * 100).toFixed(3)} cm` });
+  } else if (actual) {
     applyScale(actual / measured);
   }
   setMode("select");
 }
 
-function scaleByArea() {
+// 下絵の縮尺・向き・位置を変える。図形は変えない。前に測った下絵と図形の大きさの比は、使えなくなる
+function setBackdrop(backdrop) {
+  state.backdrop = backdrop;
+  state.alignment = null;
+  queueSave("backdrop");
+  render();
+}
+
+// 圃場に図形が 1 つでもあるか（外形か、どれかのプランの区域・区画・畝）
+async function fieldHasShapes() {
+  if (state.field.outline.length >= 3 || state.zones.length || state.blocks.length || state.beds.length) {
+    return true;
+  }
+  for (const plan of state.plans.filter((other) => other.id !== state.plan.id)) {
+    if ((await state.store.list("zones", plan.id)).length) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// 下絵を図形に合わせる。クリックは「下絵の上の目印、図形の上の点」の順で 2 組まで。
+// 1 組目で平行移動し、2 組目で向きも合わせる。大きさは変えない
+function alignStep() {
+  const clicks = state.draft;
+  if (clicks.length === 1) {
+    $("hint").textContent = "その目印が来るべき、図形の上の点をクリック。";
+  } else if (clicks.length === 2) {
+    setBackdrop(alignBackdrop(state.backdrop, [[clicks[0], clicks[1]]]).backdrop);
+    record({ kind: "backdrop.move", plan: false, text: "下絵の位置を、図形に合わせた（図形は変わらない）" });
+    // 1 つ目の目印は、いまは図形の上の点にある。次のクリックは、2 組目の下絵の上の目印
+    state.draft = [clicks[1], clicks[1]];
+    state.alignAt = clicks[1];
+    $("hint").textContent = "向きも合わせるときは、下絵の上の 2 つ目の目印をクリック（1 つ目から離れた点ほど正確です）。位置だけでよければ Esc。";
+    renderMap();
+  } else if (clicks.length === 3) {
+    $("hint").textContent = "その 2 つ目の目印が来るべき、図形の上の点をクリック。";
+  } else if (clicks.length === 4) {
+    const [, , from, to] = clicks;
+    const at = state.alignAt;
+    const { backdrop, ratio } = alignBackdrop(state.backdrop, [[at, at], [from, to]]);
+    setBackdrop(backdrop);
+    state.alignment = { pixel: worldToImage(backdrop, at), at, ratio };
+    record({ kind: "backdrop.turn", plan: false, text: "下絵の向きを、図形に合わせた（図形は変わらない）", after: `${round2(backdrop.rotation_deg)} 度` });
+    setMode("select");
+    const percent = (ratio - 1) * 100;
+    notify(
+      Math.abs(percent) < 0.5
+        ? `図形と下絵の大きさは、ほぼ合っています（差 ${Math.abs(percent).toFixed(1)}%）。`
+        : `図形は、この下絵の尺度より ${Math.abs(percent).toFixed(1)}% ${percent > 0 ? "大きく" : "小さく"}なっています` +
+            `（図形の上で ${distance(at, to).toFixed(2)} m、下絵の上で ${distance(at, from).toFixed(2)} m）。\n` +
+            "図形のほうが誤っているときは、「図形を下絵の縮尺に合わせる」で、この圃場の図形の大きさを直せます。下絵のほうが不正確なら、このままにしてください。"
+    );
+  }
+}
+
+const round2 = (value) => Math.round(value * 100) / 100;
+
+// 図形を、下絵の縮尺に合わせる。この圃場のすべてのプランの図形を、原点のまわりに伸び縮みさせ、
+// 下絵は、合わせた目印が図形と一緒に動くように平行移動する
+async function fitShapesToBackdrop() {
+  const alignment = state.alignment;
+  if (!alignment) {
+    return;
+  }
+  const factor = 1 / alignment.ratio;
+  const ok = await confirmAction({
+    message: "この圃場のすべてのプランの外形・区域・区画・畝の大きさを、下絵の縮尺に合わせて変えます。「元に戻す」では戻せません。",
+    name: `図形を ${factor.toFixed(4)} 倍`,
+    action: "図形の大きさを変える",
+  });
+  if (!ok || state.alignment !== alignment) {
+    return;
+  }
+  const at = [alignment.at[0] * factor, alignment.at[1] * factor];
+  state.backdrop = anchorBackdrop(state.backdrop, alignment.pixel, at);
+  state.alignment = null;
+  queueSave("backdrop");
+  const { x, y, w, h } = state.view;
+  setView({ x: x * factor, y: y * factor, w: w * factor, h: h * factor });
+  persist(() => transformShapes((points) => scalePoints(points, factor))).then(resetHistory);
+  record({ kind: "field.scale", plan: false, text: "図形を下絵の縮尺に合わせた（すべての図形の大きさが変わる）", after: `${factor.toFixed(4)} 倍` });
+  render();
+}
+
+
+async function scaleByArea() {
   if (state.field.outline.length < 3) {
     notify("先に圃場の外形を描いてください。");
     return;
   }
   const actual = askNumber("圃場の実際の面積（㎡）");
-  if (actual) {
-    applyScale(Math.sqrt(actual / polygonArea(state.field.outline)));
+  if (!actual) {
+    return;
   }
+  const factor = Math.sqrt(actual / polygonArea(state.field.outline));
+  if (!state.backdrop?.fitted) {
+    applyScale(factor);
+    return;
+  }
+  // 図形に合わせて置いた下絵: 図形の大きさだけを直す。下絵は動かさない
+  const ok = await confirmAction({
+    message: "外形の面積に合わせて、この圃場のすべてのプランの図形の大きさを変えます。下絵は変わらないので、下絵と図形がずれます。「元に戻す」では戻せません。",
+    name: `図形を ${factor.toFixed(4)} 倍`,
+    action: "図形の大きさを変える",
+  });
+  if (!ok) {
+    return;
+  }
+  state.alignment = null;
+  persist(() => transformShapes((points) => scalePoints(points, factor))).then(resetHistory);
+  record({ kind: "field.scale", plan: false, text: "外形の面積で、図形の大きさを直した（下絵は変わらない）", after: `${factor.toFixed(4)} 倍` });
+  render();
 }
 
 function setRotation(degrees) {
   const delta = degrees - state.backdrop.rotation_deg;
+  if (state.backdrop.fitted) {
+    // 図形に合わせて置いた下絵: 下絵だけを、画面の真ん中のまわりに回す
+    const { x, y, w, h } = state.view;
+    setBackdrop(rotateBackdropAt(state.backdrop, delta, [x + w / 2, -(y + h / 2)]));
+    record({ kind: "backdrop.turn", plan: false, text: "下絵の向きを変えた（図形は変わらない）", after: `${degrees} 度` });
+    return;
+  }
   state.backdrop.rotation_deg = degrees;
   queueSave("backdrop");
   if (state.field.view_dirs) {
@@ -1578,7 +1711,7 @@ async function loadFieldData(field) {
   } catch {
     // 読めなければ先頭のプランを開く
   }
-  Object.assign(state, { field, plans, backdrop, backdropUrl });
+  Object.assign(state, { field, plans, backdrop, backdropUrl, alignment: null });
   return plans.find((plan) => plan.id === currentId) || plans[0];
 }
 
@@ -1771,24 +1904,66 @@ function imageSize(url) {
   });
 }
 
+// 下絵を読み込む。図形がすでにある圃場では、図形に合わせて置く下絵（fitted）になり、
+// 縮尺・向き・位置を変えても図形は変わらない。前の下絵と同じ範囲を、解像度だけ変えて写した画像なら、
+// 縮尺・基準点・向きを、画素の数の比から引き継げる
 async function loadBackdropFile(file) {
+  const previous = state.backdrop;
+  let size;
+  const local = URL.createObjectURL(file);
+  try {
+    size = await imageSize(local);
+  } catch (error) {
+    $("saveStatus").textContent = `画像を読めませんでした: ${error.message}`;
+    return;
+  } finally {
+    URL.revokeObjectURL(local);
+  }
+  let placement = null;
+  let carried = false; // 前の下絵の縮尺・位置・向きを引き継いだか
+  const inherited = previous?.size ? inheritBackdrop(previous, previous.size, size) : null;
+  if (inherited) {
+    const same = await confirmAction({
+      message:
+        "前の下絵と、縦と横の比が同じ画像です。同じ範囲を、解像度だけ変えて写した画像なら、前の下絵の縮尺・位置・向きを引き継ぎます。別の範囲の画像なら、仮の縮尺で置きます。",
+      name: `${previous.size.join(" × ")} 画素 → ${size.join(" × ")} 画素`,
+      action: "同じ範囲として引き継ぐ",
+      cancel: "別の画像として置く",
+    });
+    if (same) {
+      placement = { ...inherited, fitted: Boolean(previous.fitted) };
+      carried = true;
+    }
+  }
+  if (!placement) {
+    placement = {
+      m_per_px: config.defaultMetersPerPixel,
+      origin_px: [size[0] / 2, size[1] / 2],
+      rotation_deg: 0,
+      fitted: await fieldHasShapes(),
+    };
+  }
   $("saveStatus").textContent = "画像を保存中…";
   try {
     const path = await state.store.uploadImage(state.field.id, file);
     const url = await state.store.imageUrl(path);
-    const size = await imageSize(url);
-    state.backdrop = {
-      id: crypto.randomUUID(),
-      field_id: state.field.id,
-      storage_path: path,
-      m_per_px: config.defaultMetersPerPixel,
-      origin_px: [size[0] / 2, size[1] / 2],
-      rotation_deg: 0,
-      size,
-    };
+    state.backdrop = { id: crypto.randomUUID(), field_id: state.field.id, storage_path: path, ...placement, size };
     state.backdropUrl = url;
+    state.alignment = null;
     queueSave("backdrop");
-    fitView();
+    record({
+      kind: "backdrop.load",
+      plan: false,
+      text: carried
+        ? "下絵を読み込んだ（前の下絵の縮尺・位置・向きを引き継いだ）"
+        : placement.fitted
+          ? "下絵を読み込んだ（図形に合わせて置く下絵。縮尺・向き・位置を変えても図形は変わらない）"
+          : "下絵を読み込んだ",
+      after: `${size.join(" × ")} 画素`,
+    });
+    if (!placement.fitted) {
+      fitView();
+    }
     render();
   } catch (error) {
     $("saveStatus").textContent = `画像の保存に失敗しました: ${error.message}`;
@@ -1979,6 +2154,11 @@ function endPointer(event) {
   if (state.mode === "select") {
     state.selected = finished.shape || null;
     state.selectedVertex = null;
+  } else if (state.mode === "align") {
+    state.draft.push(world);
+    alignStep();
+    renderMap();
+    return;
   } else if (state.mode === "scale") {
     state.draft.push(world);
     if (state.draft.length === 2) {
@@ -2045,6 +2225,7 @@ $("fitBtn").addEventListener("click", () => {
   renderMap();
 });
 $("scaleByAreaBtn").addEventListener("click", scaleByArea);
+$("fitShapesBtn").addEventListener("click", fitShapesToBackdrop);
 $("fieldSelect").addEventListener("change", (event) => {
   planTask(() => openField(state.fields.find((field) => field.id === event.target.value)));
 });

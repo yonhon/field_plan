@@ -44,6 +44,16 @@ create table if not exists field.backdrops (
   created_at timestamptz not null default now()
 );
 
+-- 図形に合わせて置いた下絵か。true なら、縮尺・向き・位置を変えても図形は変わらない。
+-- false は、その上で図形を描いた下絵で、縮尺や向きを変えると図形も一緒に伸び縮み・回転する
+alter table field.backdrops add column if not exists fitted boolean;
+-- 入れたときにあった下絵は、圃場の最初の 1 枚のほかを、図形に合わせて置いた下絵とみなす
+update field.backdrops b set fitted = exists (
+  select 1 from field.backdrops older where older.field_id = b.field_id and older.created_at < b.created_at
+) where fitted is null;
+alter table field.backdrops alter column fitted set default false;
+alter table field.backdrops alter column fitted set not null;
+
 -- プラン。圃場の外形と下絵は共通で、区域の配置を何通りか作って比べられる
 create table if not exists field.plans (
   id uuid primary key default gen_random_uuid(),
