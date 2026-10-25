@@ -66,13 +66,20 @@ const works = [
   { id: "w7", block_id: "k1", work_type: "rotary", seq: 1, plan_start: "2026-02-20", plan_end: "2026-02-20" },
 ];
 
-test("その日の作付は、いまの作付か次に来る作付で、収穫を終えた作付は選ばない", () => {
+test("その日の作付は、その日までに始まった作付のうちいちばん新しいもの。始まった日は、記録があれば記録の日", () => {
   const onBed1 = plantings.filter((item) => item.bed_id === "b1");
   assert.equal(plantingOnDate(onBed1, works, "2026-02-01").id, "p1"); // まだ始まっていなくても、次に来る作付
   assert.equal(plantingOnDate(onBed1, works, "2026-04-30").id, "p1");
-  assert.equal(plantingOnDate(onBed1, works, "2026-05-01").id, "p2");
-  assert.equal(plantingOnDate(onBed1, works, "2026-06-01"), null);
-  // 作業に日付のない作付は、いつでも選ぶ
+  // 収穫を終えたあとも、次の作付（5/10 から）が始まるまでは前の作付（残渣処理などの記録のため）
+  assert.equal(plantingOnDate(onBed1, works, "2026-05-01").id, "p1");
+  assert.equal(plantingOnDate(onBed1, works, "2026-05-10").id, "p2");
+  // 次の作付がなければ、最後の作付のまま（計画に収穫がない、作りかけの作付も）
+  assert.equal(plantingOnDate(onBed1, works, "2026-12-01").id, "p2");
+  // 計画と実績の両方があれば実績を優先する。p2 の最初の記録が 4/25 なら、4/25 から p2
+  const early = [{ date: "2026-04-25", targets: [{ planting_id: "p2" }] }];
+  assert.equal(plantingOnDate(onBed1, works, "2026-04-25", early).id, "p2");
+  assert.equal(plantingOnDate(onBed1, works, "2026-04-24", early).id, "p1");
+  // 作業に日付のない作付は、始まっている扱い
   assert.equal(plantingOnDate([{ id: "x", seq: 1 }], [], "2030-01-01").id, "x");
 });
 
@@ -92,11 +99,14 @@ test("対象は品目ごとにまとめ、マルチの有無で分ける。そ�
   assert.equal(item.planting_id, "p1");
   near(item.area_m2, 16);
   assert.deepEqual(choices.blocks.map((item) => [item.block_id, item.label, item.area_m2]), [["k1", "区画A", 60]]);
-  // 畝3 は 5/1 でなくなる。5/1 には畝1 がニンジンになる
-  const may = targetChoices(data, "2026-05-01");
+  // 畝3 は 5/1 でなくなる。5/10 には畝1 がニンジンになる。畝2 は次の作付がないので、レタスのまま
+  const may = targetChoices(data, "2026-05-10");
   assert.deepEqual(
     may.crops.map((group) => [group.name, group.items.map((item) => item.bed_id)]),
-    [["ニンジン", ["b1"]]]
+    [
+      ["ニンジン", ["b1"]],
+      ["レタス", ["b2"]],
+    ]
   );
 });
 

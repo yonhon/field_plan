@@ -29,21 +29,32 @@ export function bedAreas(block, beds) {
   return areas;
 }
 
-// その日に畝にある作付。いまの作付か、次に来る作付。収穫を終えた作付（最後の作業の終了日が前）は選ばない
-export function plantingOnDate(plantings, works, date) {
-  return (
-    [...plantings].sort(bySeq).find((planting) => {
-      const range = worksRange(works.filter((work) => work.planting_id === planting.id));
-      return !range || range.end >= date;
-    }) || null
-  );
+// 作付が始まった日。計画と実績の両方があれば実績を優先し、記録があれば最初の記録の日、なければ計画の最初の作業の日。
+// どちらもなければ null
+export function plantingStart(planting, works, logs = []) {
+  const recorded = logs
+    .filter((log) => (log.targets || []).some((target) => target.planting_id === planting.id))
+    .map((log) => log.date)
+    .sort()[0];
+  return recorded || worksRange(works.filter((work) => work.planting_id === planting.id))?.start || null;
+}
+
+// その日に畝にある作付。その日までに始まった作付のうち、いちばん新しいもの。まだどれも始まっていなければ、次に来る作付。
+// 計画に収穫が入っていない作付（計画を作りかけの作付）も、次の作付が始まるまでは、その畝の作付として扱う
+export function plantingOnDate(plantings, works, date, logs = []) {
+  const sorted = [...plantings].sort(bySeq);
+  const started = sorted.filter((planting) => {
+    const start = plantingStart(planting, works, logs);
+    return !start || start <= date;
+  });
+  return started.at(-1) || sorted[0] || null;
 }
 
 const cropMulch = (planting, crops) => planting.mulch ?? crops.find((crop) => crop.id === planting.crop_id)?.mulch ?? false;
 
 // 記録の対象にできるもの。その日にある畝の作付を、品目ごとにまとめる（同じ品目でも、マルチの有無で分ける）。
 // 区画の作業のために、その日にある区画も返す
-export function targetChoices({ blocks, beds, plantings, works, crops = [] }, date) {
+export function targetChoices({ blocks, beds, plantings, works, crops = [], logs = [] }, date) {
   const liveBlocks = blocks.filter((block) => existsOn(block.start_date, block.end_date, date));
   const groups = new Map();
   for (const block of liveBlocks) {
@@ -53,7 +64,8 @@ export function targetChoices({ blocks, beds, plantings, works, crops = [] }, da
       const planting = plantingOnDate(
         plantings.filter((item) => item.bed_id === bed.id),
         works,
-        date
+        date,
+        logs
       );
       if (!planting) {
         continue;

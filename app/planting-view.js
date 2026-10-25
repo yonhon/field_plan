@@ -144,8 +144,16 @@ export function renderPlantingDetail() {
 
 // ---- 気象 ----
 
-// 作付の定植・播種の日。記録があれば実績の開始日、なければ計画の開始日
+// 作付の定植・播種の日。計画と実績の両方があれば実績を優先し、定植・播種の記録があればその最初の日
+// （計画の作業につながっていない記録も含む）、なければ計画の定植・播種の開始日
 function plantedDate(c, actuals) {
+  const recorded = (state().logs || [])
+    .filter((log) => log.work_type === "plant" && log.targets.some((target) => target.planting_id === c.planting.id))
+    .map((log) => log.date)
+    .sort()[0];
+  if (recorded) {
+    return recorded;
+  }
   const plant = c.ownWorks.find((work) => work.work_type === "plant" && !work.cancelled_on);
   return plant ? actuals.get(plant.id)?.start || plant.plan_start || null : null;
 }

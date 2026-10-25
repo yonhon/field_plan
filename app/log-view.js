@@ -132,7 +132,7 @@ async function loadData() {
 
 // 計画の作業の対象（作付の畝、または区画）。その日の対象の一覧から取り、なければ名前だけで作る
 function targetForWork(work, date) {
-  const choices = targetChoices(data, date);
+  const choices = targetChoices({ ...data, logs: state().logs || [] }, date);
   if (work.block_id) {
     const block = data.blocks.find((item) => item.id === work.block_id);
     return choices.blocks.find((item) => item.block_id === work.block_id) || { block_id: work.block_id, label: block?.name || "", crop_name: "", area_m2: null };
@@ -357,7 +357,7 @@ function blankInput(kind) {
 }
 
 function currentChoices() {
-  return targetChoices(data, draft.date || localToday());
+  return targetChoices({ ...data, logs: state().logs || [] }, draft.date || localToday());
 }
 
 // 選んでいる対象。品目で選ぶときは畝ごと（まとまりの key 付き）、区画で選ぶときは区画ごと
@@ -855,7 +855,8 @@ export async function uncancelWork(work) {
   }
 }
 
-// 作業をした日を変える。その日にない畝や区画は、選びから外れる
+// 作業をした日を変える。その日にない畝や区画は、選びから外れる。
+// 一覧にない対象になっていた畝や区画も、その日の一覧にあれば、選んだ畝（区画）に戻す
 function setDate(date) {
   draft.date = date;
   const choices = currentChoices();
@@ -863,6 +864,17 @@ function setDate(date) {
   const blocks = new Set(choices.blocks.map((item) => item.block_id));
   draft.beds = new Set([...draft.beds].filter((id) => beds.has(id)));
   draft.blocks = new Set([...draft.blocks].filter((id) => blocks.has(id)));
+  draft.orphans = draft.orphans.filter((target) => {
+    if (target.bed_id && beds.has(target.bed_id)) {
+      draft.beds.add(target.bed_id);
+      return false;
+    }
+    if (!target.bed_id && target.block_id && blocks.has(target.block_id)) {
+      draft.blocks.add(target.block_id);
+      return false;
+    }
+    return true;
+  });
   renderDialog();
   updateTotals();
 }
