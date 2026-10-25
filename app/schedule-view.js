@@ -18,7 +18,7 @@ import {
 import { cropLabel, plantingNumbers, summarize } from "./crops.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { completeWorks, logForWork, openLogEditor } from "./log-view.js";
+import { completeWorks, logForWork, moveLogs, openLogEditor } from "./log-view.js";
 import { lateWorks, withActualDates, workActuals, workStatus } from "./logs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
@@ -46,6 +46,7 @@ const ARRANGE_MODES = {
 const picked = new Set(); // 工程表で選んでいる作業の ID
 let clipboard = null; // コピーか切り取りをした作業 { works, cut }
 let barDrag = null; // 工程表で帯をドラッグしている途中の状態
+let actualDrag = null; // 工程表で実績の帯をドラッグしている途中の状態
 let addingFor = null; // 「作付を追加」の日付の初期値を入れたときの状態
 
 const state = () => ctx.state;
@@ -342,22 +343,26 @@ export const anyTypeLabel = (code) => (state().allWorkTypes || state().workTypes
 
 // 区画または畝の実績の帯。計画の作業につながった記録は、開始から終了まで（終わっていなければ開始の日だけ）。
 // 計画にない作業の記録は、その日だけ
+// logs は、その帯のもとになった記録の ID（帯をドラッグすると、これらの記録の日付を動かす）
 export function actualSpans(ownerWorks, matchesTarget, actuals) {
   const spans = [];
+  const logs = state().logs || [];
   for (const work of ownerWorks) {
     const actual = actuals.get(work.id);
     if (actual) {
-      spans.push({ type: work.work_type, start: actual.start, end: actual.end || actual.start, open: !actual.end });
+      const ids = logs.filter((log) => log.targets.some((target) => target.work_id === work.id && matchesTarget(target))).map((log) => log.id);
+      spans.push({ type: work.work_type, start: actual.start, end: actual.end || actual.start, open: !actual.end, logs: ids });
     }
   }
-  const seen = new Set();
-  for (const log of state().logs || []) {
+  const byDay = new Map();
+  for (const log of logs) {
     if (log.targets.some((target) => !target.work_id && matchesTarget(target))) {
       const key = `${log.work_type}|${log.date}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        spans.push({ type: log.work_type, start: log.date, end: log.date, open: false, log: log.id });
+      if (!byDay.has(key)) {
+        byDay.set(key, { type: log.work_type, start: log.date, end: log.date, open: false, logs: [] });
+        spans.push(byDay.get(key));
       }
+      byDay.get(key).logs.push(log.id);
     }
   }
   return spans;
@@ -435,9 +440,10 @@ function renderGantt() {
       .map((span) => {
         const days = diffDays(span.start, span.end) + 1;
         const range = span.start === span.end ? fullDay(span.start) : `${fullDay(span.start)} 〜 ${fullDay(span.end)}`;
-        const tip = `<strong>${escapeHtml(anyTypeLabel(span.type))}（実績${span.open ? "。まだ終わっていない" : ""}）</strong>${range}`;
+        const tip = `<strong>${escapeHtml(anyTypeLabel(span.type))}（実績${span.open ? "。まだ終わっていない" : ""}）</strong>${range}${canEdit() ? "<br>ドラッグで記録の日を動かせます" : ""}`;
         return (
-          `<span class="gantt-actual-bar${span.open ? " is-open" : ""}" data-tip="${escapeHtml(tip)}" ` +
+          `<span class="gantt-actual-bar${span.open ? " is-open" : ""}" data-tip="${escapeHtml(tip)}" data-logs="${span.logs.join(",")}" ` +
+          `data-start="${span.start}" data-end="${span.end}" data-type="${span.type}" ` +
           `style="left:${x(span.start)}px;width:${days * DAY_PX}px;background-color:${TYPE_COLORS[span.type] || "#888"}">` +
           `${days * DAY_PX > 60 ? escapeHtml(anyTypeLabel(span.type)) : ""}</span>`
         );
@@ -448,8 +454,9 @@ function renderGantt() {
   // 計画の段（帯をドラッグできる）と、実績の段（ドラッグできない）
   const row = (cls, name, content, attrs) =>
     `<div class="gantt-row ${cls}${attrs === openRow ? " is-open" : ""}" ${attrs}><div class="gantt-name">${name}${lane("計画")}</div><div class="gantt-track">${content}</div></div>`;
-  const actualRow = (cls, name, content) =>
-    `<div class="gantt-actual ${cls}${mode === "both" ? " is-sub" : ""}"><div class="gantt-name">${mode === "both" ? "" : name}${lane("実績")}</div><div class="gantt-track">${content}</div></div>`;
+  // 実績の段。data-actual-block / data-actual-bed は、帯をドラッグしたときに、どの畝（区画）の記録を動かすかに使う
+  const actualRow = (cls, name, content, attrs) =>
+    `<div class="gantt-actual ${cls}${mode === "both" ? " is-sub" : ""}" ${attrs}><div class="gantt-name">${mode === "both" ? "" : name}${lane("実績")}</div><div class="gantt-track">${content}</div></div>`;
   const link = (kind, id, text) => `<a href="#" class="gantt-link" data-detail="${kind}" data-id="${id}">${escapeHtml(text)}</a>`;
 
   const rows = [];
@@ -459,7 +466,7 @@ function renderGantt() {
       rows.push(row("block", name, bars(blockWorks(block.id)), `data-block="${block.id}"`));
     }
     if (showActual) {
-      rows.push(actualRow("block", name, actualBars(spansOf.get(block.id))));
+      rows.push(actualRow("block", name, actualBars(spansOf.get(block.id)), `data-actual-block="${block.id}" data-name="${escapeHtml(block.name)}"`));
     }
     for (const bed of blockBeds(block.id)) {
       const plantings = bedPlantings(bed.id);
@@ -472,7 +479,8 @@ function renderGantt() {
         rows.push(row("bed", name, content, `data-bed="${bed.id}"`));
       }
       if (showActual) {
-        rows.push(actualRow("bed", name, actualBars(spansOf.get(bed.id))));
+        const label = `${block.name} 畝${bed.seq}`;
+        rows.push(actualRow("bed", name, actualBars(spansOf.get(bed.id)), `data-actual-bed="${bed.id}" data-name="${escapeHtml(label)}"`));
       }
     }
   }
@@ -1381,6 +1389,58 @@ function initGanttEditing() {
   gantt.addEventListener("pointerup", finish);
   gantt.addEventListener("pointercancel", finish);
 
+  // 実績の帯のドラッグ。横に動かした日数だけ、もとになった記録の日付を動かす
+  gantt.addEventListener("pointerdown", (event) => {
+    const bar = event.target.closest(".gantt-actual-bar");
+    if (!bar || !bar.dataset.logs || !canEdit() || event.button !== 0) {
+      return;
+    }
+    pressedBar = true;
+    actualDrag = { bar, row: bar.closest(".gantt-actual"), startX: event.clientX, days: 0, moved: false };
+    gantt.setPointerCapture(event.pointerId);
+  });
+  gantt.addEventListener("pointermove", (event) => {
+    if (!actualDrag) {
+      return;
+    }
+    const dx = event.clientX - actualDrag.startX;
+    if (!actualDrag.moved && Math.abs(dx) < 4) {
+      return;
+    }
+    actualDrag.moved = true;
+    actualDrag.days = Math.round(dx / DAY_PX);
+    actualDrag.bar.style.transform = `translateX(${actualDrag.days * DAY_PX}px)`;
+    const { start, end, type } = actualDrag.bar.dataset;
+    const moved = (iso) => fullDay(addDays(iso, actualDrag.days));
+    tip.innerHTML = `<strong>${escapeHtml(anyTypeLabel(type))}の記録</strong>${start === end ? moved(start) : `${moved(start)} 〜 ${moved(end)}`}`;
+    tip.hidden = false;
+    tip.style.left = `${Math.max(8, Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8))}px`;
+    tip.style.top = `${event.clientY + 18}px`;
+  });
+  const finishActual = async (event) => {
+    const drag = actualDrag;
+    actualDrag = null;
+    if (!drag) {
+      return;
+    }
+    drag.bar.style.transform = "";
+    tip.hidden = true;
+    if (event.type === "pointercancel" || !drag.moved || !drag.days) {
+      return;
+    }
+    const { actualBlock, actualBed, name } = drag.row.dataset;
+    let matches;
+    if (actualBlock) {
+      matches = blockTarget(actualBlock);
+    } else {
+      const bed = state().beds.find((item) => item.id === actualBed);
+      matches = bedTarget(bed, bedPlantings(actualBed).map((planting) => planting.id));
+    }
+    await moveLogs(drag.bar.dataset.logs.split(","), drag.days, matches, name);
+  };
+  gantt.addEventListener("pointerup", finishActual);
+  gantt.addEventListener("pointercancel", finishActual);
+
   // 帯のない所をクリックすると、選択を外して、その行を「作業の計画」で開く。
   // 行の名前の品目（区画の名前）は、作付の詳細へのリンク
   gantt.addEventListener("click", (event) => {
@@ -1475,7 +1535,7 @@ export function initSchedule(context) {
   // 工程表の帯にマウスを乗せると、開始日と終了日を出す
   const tip = $("ganttTip");
   $("gantt").addEventListener("pointermove", (event) => {
-    if (barDrag) {
+    if (barDrag || actualDrag) {
       return; // ドラッグ中は、動かした先の日付を別に出している
     }
     const bar = event.target.closest(".gantt-bar, .gantt-actual-bar");

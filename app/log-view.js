@@ -1,6 +1,6 @@
 // 作業の記録の画面。日程の画面の「最近の記録」の欄と「記録する」のボタン、記録を入れる窓。
 // 記録は、実際に使うプランの区画・畝・作付・作業につなぐ。計画はスマホでは直せないが、記録はスマホでも入れられる。
-import { WORK_COLORS, localToday } from "./schedule.js";
+import { WORK_COLORS, addDays, localToday } from "./schedule.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { matchWork, productAmount, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
@@ -181,6 +181,74 @@ export async function completeWorks(works) {
   } catch (error) {
     ctx.setStatus("");
     notify(`記録を保存できませんでした: ${error.message}`);
+  }
+}
+
+// 記録がほかの畝にも付いているときに、動かす範囲を尋ねる。"one"（この畝だけ）、"all"（記録ごと）、null（やめる）
+function chooseScope(rowName, others) {
+  const box = document.createElement("dialog");
+  box.className = "notice";
+  box.innerHTML =
+    '<p class="notice-text"></p><div class="row">' +
+    '<button class="primary-btn" data-scope="one"></button><button class="chip-btn" data-scope="all"></button>' +
+    '<button class="text-btn" data-scope="">キャンセル</button></div>';
+  box.querySelector(".notice-text").textContent = `この記録は、ほかの ${others} か所の畝（区画）にも付いています。どこまで日付を動かしますか。`;
+  box.querySelector('[data-scope="one"]').textContent = `${rowName}だけ動かす`;
+  box.querySelector('[data-scope="all"]').textContent = `記録ごと動かす（${others + 1} か所）`;
+  document.body.append(box);
+  return new Promise((resolve) => {
+    box.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-scope]");
+      if (button) {
+        box.returnValue = button.dataset.scope;
+        box.close();
+      }
+    });
+    box.addEventListener("close", () => {
+      box.remove();
+      resolve(box.returnValue || null);
+    });
+    box.showModal();
+  });
+}
+
+// 記録の日付を days 日ずらす（工程表の実績の帯のドラッグ）。matches(対象) は、ドラッグした行（畝か区画）の対象か。
+// 記録がほかの畝にも付いているときは、その行の分だけを別の記録に分けて動かすか、記録ごと動かすかを尋ねる
+export async function moveLogs(logIds, days, matches, rowName) {
+  const logs = logIds.map((id) => (state().logs || []).find((log) => log.id === id)).filter(Boolean);
+  if (!logs.length || !days) {
+    return false;
+  }
+  const others = Math.max(0, ...logs.map((log) => log.targets.filter((target) => !matches(target)).length));
+  const scope = others ? await chooseScope(rowName, others) : "all";
+  if (!scope) {
+    return false;
+  }
+  const fields = (log) => ({ id: log.id, field_id: log.field_id, date: log.date, work_type: log.work_type, finishes: log.finishes, spec: log.spec, note: log.note });
+  const strip = ({ id, log_id, ...rest }) => rest;
+  ctx.setStatus("記録の日付を動かしています…");
+  try {
+    for (const log of logs) {
+      const date = addDays(log.date, days);
+      const mine = log.targets.filter(matches);
+      const rest = log.targets.filter((target) => !matches(target));
+      if (scope === "all" || !rest.length) {
+        await state().store.saveLog({ ...fields(log), date, targets: log.targets, inputs: log.inputs || [] });
+      } else {
+        // 残す畝の記録と、動かす畝の記録に分ける
+        await state().store.saveLog({ ...fields(log), targets: rest, inputs: log.inputs || [] });
+        const { id, ...copy } = fields(log);
+        await state().store.saveLog({ ...copy, date, targets: mine.map(strip), inputs: (log.inputs || []).map(strip) });
+      }
+    }
+    await reload();
+    ctx.setStatus(`記録の日付を ${Math.abs(days)} 日${days > 0 ? "後ろ" : "前"}へ動かしました`);
+    return true;
+  } catch (error) {
+    ctx.setStatus("");
+    notify(`記録の日付を動かせませんでした: ${error.message}`);
+    await reload().catch(() => {});
+    return false;
   }
 }
 

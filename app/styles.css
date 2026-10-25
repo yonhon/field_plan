@@ -1771,6 +1771,13 @@ body.plan-busy #scheduleView {
   opacity: 0.55;
 }
 
+/* PC では、実績の帯もドラッグで日付を動かせる */
+@media (min-width: 801px) {
+  .gantt-actual-bar[data-logs]:not([data-logs=""]) {
+    cursor: grab;
+  }
+}
+
 .gantt-lane {
   margin-left: 6px;
   font-size: 10px;
