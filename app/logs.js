@@ -441,6 +441,51 @@ export function stackLanes(items) {
   return result;
 }
 
+// 工程表の 1 行の帯の置き方。items は { start, end }（日付）。
+// 1 日の作業はその日に描き、同じ日に 1 日の作業が複数あるときだけ、その日の中で上下の段に分ける。
+// 何日かの作業は、1 日の作業がある日を除いた日に、普通の高さで描く（初日に 1 日の作業があれば、残りの日だけ）。
+// 何日かの作業どうしが重なるとき、または 1 日の作業で全部の日が埋まる作業があるときは、帯が隠れないよう、
+// 行の全部を stackLanes で上下の段に分ける。
+// 返り値は描く帯（分かれた作業は複数）の [{ item（items の何番目か）, start, end, lane, lanes, cutStart, cutEnd }]。
+// cutStart / cutEnd は、作業の本当の開始日・終了日ではない切れ目か
+export function layoutBars(items) {
+  const indexed = items.map((item, i) => ({ ...item, i }));
+  const singles = indexed.filter((item) => item.start === item.end);
+  const multis = indexed.filter((item) => item.start < item.end);
+  const singleDays = new Map();
+  singles.forEach((item) => singleDays.set(item.start, [...(singleDays.get(item.start) || []), item]));
+  const segmentsOf = (item) => {
+    const segments = [];
+    let current = null;
+    for (let day = item.start; day <= item.end; day = addDays(day, 1)) {
+      if (singleDays.has(day)) {
+        current = null;
+      } else if (current) {
+        current.end = day;
+      } else {
+        current = { start: day, end: day };
+        segments.push(current);
+      }
+    }
+    return segments;
+  };
+  const split = multis.map((item) => ({ item, segments: segmentsOf(item) }));
+  const multisOverlap = multis.some((a, x) => multis.some((b, y) => x < y && a.start <= b.end && b.start <= a.end));
+  if (multisOverlap || split.some(({ segments }) => !segments.length)) {
+    return stackLanes(items).map((lane, i) => ({ item: i, start: items[i].start, end: items[i].end, ...lane, cutStart: false, cutEnd: false }));
+  }
+  const bars = [];
+  for (const [day, list] of singleDays) {
+    list.forEach((item, k) => bars.push({ item: item.i, start: day, end: day, lane: k, lanes: list.length, cutStart: false, cutEnd: false }));
+  }
+  for (const { item, segments } of split) {
+    segments.forEach((segment) =>
+      bars.push({ item: item.i, start: segment.start, end: segment.end, lane: 0, lanes: 1, cutStart: segment.start !== item.start, cutEnd: segment.end !== item.end })
+    );
+  }
+  return bars.sort((a, b) => a.item - b.item || a.start.localeCompare(b.start));
+}
+
 // 品目ごとに入れた液の量（L）を、その品目の畝に面積の比で分ける。面積が分からなければ等分
 export function splitByArea(items, liters) {
   if (!items.length || !(liters > 0)) {

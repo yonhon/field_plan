@@ -1783,6 +1783,19 @@ body.plan-busy #scheduleView {
   opacity: 0.55;
 }
 
+/* 1 日の作業をよけて分かれた帯は、切れ目の角を四角くして、続きだと分かるようにする */
+.gantt-bar.cut-start,
+.gantt-actual-bar.cut-start {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.gantt-bar.cut-end,
+.gantt-actual-bar.cut-end {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 /* PC では、実績の帯もドラッグで日付を動かせる */
 @media (min-width: 801px) {
   .gantt-actual-bar[data-logs]:not([data-logs=""]) {

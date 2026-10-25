@@ -19,7 +19,7 @@ import { cropLabel, plantingNumbers, summarize } from "./crops.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, logForWork, moveLogs, openLogEditor } from "./log-view.js";
-import { lateWorks, stackLanes, withActualDates, workActuals, workStatus } from "./logs.js";
+import { lateWorks, layoutBars, withActualDates, workActuals, workStatus } from "./logs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
 
@@ -423,36 +423,53 @@ function renderGantt() {
     months.push(`<span class="gantt-month" style="left:${x(day)}px">${Number(day.slice(0, 4))}年${Number(day.slice(5, 7))}月</span>`);
   }
   const flaggedWorks = new Set(problems.map((problem) => problem.work_id).filter(Boolean));
-  // 同じ行で日が重なる帯は、上下の段に分けて細くする（1 日の作業は、ほかの作業と同じ日に重ねられるため）
+  // 帯の置き方（layoutBars）。1 日の作業と長い作業が重なる日は 1 日の作業を描き、長い作業はほかの日に普通の高さで描く。
+  // 上下の段に分けるのは、1 日の作業どうしが同じ日に重なるときだけ
   const laneStyle = ({ lane, lanes }) => (lanes > 1 ? `top:${(lane * 100) / lanes}%;height:${100 / lanes}%;bottom:auto;` : "");
+  const cutClass = (bar) => `${bar.cutStart ? " cut-start" : ""}${bar.cutEnd ? " cut-end" : ""}`;
+  // 分かれた作業の名前は、いちばん長い切れ端にだけ書く
+  const labelled = (layout) => {
+    const best = new Map();
+    layout.forEach((bar, k) => {
+      const days = diffDays(bar.start, bar.end) + 1;
+      if (bar.lanes === 1 && days * DAY_PX > 60 && (!best.has(bar.item) || days > best.get(bar.item).days)) {
+        best.set(bar.item, { k, days });
+      }
+    });
+    return new Set([...best.values()].map((item) => item.k));
+  };
   // entries は { work, extra }（extra は、帯の説明に添える品目の名前）
   const bars = (entries) => {
     const dated = entries.filter(({ work }) => isDated(work));
-    const lanes = stackLanes(dated.map(({ work }) => ({ start: work.plan_start, end: work.plan_end })));
-    return dated
-      .map(({ work, extra = "" }, i) => {
-        const days = workDays(work);
-        const tip = `<strong>${escapeHtml(typeLabel(work.work_type))}${escapeHtml(extra)}</strong>${fullDay(work.plan_start)} 〜 ${fullDay(work.plan_end)}（${days} 日）`;
+    const layout = layoutBars(dated.map(({ work }) => ({ start: work.plan_start, end: work.plan_end })));
+    const named = labelled(layout);
+    return layout
+      .map((bar, k) => {
+        const { work, extra = "" } = dated[bar.item];
+        const days = diffDays(bar.start, bar.end) + 1;
+        const tip = `<strong>${escapeHtml(typeLabel(work.work_type))}${escapeHtml(extra)}</strong>${fullDay(work.plan_start)} 〜 ${fullDay(work.plan_end)}（${workDays(work)} 日）`;
         return (
-          `<span class="gantt-bar${picked.has(work.id) ? " is-picked" : ""}${flaggedWorks.has(work.id) ? " is-flagged" : ""}" data-id="${work.id}" data-tip="${escapeHtml(tip)}" ` +
-          `style="left:${x(work.plan_start)}px;width:${days * DAY_PX}px;${laneStyle(lanes[i])}background-color:${TYPE_COLORS[work.work_type] || "#888"}">` +
-          `${days * DAY_PX > 60 && lanes[i].lanes === 1 ? escapeHtml(typeLabel(work.work_type)) : ""}</span>`
+          `<span class="gantt-bar${cutClass(bar)}${picked.has(work.id) ? " is-picked" : ""}${flaggedWorks.has(work.id) ? " is-flagged" : ""}" data-id="${work.id}" data-tip="${escapeHtml(tip)}" ` +
+          `style="left:${x(bar.start)}px;width:${days * DAY_PX}px;${laneStyle(bar)}background-color:${TYPE_COLORS[work.work_type] || "#888"}">` +
+          `${named.has(k) ? escapeHtml(typeLabel(work.work_type)) : ""}</span>`
         );
       })
       .join("");
   };
   const actualBars = (spans) => {
-    const lanes = stackLanes(spans);
-    return spans
-      .map((span, i) => {
-        const days = diffDays(span.start, span.end) + 1;
+    const layout = layoutBars(spans);
+    const named = labelled(layout);
+    return layout
+      .map((bar, k) => {
+        const span = spans[bar.item];
+        const days = diffDays(bar.start, bar.end) + 1;
         const range = span.start === span.end ? fullDay(span.start) : `${fullDay(span.start)} 〜 ${fullDay(span.end)}`;
         const tip = `<strong>${escapeHtml(anyTypeLabel(span.type))}（実績${span.open ? "。まだ終わっていない" : ""}）</strong>${range}${canEdit() ? "<br>ドラッグで記録の日を動かせます" : ""}`;
         return (
-          `<span class="gantt-actual-bar${span.open ? " is-open" : ""}" data-tip="${escapeHtml(tip)}" data-logs="${span.logs.join(",")}" ` +
+          `<span class="gantt-actual-bar${cutClass(bar)}${span.open ? " is-open" : ""}" data-tip="${escapeHtml(tip)}" data-logs="${span.logs.join(",")}" ` +
           `data-start="${span.start}" data-end="${span.end}" data-type="${span.type}" ` +
-          `style="left:${x(span.start)}px;width:${days * DAY_PX}px;${laneStyle(lanes[i])}background-color:${TYPE_COLORS[span.type] || "#888"}">` +
-          `${days * DAY_PX > 60 && lanes[i].lanes === 1 ? escapeHtml(anyTypeLabel(span.type)) : ""}</span>`
+          `style="left:${x(bar.start)}px;width:${days * DAY_PX}px;${laneStyle(bar)}background-color:${TYPE_COLORS[span.type] || "#888"}">` +
+          `${named.has(k) ? escapeHtml(anyTypeLabel(span.type)) : ""}</span>`
         );
       })
       .join("");
@@ -1407,7 +1424,12 @@ function initGanttEditing() {
       return;
     }
     pressedBar = true;
-    actualDrag = { bar, row: bar.closest(".gantt-actual"), startX: event.clientX, days: 0, moved: false };
+    const row = bar.closest(".gantt-actual");
+    // 1 日の作業をよけて分かれた帯は、まとめて動かす
+    const parts = [...row.querySelectorAll(".gantt-actual-bar")].filter(
+      (item) => item.dataset.logs === bar.dataset.logs && item.dataset.start === bar.dataset.start && item.dataset.type === bar.dataset.type
+    );
+    actualDrag = { bar, parts, row, startX: event.clientX, days: 0, moved: false };
     gantt.setPointerCapture(event.pointerId);
   });
   gantt.addEventListener("pointermove", (event) => {
@@ -1420,7 +1442,7 @@ function initGanttEditing() {
     }
     actualDrag.moved = true;
     actualDrag.days = Math.round(dx / DAY_PX);
-    actualDrag.bar.style.transform = `translateX(${actualDrag.days * DAY_PX}px)`;
+    actualDrag.parts.forEach((part) => (part.style.transform = `translateX(${actualDrag.days * DAY_PX}px)`));
     const { start, end, type } = actualDrag.bar.dataset;
     const moved = (iso) => fullDay(addDays(iso, actualDrag.days));
     tip.innerHTML = `<strong>${escapeHtml(anyTypeLabel(type))}の記録</strong>${start === end ? moved(start) : `${moved(start)} 〜 ${moved(end)}`}`;
@@ -1434,7 +1456,7 @@ function initGanttEditing() {
     if (!drag) {
       return;
     }
-    drag.bar.style.transform = "";
+    drag.parts.forEach((part) => (part.style.transform = ""));
     tip.hidden = true;
     if (event.type === "pointercancel" || !drag.moved || !drag.days) {
       return;

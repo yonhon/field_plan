@@ -14,6 +14,7 @@ import {
   usageTable,
   shiftAfterActual,
   specDiff,
+  layoutBars,
   stackLanes,
   withActualDates,
   workStatus,
@@ -292,4 +293,34 @@ test("日が重なる帯を、重なりのまとまりごとに上下の段に�
     { lane: 1, lanes: 2 },
   ]);
   assert.deepEqual(stackLanes([]), []);
+});
+
+test("工程表の帯の置き方。上下に分けるのは、1 日の作業どうしが同じ日に重なるときだけ", () => {
+  const brief = (bars) => bars.map((bar) => [bar.item, bar.start.slice(5), bar.end.slice(5), bar.lane, bar.lanes, bar.cutStart, bar.cutEnd]);
+  // 1 日のマルチ張り（6/1）と、同じ日に始まる 5 日の定植（6/1〜6/5）: 6/1 はマルチ張り、定植は 6/2〜6/5 を普通の高さで
+  assert.deepEqual(brief(layoutBars([{ start: "2027-06-01", end: "2027-06-01" }, { start: "2027-06-01", end: "2027-06-05" }])), [
+    [0, "06-01", "06-01", 0, 1, false, false],
+    [1, "06-02", "06-05", 0, 1, true, false],
+  ]);
+  // 同じ日に 1 日の作業が 2 つ（畝立てとマルチ張り）なら、その日の中だけ上下に分ける
+  assert.deepEqual(brief(layoutBars([{ start: "2027-06-01", end: "2027-06-01" }, { start: "2027-06-01", end: "2027-06-01" }, { start: "2027-06-02", end: "2027-06-04" }])), [
+    [0, "06-01", "06-01", 0, 2, false, false],
+    [1, "06-01", "06-01", 1, 2, false, false],
+    [2, "06-02", "06-04", 0, 1, false, false],
+  ]);
+  // 収穫（6/10〜6/20）の途中の 1 日の防除（6/15）: 収穫の帯は防除の日の前後に分かれる
+  assert.deepEqual(brief(layoutBars([{ start: "2027-06-10", end: "2027-06-20" }, { start: "2027-06-15", end: "2027-06-15" }])), [
+    [0, "06-10", "06-14", 0, 1, false, true],
+    [0, "06-16", "06-20", 0, 1, true, false],
+    [1, "06-15", "06-15", 0, 1, false, false],
+  ]);
+  // 何日かの作業どうしが重なるときは、行の全部を上下に分ける（どの帯も隠れないように）
+  assert.deepEqual(brief(layoutBars([{ start: "2027-06-01", end: "2027-06-03" }, { start: "2027-06-03", end: "2027-06-05" }])), [
+    [0, "06-01", "06-03", 0, 2, false, false],
+    [1, "06-03", "06-05", 1, 2, false, false],
+  ]);
+  // 2 日の作業の両日に 1 日の作業があって、全部の日が埋まるときも、上下に分ける
+  assert.equal(layoutBars([{ start: "2027-06-01", end: "2027-06-02" }, { start: "2027-06-01", end: "2027-06-01" }, { start: "2027-06-02", end: "2027-06-02" }]).every((bar) => bar.start === "2027-06-01" || bar.lanes >= 1), true);
+  assert.equal(layoutBars([{ start: "2027-06-01", end: "2027-06-02" }, { start: "2027-06-01", end: "2027-06-01" }, { start: "2027-06-02", end: "2027-06-02" }]).length, 3);
+  assert.deepEqual(layoutBars([]), []);
 });
