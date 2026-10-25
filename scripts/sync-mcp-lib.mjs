@@ -6,7 +6,7 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const SHARED = ["geometry.js", "schedule.js", "crops.js", "updates.json"];
+export const SHARED = ["geometry.js", "schedule.js", "crops.js", "logs.js", "updates.json"];
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const APP = join(root, "app");

@@ -1,8 +1,9 @@
-// 計画を返す道具。data は index.ts が DB から読んだもの（表ごとの行の配列と、アプリの更新の一覧）。
+// 計画と作業の記録を返す道具。data は index.ts が DB から読んだもの（表ごとの行の配列と、アプリの更新の一覧）。
 // 圃場はいくつもある。品目と肥料のほかは、どの圃場の話かを毎回 field で選ぶ。
-// 面積、苗数、肥料の量、日程の無理は、画面と同じ部品（lib/）で計算する。
+// 面積、苗数、肥料の量、日程の無理、農薬の使用回数は、画面と同じ部品（lib/）で計算する。
 import { plantingNumbers, summarize, cropLabel } from "./lib/crops.js";
 import { polygonArea, rectSize } from "./lib/geometry.js";
+import { firstHarvestDay, inputText, specText, usageTable } from "./lib/logs.js";
 import { harvestEnd, planProblems, worksRange } from "./lib/schedule.js";
 
 class ToolInputError extends Error {}
@@ -12,6 +13,8 @@ const ZONE_KINDS = { tillable: "有効圃場", shed: "物置", well: "井戸", p
 const TIME_ZONE = "Asia/Tokyo";
 const DEFAULT_CHANGE_DAYS = 30;
 const MAX_CHANGE_DAYS = 120;
+const MAX_RECORDS = 200;
+const INPUT_KINDS = { pesticide: "農薬", fertilizer: "肥料", seed: "種苗", material: "資材" };
 const bySeq = (a, b) => a.seq - b.seq;
 const round = (value, digits = 1) => Math.round(value * 10 ** digits) / 10 ** digits;
 
@@ -71,7 +74,7 @@ function pickField(data, name) {
   throw new ToolInputError(`圃場「${name}」は${partial.length ? "複数あります" : "ありません"}。圃場の名前: ${names}`);
 }
 
-// 選んだ圃場のプランと変更の記録だけにする。区域や畝などは、プランで絞る（scope）
+// 選んだ圃場のプラン、変更の記録、作業の記録だけにする。区域や畝などは、プランで絞る（scope）
 function inField(data, name) {
   const field = pickField(data, name);
   return {
@@ -79,8 +82,15 @@ function inField(data, name) {
     field,
     plans: data.plans.filter((plan) => plan.field_id === field.id),
     changes: data.changes.filter((entry) => entry.field_id === field.id),
+    workLogs: (data.workLogs || []).filter((log) => log.field_id === field.id),
   };
 }
+
+// 作業の記録をつなぐ「実際に使うプラン」。決まっていなければ null
+const activePlanOf = (data) => data.plans.find((plan) => plan.id === data.field.active_plan_id) || null;
+
+// 文字の絞り込み。省いたときは何でも通す。一部が合えばよい
+const matchText = (value, query) => query == null || query === "" || String(value || "").includes(String(query));
 
 const fieldArea = (field) => (field.outline?.length >= 3 ? round(polygonArea(field.outline)) : null);
 
@@ -106,6 +116,7 @@ const workLine = (part, work) => ({
   start: work.plan_start,
   end: work.plan_end,
   ...(work.note ? { note: work.note } : {}),
+  ...(work.cancelled_on ? { cancelled_on: work.cancelled_on } : {}),
 });
 
 const FIELD_ARG = { field: { type: "string", description: "圃場の名前（一部でもよい）。list_fields で確かめる。" } };
@@ -121,13 +132,18 @@ export const TOOLS = [
       return {
         fields: data.fields.map((field) => {
           const last = data.changes.find((entry) => entry.field_id === field.id);
+          const logs = (data.workLogs || []).filter((log) => log.field_id === field.id);
           return {
             name: field.name,
             area_sqm: fieldArea(field),
             plans: data.plans.filter((plan) => plan.field_id === field.id).map((plan) => plan.name),
+            active_plan: data.plans.find((plan) => plan.id === field.active_plan_id)?.name || null,
             last_change: last ? { date: last.day, no: `#${last.no}` } : null,
+            records: logs.length,
+            last_record: logs.map((log) => log.date).sort().at(-1) || null,
           };
         }),
+        note: "active_plan は「実際に使うプラン」。作業の記録は、このプランの区画と畝につないでいます。",
       };
     },
   },
@@ -146,6 +162,7 @@ export const TOOLS = [
           const last = data.changes.find((entry) => entry.plan_id === plan.id);
           return {
             name: plan.name,
+            ...(plan.id === data.field.active_plan_id ? { active: true } : {}),
             tillable_area_sqm: round(part.zones.filter((zone) => zone.kind === "tillable").reduce((sum, zone) => sum + polygonArea(zone.shape), 0)),
             blocks: part.blocks.length,
             beds: part.beds.length,
@@ -155,7 +172,7 @@ export const TOOLS = [
             last_change: last ? { date: last.day, no: `#${last.no}` } : null,
           };
         }),
-        note: "last_change が空のプランは、変更の記録を始める前に作ったか、まだ変更がないプランです。",
+        note: "last_change が空のプランは、変更の記録を始める前に作ったか、まだ変更がないプランです。active が true のプランは「実際に使うプラン」で、作業の記録はこのプランにつないでいます。",
       };
     },
   },
@@ -163,7 +180,7 @@ export const TOOLS = [
     name: "get_plan",
     title: "プランの配置と作付",
     description:
-      "1 つのプランの全体を返す。区域、耕起対象区画（区画の作業を含む）、区画ごとの畝、畝ごとの作付（品目、苗数、肥料の量、作業の日付）、品目ごとの集計、日程の無理の指摘。",
+      "1 つのプランの全体を返す。区域、耕起対象区画（区画の作業を含む）、区画ごとの畝、畝ごとの作付（品目、苗数、肥料の量、作業の日付）、品目ごとの集計、日程の無理の指摘。取りやめた作業には cancelled_on（取りやめた日）が付く。",
     inputSchema: {
       type: "object",
       properties: { ...FIELD_ARG, ...PLAN_ARG, block: { type: "string", description: "区画の名前。指定すると、その区画だけを返す。" } },
@@ -247,7 +264,7 @@ export const TOOLS = [
   {
     name: "get_schedule",
     title: "期間を決めた作業の一覧",
-    description: "計画した作業を、日付の順に返す。同じ日の同じ作業は、場所（区画や畝）をまとめて 1 件にする。期間を省くと、日付の入った作業をすべて返す。",
+    description: "計画した作業を、日付の順に返す。同じ日の同じ作業は、場所（区画や畝）をまとめて 1 件にする。期間を省くと、日付の入った作業をすべて返す。取りやめた作業には cancelled_on（取りやめた日）が付く。実際に行ったかは get_records で確かめる。",
     inputSchema: {
       type: "object",
       properties: {
@@ -267,9 +284,16 @@ export const TOOLS = [
       const groups = new Map();
       for (const work of dated) {
         const planting = part.plantings.find((item) => item.id === work.planting_id);
-        const key = `${work.plan_start}|${work.plan_end}|${work.work_type}|${planting?.crop_name || ""}`;
+        const key = `${work.plan_start}|${work.plan_end}|${work.work_type}|${planting?.crop_name || ""}|${work.cancelled_on || ""}`;
         if (!groups.has(key)) {
-          groups.set(key, { start: work.plan_start, end: work.plan_end, work: part.typeLabel(work.work_type), ...(planting?.crop_name ? { crop: planting.crop_name } : {}), places: [] });
+          groups.set(key, {
+            start: work.plan_start,
+            end: work.plan_end,
+            work: part.typeLabel(work.work_type),
+            ...(planting?.crop_name ? { crop: planting.crop_name } : {}),
+            ...(work.cancelled_on ? { cancelled_on: work.cancelled_on } : {}),
+            places: [],
+          });
         }
         groups.get(key).places.push(part.place(work));
       }
@@ -364,7 +388,159 @@ export const TOOLS = [
       };
     },
   },
+  {
+    name: "get_records",
+    title: "作業の記録",
+    description:
+      "実際に行った作業の記録を、新しい日から順に返す。記録ごとに、作業をした日、作業、対象の畝（記録した時点の名前、品目、畝＋通路の面積）、仕様（株間など）、資材（農薬、肥料など）、メモ、つながる計画の作業。期間、品目、作業、場所で絞れる。取りやめた計画の作業も返す。",
+    inputSchema: {
+      type: "object",
+      required: ["field"],
+      properties: {
+        ...FIELD_ARG,
+        from: { type: "string", description: "この日以降（YYYY-MM-DD）。" },
+        to: { type: "string", description: "この日以前（YYYY-MM-DD）。" },
+        crop: { type: "string", description: "品目の名前（一部でもよい）。" },
+        work: { type: "string", description: "作業の名前（一部でもよい。例: 防除、定植、灌水）。" },
+        place: { type: "string", description: "場所（一部でもよい。例: 区画1、区画1 畝3）。" },
+      },
+    },
+    run(all, args) {
+      const data = inField(all, args.field);
+      const from = dateArg(args.from, "from");
+      const to = dateArg(args.to, "to");
+      const active = activePlanOf(data);
+      const part = active ? scope(data, active) : null;
+      const typeLabel = (code) => data.workTypes.find((type) => type.code === code)?.label || code;
+      const records = data.workLogs
+        .filter((log) => (!from || log.date >= from) && (!to || log.date <= to) && matchText(typeLabel(log.work_type), args.work))
+        .map((log) => ({ log, targets: (log.targets || []).filter((target) => matchText(target.crop_name, args.crop) && matchText(target.label, args.place)) }))
+        .filter((item) => item.targets.length)
+        .sort((a, b) => b.log.date.localeCompare(a.log.date) || String(b.log.created_at).localeCompare(String(a.log.created_at)));
+      const shown = records.slice(0, MAX_RECORDS);
+      // 畝ごとの、つながる計画の作業（実際に使うプランの作業）
+      const plannedOf = (target) => (part && target.work_id ? part.works.find((work) => work.id === target.work_id) || null : null);
+      const cancelled = part
+        ? part.works
+            .filter((work) => work.cancelled_on && (!from || work.cancelled_on >= from) && (!to || work.cancelled_on <= to) && matchText(part.typeLabel(work.work_type), args.work))
+            .map((work) => ({ work, place: part.place(work), crop: part.plantings.find((item) => item.id === work.planting_id)?.crop_name || "" }))
+            .filter((item) => matchText(item.crop, args.crop) && matchText(item.place, args.place))
+            .map(({ work, place, crop }) => ({
+              cancelled_on: work.cancelled_on,
+              work: part.typeLabel(work.work_type),
+              place,
+              ...(crop ? { crop } : {}),
+              planned: { start: work.plan_start, end: work.plan_end },
+              ...(work.cancel_note ? { note: work.cancel_note } : {}),
+            }))
+        : [];
+      return {
+        field: data.field.name,
+        active_plan: active?.name || null,
+        from,
+        to,
+        records: shown.map(({ log, targets }) => {
+          const spec = specText(log.work_type, log.spec || {});
+          const inputs = [...(log.inputs || [])].sort(bySeq);
+          const linked = targets.some((target) => plannedOf(target));
+          return {
+            date: log.date,
+            work: typeLabel(log.work_type),
+            places: [...targets]
+              .sort((a, b) => a.label.localeCompare(b.label, "ja", { numeric: true }))
+              .map((target) => {
+                const planned = plannedOf(target);
+                return {
+                  place: target.label,
+                  ...(target.crop_name ? { crop: target.crop_name } : {}),
+                  ...(target.area_m2 != null ? { area_sqm: round(Number(target.area_m2)) } : {}),
+                  ...(target.spray_l != null ? { spray_liters: round(Number(target.spray_l), 2) } : {}),
+                  ...(planned ? { planned: { start: planned.plan_start, end: planned.plan_end } } : {}),
+                };
+              }),
+            ...((log.targets || []).length > targets.length ? { other_places: log.targets.length - targets.length } : {}),
+            ...(spec ? { spec } : {}),
+            ...(inputs.length
+              ? {
+                  inputs: inputs.map((input) => ({
+                    kind: INPUT_KINDS[input.kind] || input.kind,
+                    text: inputText(input),
+                    ...(input.amount != null ? { amount: Number(input.amount), unit: input.unit } : {}),
+                  })),
+                }
+              : {}),
+            ...(log.note ? { note: log.note } : {}),
+            ...(linked ? { completes_planned_work: Boolean(log.finishes) } : {}),
+          };
+        }),
+        ...(records.length > shown.length ? { more_records: records.length - shown.length, hint: "from と to で期間を絞ると、残りの記録を読めます。" } : {}),
+        cancelled_works: cancelled,
+        note:
+          "places の place は、記録した時点の名前です。planned は、その畝で、この記録がつながる計画の作業の予定日です（計画にない作業にはありません）。completes_planned_work が true なら、つながる計画の作業をこの記録で終えています。other_places は、同じ記録のうち、絞り込みに合わなかった畝の数です。2 日以上かかった作業は、日ごとに 1 件ずつ記録しています。cancelled_works は、取りやめた計画の作業です。",
+      };
+    },
+  },
+  {
+    name: "get_pesticide_usage",
+    title: "農薬の使用回数",
+    famic: true, // 農薬の使用基準（FAMIC）を使う。外せる（toolsFor）
+    description:
+      "実際に使うプランの作付ごとに、防除の記録から数えた農薬の使用回数（本剤ごとと、有効成分ごと）と、使用基準の上限、使用時期の基準を満たす最初の収穫日を返す。使用基準は、防除を記録した時点の農薬登録情報の写し。",
+    inputSchema: {
+      type: "object",
+      required: ["field"],
+      properties: {
+        ...FIELD_ARG,
+        crop: { type: "string", description: "品目の名前（一部でもよい）。" },
+        place: { type: "string", description: "場所（一部でもよい。例: 区画1、区画1 畝3）。" },
+      },
+    },
+    run(all, args) {
+      const data = inField(all, args.field);
+      const active = activePlanOf(data);
+      if (!active) {
+        throw new ToolInputError("この圃場には、実際に使うプランが決まっていません。防除の記録は、実際に使うプランの作付につなぎます。");
+      }
+      const part = scope(data, active);
+      const logs = data.workLogs;
+      const spraysOf = (planting) =>
+        logs.filter((log) => (log.inputs || []).some((input) => input.kind === "pesticide") && (log.targets || []).some((target) => target.planting_id === planting.id));
+      const plantings = part.plantings
+        .map((planting) => ({ planting, place: part.place({ planting_id: planting.id }), sprays: spraysOf(planting) }))
+        .filter((item) => item.sprays.length && matchText(item.planting.crop_name, args.crop) && matchText(item.place, args.place))
+        .sort((a, b) => a.place.localeCompare(b.place, "ja", { numeric: true }) || a.planting.seq - b.planting.seq);
+      return {
+        field: data.field.name,
+        active_plan: active.name,
+        plantings: plantings.map(({ planting, place, sprays }) => {
+          const table = usageTable(logs, planting.id, planting.crop_name);
+          const harvestFrom = firstHarvestDay(logs, planting.id, planting.crop_name);
+          return {
+            place,
+            crop: planting.crop_name || "品目なし",
+            sprays: [...sprays]
+              .sort((a, b) => a.date.localeCompare(b.date))
+              .map((log) => ({ date: log.date, products: (log.inputs || []).filter((input) => input.kind === "pesticide").map(inputText) })),
+            ingredients: table.ingredients.map((item) => ({
+              name: item.name,
+              count: item.count,
+              max: item.max,
+              ...(item.max && item.count >= item.max ? { reached_limit: true } : {}),
+              ...(item.condition ? { condition: item.condition } : {}),
+            })),
+            products: table.products.map((item) => ({ name: item.name, reg_no: item.reg_no, count: item.count, max: item.max })),
+            ...(harvestFrom ? { harvest_ok_from: harvestFrom } : {}),
+          };
+        }),
+        note:
+          "回数は、このアプリの防除の記録から数えた回数で、1 件の記録で 1 回です。max は使用基準の上限（記録した時点の写し）で、空は写しがないものです。condition は、上限に条件があるときの基準の文です。harvest_ok_from は、最後の防除と使用時期（収穫の何日前まで）から求めた、基準を満たす最初の収穫日です。登録内容は変わることがあるので、使う前に農薬のラベルで確かめてください。",
+      };
+    },
+  },
 ];
+
+// 公開する道具。famic が false なら、農薬の使用基準を使う道具を外す
+export const toolsFor = ({ famic = true } = {}) => TOOLS.filter((tool) => famic || !tool.famic);
 
 const text = (value, isError = false) => ({
   content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }],
@@ -372,8 +548,8 @@ const text = (value, isError = false) => ({
 });
 
 // 道具を実行して MCP の結果を返す。道具の名前が違うときは null
-export async function runTool(name, args, getData) {
-  const tool = TOOLS.find((item) => item.name === name);
+export async function runTool(name, args, getData, tools = TOOLS) {
+  const tool = tools.find((item) => item.name === name);
   if (!tool) {
     return null;
   }
@@ -384,6 +560,6 @@ export async function runTool(name, args, getData) {
       return text(error.message, true);
     }
     console.error(error);
-    return text("計画の読み込みに失敗しました。しばらくしてからもう一度試してください。", true);
+    return text("データの読み込みに失敗しました。しばらくしてからもう一度試してください。", true);
   }
 }

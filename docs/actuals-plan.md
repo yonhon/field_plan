@@ -210,7 +210,7 @@ FAMIC のデータを使う部分は、ほかの部分から切り離せるよ�
 | MCP サーバー | `get_pesticide_usage` |
 
 - この部分を外しても、防除の記録（農薬の名前、量、使い方、希釈倍率、散布液量）は、文字と数字で入れられるようにします。`work_log_inputs` の `reg_no` と `standard` は空のままになります。
-- 外すかどうかは、`app/config.js` の `famic`（`false` で外す）で切り替えます。外したときは、画面にこの部分を出しません。取り込みは、GitHub Actions の `famic.yml` を止めます。
+- 外すかどうかは、`app/config.js` の `famic`（`false` で外す）で切り替えます。外したときは、画面にこの部分を出しません。取り込みは、GitHub Actions の `famic.yml` を止めます。MCP サーバーは、Supabase の秘密の値 `FIELD_FAMIC` を `false` にします。
 
 ### 4.8 取り込み係の利用者
 
@@ -468,14 +468,19 @@ GitHub Actions から気象の値と FAMIC の登録情報を入れるために�
 
 ## 9. MCP サーバー
 
-`field-mcp` に、記録を返す道具を足します。
+`field-mcp` に、記録を返す道具を足しました。
 
 | 道具 | 返すもの |
 |---|---|
-| `get_records` | 期間、品目、作業の種類で絞った記録（対象の畝、仕様、資材） |
+| `get_records` | 期間、品目、作業の種類、場所で絞った記録（対象の畝、仕様、資材、メモ、つながる計画の作業） |
 | `get_pesticide_usage` | 作付ごとの、農薬の本剤と有効成分の使用回数と、使用基準。FAMIC のデータを使うので、4.7 の切り離せる部分に入れる |
 
-いまのサーバーの説明は「返すのは計画で、実際に行った作業の記録ではありません」なので、計画と記録の両方を返すこと、記録の道具では「行った」と書いてよいことに書き換えます。
+サーバーの説明は、これまで「返すのは計画で、実際に行った作業の記録ではありません」でした。計画と記録の両方を返すこと、記録の道具では「行った」と書いてよいことに書き換えました。
+
+- `get_records` は、新しい日から順に最大 200 件を返します。品目と場所は、記録した時点の名前（`work_log_targets` の `label` と `crop_name`）の一部で絞ります。取りやめた計画の作業（`cancelled_works`）も返します。
+- `get_pesticide_usage` は、画面の作付の詳細と同じ部品（`app/logs.js` の `usageTable`、`firstHarvestDay`）で数えます。使用基準は、記録に持たせた写し（`standard`）だけを使い、FAMIC の表は読みません。
+- Supabase の秘密の値 `FIELD_FAMIC` を `false` にすると、`get_pesticide_usage` と、その説明を外します（4.7）。
+- `list_fields` と `list_plans` に、実際に使うプランを足しました。`get_plan` と `get_schedule` の作業には、取りやめた日（`cancelled_on`）を付けます。
 
 ## 10. 作る順番
 

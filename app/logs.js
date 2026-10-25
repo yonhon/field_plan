@@ -274,6 +274,52 @@ export function compressedAxis(spans, { margin = 1, minGap = 3, gapWidth = 2 } =
   return { first, last, total: x, x: at, breaks, ticks };
 }
 
+// ---- 記録の文 ----
+// 画面と MCP サーバーで同じ書き方にする
+
+// 作業の種類ごとの仕様の欄。[spec のキー, 見出し, 種類（省くと数）]
+export const SPEC_FIELDS = {
+  plant: [
+    ["plant_gap_cm", "株間（cm）"],
+    ["row_gap_cm", "条間（cm）"],
+    ["row_count", "条数"],
+    ["seeds", "1 か所の粒数"],
+    ["depth_cm", "植える深さ（cm）"],
+    ["staggered", "千鳥", "check"],
+  ],
+  nursery_sow: [
+    ["tray", "トレイ（例: 128 穴）", "text"],
+    ["trays", "枚数"],
+    ["seeds", "1 穴の粒数"],
+  ],
+  ridge: [
+    ["bed_width_cm", "実畦の幅（cm）"],
+    ["aisle_width_cm", "通路の幅（cm）"],
+    ["height_cm", "畝の高さ（cm）"],
+  ],
+  mulch: [
+    ["mulch", "マルチの種類", "text"],
+    ["width_cm", "幅（cm）"],
+  ],
+  harvest: [["harvest_kg", "収穫量（kg）"]],
+};
+
+// 記録の仕様を短い文にする。例: 株間（cm） 30・条数 3・千鳥
+export function specText(type, spec = {}) {
+  return (SPEC_FIELDS[type] || [])
+    .filter(([key]) => spec[key] !== undefined && spec[key] !== null && spec[key] !== "" && spec[key] !== false)
+    .map(([key, label, kind]) => (kind === "check" ? label : `${label.replace(/（.*）/, "")} ${spec[key]}${(label.match(/（(cm|kg)）/) || [])[1] || ""}`))
+    .join("・");
+}
+
+// 記録の資材を短い文にする。例: テスト乳剤 2000 倍 散布
+export function inputText(input) {
+  if (input.kind === "pesticide") {
+    return [input.name || "農薬", input.dilution ? `${input.dilution} 倍` : "", input.method].filter(Boolean).join(" ");
+  }
+  return [input.name, input.amount !== null && input.amount !== undefined ? `${input.amount} ${input.unit}` : ""].filter(Boolean).join(" ");
+}
+
 // ---- 農薬 ----
 // 防除の記録の資材には、記録した時点の使用基準の写し（standard）を持たせる。
 // standard = { reg_no, product, target, method, ingredients: [総使用回数に数える有効成分（①〜⑤の順。数えないものは空）],

@@ -2,8 +2,8 @@
 // 工程表の行の名前から開く。表示（計画／実績／計画と実績）は工程表と共有する
 import { confirmAction, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { inputText, openLogEditor, specText, uncancelWork } from "./log-view.js";
-import { bedAreas, compressedAxis, dayGap, firstHarvestDay, plantingStart, shiftAfterActual, specDiff, usageTable } from "./logs.js";
+import { openLogEditor, uncancelWork } from "./log-view.js";
+import { bedAreas, compressedAxis, dayGap, firstHarvestDay, inputText, plantingStart, shiftAfterActual, specDiff, specText, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, localToday } from "./schedule.js";
 import { ICON_LABELS, accumulate, addTwoWeek, fetchStations, parseForecast, weatherIcon } from "./weather.js";

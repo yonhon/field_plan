@@ -3,7 +3,7 @@
 import { WORK_COLORS, addDays, localToday } from "./schedule.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { matchWork, productAmount, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
+import { SPEC_FIELDS, inputText, matchWork, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
 
 const $ = (id) => document.getElementById(id);
@@ -13,32 +13,6 @@ const escapeHtml = (text) =>
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 const RECENT = 5; // 「最近の記録」に出す件数
 const QUICK_TYPES = ["water", "spray", "weed", "plant", "topdress"]; // 大きめのボタンで並べる種類
-// 作業の種類ごとの仕様の欄。[spec のキー, 見出し, 種類（省くと数）]
-const SPEC_FIELDS = {
-  plant: [
-    ["plant_gap_cm", "株間（cm）"],
-    ["row_gap_cm", "条間（cm）"],
-    ["row_count", "条数"],
-    ["seeds", "1 か所の粒数"],
-    ["depth_cm", "植える深さ（cm）"],
-    ["staggered", "千鳥", "check"],
-  ],
-  nursery_sow: [
-    ["tray", "トレイ（例: 128 穴）", "text"],
-    ["trays", "枚数"],
-    ["seeds", "1 穴の粒数"],
-  ],
-  ridge: [
-    ["bed_width_cm", "実畦の幅（cm）"],
-    ["aisle_width_cm", "通路の幅（cm）"],
-    ["height_cm", "畝の高さ（cm）"],
-  ],
-  mulch: [
-    ["mulch", "マルチの種類", "text"],
-    ["width_cm", "幅（cm）"],
-  ],
-  harvest: [["harvest_kg", "収穫量（kg）"]],
-};
 const METHODS = ["散布", "土壌混和", "種子・種球の浸漬", "株元散布", "灌注", "その他"];
 const FERTILIZER_TYPES = new Set(["amend", "topdress"]);
 
@@ -65,22 +39,6 @@ function formatDay(iso) {
 const activePlan = () => state().plans.find((plan) => plan.id === state().field.active_plan_id) || null;
 
 // ---- 最近の記録 ----
-
-// 記録の仕様を短い文にする。例: 株間（cm） 30・条数 3・千鳥
-export function specText(type, spec = {}) {
-  return (SPEC_FIELDS[type] || [])
-    .filter(([key]) => spec[key] !== undefined && spec[key] !== null && spec[key] !== "" && spec[key] !== false)
-    .map(([key, label, kind]) => (kind === "check" ? label : `${label.replace(/（.*）/, "")} ${spec[key]}${(label.match(/（(cm|kg)）/) || [])[1] || ""}`))
-    .join("・");
-}
-
-// 記録の資材を短い文にする。例: テスト乳剤 2000 倍 散布
-export function inputText(input) {
-  if (input.kind === "pesticide") {
-    return [input.name || "農薬", input.dilution ? `${input.dilution} 倍` : "", input.method].filter(Boolean).join(" ");
-  }
-  return [input.name, input.amount !== null && input.amount !== undefined ? `${input.amount} ${input.unit}` : ""].filter(Boolean).join(" ");
-}
 
 export function renderLogs() {
   if (!ctx) {
