@@ -24,6 +24,19 @@ export function createSupabaseStore(client, options) {
     }
     return data;
   };
+  // Supabase は 1 回に 1,000 行までしか返さないので、それより多くなりうる表は分けて読む。
+  // build は、毎回新しい問い合わせを作る関数（並びは、行が一意に決まるようにしておく）
+  const PAGE = 1000;
+  const allRows = async (build) => {
+    const rows = [];
+    for (let from = 0; ; from += PAGE) {
+      const page = check(await build().range(from, from + PAGE - 1));
+      rows.push(...page);
+      if (page.length < PAGE) {
+        return rows;
+      }
+    }
+  };
 
   return {
     async loadFields() {
@@ -91,11 +104,11 @@ export function createSupabaseStore(client, options) {
       check(await client.from("plans").delete().eq("id", id));
     },
     async list(table, planId) {
-      return check(await client.from(table).select("*").eq("plan_id", planId).order(PLAN_TABLES[table].order));
+      return allRows(() => client.from(table).select("*").eq("plan_id", planId).order(PLAN_TABLES[table].order).order("id"));
     },
     // 品目と肥料は、すべてのプランで共通
     async listAll(table) {
-      return check(await client.from(table).select("*").order("name"));
+      return allRows(() => client.from(table).select("*").order("name").order("id"));
     },
     async upsert(table, rows) {
       if (rows.length) {
@@ -138,13 +151,14 @@ export function createSupabaseStore(client, options) {
     },
     // 作業の記録。圃場ごとに、対象と資材を付けて、新しい順に
     async loadLogs(fieldId) {
-      const rows = check(
-        await client
+      const rows = await allRows(() =>
+        client
           .from("work_logs")
           .select("*, targets:work_log_targets(*), inputs:work_log_inputs(*)")
           .eq("field_id", fieldId)
           .order("date", { ascending: false })
           .order("created_at", { ascending: false })
+          .order("id")
       );
       rows.forEach((row) => row.inputs.sort((a, b) => a.seq - b.seq));
       return rows;
@@ -155,6 +169,59 @@ export function createSupabaseStore(client, options) {
     },
     async deleteLog(id) {
       check(await client.from("work_logs").delete().eq("id", id));
+    },
+    // ---- 農薬の使用基準（FAMIC）。DB を使わないモードでは使えない ----
+    famic: true,
+    // 農薬を名前（カタカナにそろえた文字の一部）か登録番号で探す。有効成分ごとの行を返す
+    async searchPesticides(query) {
+      const base = client.from("famic_products").select("reg_no, ord, name, kind, holder, use_type, formulation, ingredient, count_ingredient");
+      const rows = /^\d+$/.test(query)
+        ? check(await base.eq("reg_no", Number(query)))
+        : check(await base.ilike("name_search", `%${query.replace(/[%_]/g, "")}%`).order("reg_no").limit(300));
+      return rows;
+    },
+    async loadProducts(regNos) {
+      return regNos.length ? check(await client.from("famic_products").select("*").in("reg_no", regNos.map(Number)).order("ord")) : [];
+    },
+    async loadUses(regNo, crops) {
+      return crops.length ? check(await client.from("famic_uses").select("*").eq("reg_no", Number(regNo)).in("crop", crops)) : [];
+    },
+    // FAMIC の作物名の一覧。1 回に 1,000 行までしか返らないので、分けて読む
+    async famicCropNames() {
+      return (await allRows(() => client.from("famic_crop_names").select("crop").order("crop"))).map((row) => row.crop);
+    },
+    async famicVersion() {
+      const rows = check(await client.from("famic_imports").select("*").order("id", { ascending: false }).limit(1));
+      return rows[0] || null;
+    },
+    // ---- 気象 ----
+    async saveFieldWeather(fieldId, { base_lat, base_lng, weather }) {
+      check(await client.from("fields").update({ base_lat, base_lng, weather }).eq("id", fieldId));
+    },
+    async loadWeather(stations, from, to) {
+      return stations.length
+        ? allRows(() => client.from("weather_daily").select("*").in("station", stations).gte("date", from).lte("date", to).order("date").order("station"))
+        : [];
+    },
+    async saveWeather(rows) {
+      if (rows.length) {
+        check(await client.from("weather_daily").upsert(rows));
+      }
+    },
+    // 2 週間気温予報。ブラウザーから気象庁を読めないので、Supabase の関数を通す
+    async twoWeek(station) {
+      const { data, error } = await client.functions.invoke("field-weather", { body: { station } });
+      if (error) {
+        throw error;
+      }
+      return data;
+    },
+    async twoWeekStations() {
+      const { data, error } = await client.functions.invoke("field-weather", { body: { list: true } });
+      if (error) {
+        throw error;
+      }
+      return data.stations || [];
     },
   };
 }
@@ -357,6 +424,47 @@ export function createLocalStore() {
       update((data) => {
         data.workLogs = (data.workLogs || []).filter((log) => log.id !== id);
       });
+    },
+    // 農薬の使用基準は DB にある。動作確認のため、このブラウザーの保存に famic: { products, uses } を入れたときだけ、それを使う
+    get famic() {
+      return Boolean(read().famic);
+    },
+    async searchPesticides(query) {
+      const { products = [] } = read().famic || {};
+      return /^\d+$/.test(query) ? products.filter((row) => row.reg_no === Number(query)) : products.filter((row) => row.name_search.includes(query));
+    },
+    async loadProducts(regNos) {
+      const { products = [] } = read().famic || {};
+      return products.filter((row) => regNos.map(Number).includes(row.reg_no));
+    },
+    async loadUses(regNo, crops) {
+      const { uses = [] } = read().famic || {};
+      return uses.filter((row) => row.reg_no === Number(regNo) && crops.includes(row.crop));
+    },
+    async famicCropNames() {
+      const { uses = [] } = read().famic || {};
+      return [...new Set(uses.map((row) => row.crop))].sort();
+    },
+    async saveFieldWeather(fieldId, { base_lat, base_lng, weather }) {
+      update((data) => {
+        Object.assign(data.fields.find((field) => field.id === fieldId), { base_lat, base_lng, weather });
+      });
+    },
+    async loadWeather(stations, from, to) {
+      return (read().weather || []).filter((row) => stations.includes(row.station) && row.date >= from && row.date <= to).sort((a, b) => a.date.localeCompare(b.date));
+    },
+    async saveWeather(rows) {
+      update((data) => {
+        const key = (row) => `${row.station}|${row.date}`;
+        const fresh = new Set(rows.map(key));
+        data.weather = [...(data.weather || []).filter((row) => !fresh.has(key(row))), ...rows];
+      });
+    },
+    async twoWeek() {
+      return { days: [] };
+    },
+    async twoWeekStations() {
+      return [];
     },
   };
 }

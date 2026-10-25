@@ -1,6 +1,7 @@
 // 「品目」の画面。品目ごとの設定値と、肥料の銘柄を登録する。どちらもすべてのプランで共通。
 import { confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
+import { famicEnabled } from "./pesticide.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -23,6 +24,9 @@ const CROP_FIELDS = [
   ["harvest_days", "収穫の日数", "int"],
   ["note", "メモ", "text"],
 ];
+// 農薬の使用基準（FAMIC）を使うときだけ出す欄。品目に対応する FAMIC の作物名（「、」で区切って複数）
+const FAMIC_FIELD = ["famic_crops", "FAMIC の作物名（、で区切る）", "list"];
+const cropFields = () => (famicEnabled() ? [...CROP_FIELDS.slice(0, -1), FAMIC_FIELD, CROP_FIELDS.at(-1)] : CROP_FIELDS);
 const FERTILIZER_FIELDS = [
   ["name", "銘柄", "text"],
   ["n_pct", "窒素（%）", "number"],
@@ -57,6 +61,9 @@ function cell(row, [key, , kind]) {
   if (kind === "text") {
     return `<input type="text" data-field="${key}" value="${escapeHtml(value)}" />`;
   }
+  if (kind === "list") {
+    return `<input type="text" data-field="${key}" list="famicCropList" placeholder="例: キャベツ、野菜類" value="${escapeHtml((value || []).join("、"))}" />`;
+  }
   return `<input type="number" min="0" step="${kind === "int" ? 1 : "any"}" data-field="${key}" value="${value ?? ""}" />`;
 }
 
@@ -74,7 +81,7 @@ export function renderCrops() {
   if (!ctx) {
     return;
   }
-  $("cropTable").innerHTML = table(CROP_FIELDS, ctx.state.crops, "品目がまだありません。「品目を追加」で登録してください。");
+  $("cropTable").innerHTML = table(cropFields(), ctx.state.crops, "品目がまだありません。「品目を追加」で登録してください。");
   $("fertilizerTable").innerHTML = table(FERTILIZER_FIELDS, ctx.state.fertilizers, "肥料がまだありません。");
 }
 
@@ -88,6 +95,10 @@ function parse(input, kind) {
   }
   if (kind === "fertilizer") {
     return input.value || null;
+  }
+  if (kind === "list") {
+    // 全角にそろえて（FAMIC の作物名と同じ形）、区切りで分ける
+    return [...new Set(input.value.normalize("NFKC").split(/[、,\s]+/).map((name) => name.trim()).filter(Boolean))];
   }
   if (input.value.trim() === "") {
     return null;
@@ -107,7 +118,8 @@ function unusedName(rows, base) {
 function bind(tableId, storeTable, fields, rowsOf, afterDelete) {
   $(tableId).addEventListener("change", (event) => {
     const row = rowsOf().find((item) => item.id === event.target.closest("tr[data-id]")?.dataset.id);
-    const field = fields.find(([key]) => key === event.target.dataset.field);
+    // fields は欄の並び（品目の欄は、FAMIC を使うかで変わるので、関数で渡す）
+    const field = (typeof fields === "function" ? fields() : fields).find(([key]) => key === event.target.dataset.field);
     if (!row || !field) {
       return;
     }
@@ -119,7 +131,13 @@ function bind(tableId, storeTable, fields, rowsOf, afterDelete) {
     }
     // 記録には、変える前の名前と、読める形の値を書く
     const shown = (item) =>
-      field[2] === "check" ? (item ? "あり" : "なし") : field[2] === "fertilizer" ? ctx.state.fertilizers.find((entry) => entry.id === item)?.name || "なし" : item === null || item === "" ? "空" : item;
+      field[2] === "check"
+        ? item ? "あり" : "なし"
+        : field[2] === "fertilizer"
+          ? ctx.state.fertilizers.find((entry) => entry.id === item)?.name || "なし"
+          : field[2] === "list"
+            ? (item || []).join("、") || "空"
+            : item === null || item === "" ? "空" : item;
     const what = storeTable === "crops" ? "品目" : "肥料";
     record({
       kind: `${storeTable}.${field[0]}`,
@@ -154,7 +172,16 @@ export function initCrops(context) {
   ctx = context;
   const { state } = ctx;
 
-  bind("cropTable", "crops", CROP_FIELDS, () => state.crops, async (crop) => {
+  // FAMIC の作物名の候補（適用部にある作物名）
+  if (famicEnabled()) {
+    state.store
+      .famicCropNames()
+      .then((names) => {
+        $("famicCropList").innerHTML = names.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+      })
+      .catch(() => {});
+  }
+  bind("cropTable", "crops", cropFields, () => state.crops, async (crop) => {
     const used = state.plantings.filter((planting) => planting.crop_id === crop.id);
     if (!(await confirmDelete(`この品目を削除します。${used.length ? `このプランの作付 ${used.length} 件は、名前だけが残ります。` : ""}`, `品目「${crop.name}」`))) {
       return;

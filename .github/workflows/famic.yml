@@ -1,0 +1,32 @@
+name: Import FAMIC pesticide data
+
+# FAMIC の農薬登録情報の配布ページを週に 1 回確かめ、ZIP が替わっていれば DB に取り込む（scripts/import_famic.py）。
+# 取り込み係の利用者でログインして入れる。秘密の値 FIELD_IMPORTER_EMAIL と FIELD_IMPORTER_PASSWORD が要る
+# （DB の接続文字列は置かない。取り込み係にできるのは、気象の値と FAMIC の入れ替えだけ）
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "変わっていなくても取り込み直す"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "41 20 * * 0" # 日本時間の月曜 5:41
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Import
+        env:
+          FIELD_IMPORTER_EMAIL: ${{ secrets.FIELD_IMPORTER_EMAIL }}
+          FIELD_IMPORTER_PASSWORD: ${{ secrets.FIELD_IMPORTER_PASSWORD }}
+        run: python scripts/import_famic.py ${{ inputs.force && '--force' || '' }}

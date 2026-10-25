@@ -191,6 +191,22 @@
           </dl>
         </section>
 
+        <section id="weatherPanel" class="panel edit-only">
+          <h2>気象</h2>
+          <p class="muted">作付の詳細の積算温度・積算降水量と予報に使います。観測所を選ぶと、毎日、気象庁から観測値を取ってたまっていきます（アプリを開いたときにも、欠けている直近の日を取ります）。</p>
+          <div class="form-grid">
+            <label>基準点の緯度<input id="baseLat" type="number" step="any" placeholder="例: 35.68" /></label>
+            <label>基準点の経度<input id="baseLng" type="number" step="any" placeholder="例: 139.77" /></label>
+          </div>
+          <label>気温の観測所（近い順）<select id="tempStation"></select></label>
+          <label>雨量の観測所（近い順）<select id="rainStation"></select></label>
+          <label>府県予報区<select id="forecastOffice"></select></label>
+          <label>予報の区域<select id="forecastArea"></select></label>
+          <label>予報の気温の地点<select id="forecastPoint"></select></label>
+          <label>2 週間気温予報の地点<select id="twoweekStation"></select></label>
+          <p id="weatherStatus" class="muted"></p>
+        </section>
+
         <section class="panel edit-only">
           <h2>下絵と縮尺</h2>
           <label>画像を読み込む<input id="backdropFile" type="file" accept="image/*" /></label>
@@ -379,13 +395,14 @@
     </main>
 
     <div id="ganttTip" class="gantt-tip" role="tooltip" hidden></div>
+    <datalist id="famicCropList"></datalist>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./config.js"></script>
     <script type="module">
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // 読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js", "pesticide.js", "weather.js", "weather-view.js"];
       try {
         await Promise.all(parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })));
         await import("./app.js");

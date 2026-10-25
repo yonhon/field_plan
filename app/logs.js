@@ -262,6 +262,151 @@ export function compressedAxis(spans, { margin = 1, minGap = 3, gapWidth = 2 } =
   return { first, last, total: x, x: at, breaks, ticks };
 }
 
+// ---- 農薬 ----
+// 防除の記録の資材には、記録した時点の使用基準の写し（standard）を持たせる。
+// standard = { reg_no, product, target, method, ingredients: [総使用回数に数える有効成分（①〜⑤の順。数えないものは空）],
+//              rows: [{ crop_name（アプリの品目）, crop（FAMIC の作物名）, dilution_text, liquid_text, timing_text, times_text,
+//                       totals, dilution_min, dilution_max, liquid_min, liquid_max, preharvest_days, times_max, total_max }] }
+
+// 作付の農薬の使用回数。登録番号ごとと、有効成分ごとに数える。1 件の記録で 1 回（同じ記録に同じ成分が 2 剤あっても 1 回）
+export function pesticideCounts(logs, plantingId, excludeLogId = null) {
+  const products = new Map();
+  const ingredients = new Map();
+  for (const log of logs) {
+    if (log.id === excludeLogId || !(log.targets || []).some((target) => target.planting_id === plantingId)) {
+      continue;
+    }
+    const regs = new Set();
+    const names = new Set();
+    for (const input of log.inputs || []) {
+      if (input.kind !== "pesticide" || !input.reg_no) {
+        continue;
+      }
+      regs.add(String(input.reg_no));
+      (input.standard?.ingredients || []).filter(Boolean).forEach((name) => names.add(name));
+    }
+    regs.forEach((reg) => products.set(reg, (products.get(reg) || 0) + 1));
+    names.forEach((name) => ingredients.set(name, (ingredients.get(name) || 0) + 1));
+  }
+  return { products, ingredients };
+}
+
+// 作付の、有効成分ごとの使用回数と上限の表。上限は、その作付の品目の使用基準の写しのうち、いちばん新しい記録のもの
+export function usageTable(logs, plantingId, cropName) {
+  const counts = pesticideCounts(logs, plantingId);
+  const limits = new Map();
+  const conditions = new Map();
+  const productRows = new Map();
+  const sorted = [...logs].filter((log) => (log.targets || []).some((target) => target.planting_id === plantingId)).sort((a, b) => a.date.localeCompare(b.date));
+  for (const log of sorted) {
+    for (const input of log.inputs || []) {
+      const standard = input.kind === "pesticide" && input.standard;
+      if (!standard) {
+        continue;
+      }
+      const row = standard.rows?.find((item) => item.crop_name === cropName) || null;
+      productRows.set(String(input.reg_no), { name: standard.product || input.name, max: row?.times_max ?? null });
+      (standard.ingredients || []).forEach((name, k) => {
+        if (name) {
+          limits.set(name, row?.total_max?.[k] ?? null);
+          const text = row?.totals?.[k] || "";
+          if (text.includes("(")) {
+            conditions.set(name, text);
+          }
+        }
+      });
+    }
+  }
+  return {
+    ingredients: [...counts.ingredients.entries()].map(([name, count]) => ({ name, count, max: limits.get(name) ?? null, condition: conditions.get(name) || "" })),
+    products: [...counts.products.entries()].map(([reg, count]) => ({ reg_no: reg, count, name: productRows.get(reg)?.name || reg, max: productRows.get(reg)?.max ?? null })),
+  };
+}
+
+// 最後の防除と使用時期（収穫の何日前まで）から、基準を満たす最初の収穫日。防除がなければ null
+export function firstHarvestDay(logs, plantingId, cropName) {
+  let first = null;
+  for (const log of logs) {
+    if (!(log.targets || []).some((target) => target.planting_id === plantingId)) {
+      continue;
+    }
+    for (const input of log.inputs || []) {
+      const row = input.kind === "pesticide" && input.standard?.rows?.find((item) => item.crop_name === cropName);
+      if (row?.preharvest_days) {
+        const day = addDays(log.date, row.preharvest_days);
+        if (!first || day > first) {
+          first = day;
+        }
+      }
+    }
+  }
+  return first;
+}
+
+// 防除の記録を入れるときの指摘。保存は止めない。
+// groups は品目のまとまりごとの { name, area, liters, row（その品目の使用基準。なければ null）, plantings: [{ id, harvestStart }] }。
+// countsOf(作付の ID) はその作付のこれまでの使用回数（pesticideCounts の結果）
+export function sprayWarnings({ date, dilution, regNo, ingredients = [], groups, countsOf }) {
+  const warnings = [];
+  for (const group of groups) {
+    const row = group.row;
+    if (!row) {
+      warnings.push(`${group.name}: この品目には使用基準がありません（この品目には使えない農薬の可能性があります）`);
+      continue;
+    }
+    if (dilution && row.dilution_min && dilution < row.dilution_min) {
+      warnings.push(`${group.name}: 希釈倍率 ${dilution} 倍は、基準（${row.dilution_min} 倍以上）より濃くなります`);
+    }
+    if (group.liters > 0 && group.area > 0 && row.liquid_min !== null && row.liquid_min !== undefined) {
+      const per10a = (group.liters / group.area) * 1000;
+      if (per10a < row.liquid_min - 1e-9 || per10a > row.liquid_max + 1e-9) {
+        warnings.push(`${group.name}: 散布液量が 10 a あたり ${Math.round(per10a)} L で、基準（${row.liquid_min}〜${row.liquid_max} L）の外です`);
+      }
+    }
+    let product = 0;
+    const totals = new Map();
+    let soonest = null;
+    for (const planting of group.plantings) {
+      const counts = countsOf(planting.id);
+      product = Math.max(product, (counts.products.get(String(regNo)) || 0) + 1);
+      ingredients.forEach((name, k) => {
+        if (name) {
+          totals.set(k, Math.max(totals.get(k) || 0, (counts.ingredients.get(name) || 0) + 1));
+        }
+      });
+      if (planting.harvestStart && (!soonest || planting.harvestStart < soonest)) {
+        soonest = planting.harvestStart;
+      }
+    }
+    if (row.times_max && product > row.times_max) {
+      warnings.push(`${group.name}: 本剤の使用回数が、この防除で ${product} 回になり、上限（${row.times_max} 回）を超えます`);
+    }
+    for (const [k, count] of totals) {
+      const max = row.total_max?.[k];
+      if (max && count > max) {
+        warnings.push(`${group.name}: ${ingredients[k]} を含む農薬の使用回数が、この防除で ${count} 回になり、上限（${max} 回）を超えます`);
+      }
+      if ((row.totals?.[k] || "").includes("(")) {
+        warnings.push(`${group.name}: ${ingredients[k]} の総使用回数には条件があります。確かめてください: ${row.totals[k]}`);
+      }
+    }
+    if (row.preharvest_days && soonest) {
+      const days = diffDays(date, soonest);
+      if (days < row.preharvest_days) {
+        warnings.push(`${group.name}: 収穫の開始（${soonest.slice(5).replace("-", "/")}）まで ${days} 日で、使用時期（収穫 ${row.preharvest_days} 日前まで）を満たしません`);
+      }
+    }
+  }
+  return [...new Set(warnings)];
+}
+
+// 選んだ品目の使用基準の行から、初めの希釈倍率。下限（いちばん濃くしてよい倍率）のうち、いちばん大きいもの。
+// 薄くする分には基準を外れないので、どの組み合わせでも 1 つに決まる
+export function defaultDilution(rows) {
+  const lows = rows.filter(Boolean).map((row) => row.dilution_min).filter((value) => value > 0);
+  return lows.length ? Math.max(...lows) : null;
+}
+
 // 品目ごとに入れた液の量（L）を、その品目の畝に面積の比で分ける。面積が分からなければ等分
 export function splitByArea(items, liters) {
   if (!items.length || !(liters > 0)) {

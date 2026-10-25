@@ -1,0 +1,27 @@
+name: Fetch weather observations
+
+# 圃場の「気象」の欄で選んだアメダスの観測所の、日ごとの観測値を気象庁から取って DB に入れる（scripts/fetch-weather.mjs）。
+# 気象庁の 10 分ごとの値は 11 日前までしか残らないので、毎日動かす。
+# 取り込み係の利用者でログインして入れる。秘密の値 FIELD_IMPORTER_EMAIL と FIELD_IMPORTER_PASSWORD が要る
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 18 * * *" # 日本時間の 3:17
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Fetch
+        env:
+          FIELD_IMPORTER_EMAIL: ${{ secrets.FIELD_IMPORTER_EMAIL }}
+          FIELD_IMPORTER_PASSWORD: ${{ secrets.FIELD_IMPORTER_PASSWORD }}
+        run: node scripts/fetch-weather.mjs

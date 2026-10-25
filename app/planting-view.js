@@ -3,8 +3,11 @@
 import { notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { inputText, openLogEditor, specText, uncancelWork } from "./log-view.js";
-import { bedAreas, compressedAxis, dayGap, shiftAfterActual, specDiff } from "./logs.js";
-import { WORK_COLORS, diffDays, existsOn, harvestEnd, localToday } from "./schedule.js";
+import { bedAreas, compressedAxis, dayGap, firstHarvestDay, shiftAfterActual, specDiff, usageTable } from "./logs.js";
+import { NOTICE_URL, famicEnabled } from "./pesticide.js";
+import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, localToday } from "./schedule.js";
+import { ICON_LABELS, accumulate, addTwoWeek, fetchStations, parseForecast, weatherIcon } from "./weather.js";
+import { officeForecast, weatherSettings } from "./weather-view.js";
 import {
   actualSpans,
   anyTypeLabel,
@@ -26,6 +29,11 @@ const MIN_GAP_DAYS = 3; // これ以上作業のない期間は、詰めて表�
 
 let ctx = null; // { state, showView, openInSchedule, setStatus }
 const target = { kind: null, id: null }; // 開いている作付（planting）か区画（block）
+// 読み込んだ観測値と予報。画面を開いたあとで読み、読み終えたら描き直す
+const weather = { key: "", rows: null, loading: false };
+const forecast = { key: "", days: null, error: "", loading: false };
+let stationNames = null;
+let wx = null; // いま描いている作付の気象の表示（作業の表の列で使う）
 
 const state = () => ctx.state;
 const bySeq = (a, b) => a.seq - b.seq;
@@ -122,13 +130,228 @@ export function renderPlantingDetail() {
   const active = isActivePlan();
   const actuals = currentActuals();
   const logs = active ? (state().logs || []).filter((log) => log.targets.some(c.matches)) : [];
+  wx = weatherView(c, actuals, active);
   $("plantingBody").innerHTML =
     headHtml(c, active) +
     `<div class="row detail-modes">${active ? `<div class="log-modes" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}` +
     `<span class="muted">${active ? "工程表で選んでいた表示のまま開きます。" : "実績は、実際に使うプランを開くと出せます。"}</span></div>` +
+    `<div class="detail-layout"><div class="detail-main">` +
     `<section class="panel">${timelineHtml(c, mode, actuals)}</section>` +
     (mode === "both" ? diffHtml(c, actuals, logs) : "") +
-    `<section class="panel"><div class="panel-heading"><h2>作業</h2><span class="muted">${tableNote(mode)}</span></div>${tableHtml(c, mode, actuals, logs)}</section>`;
+    `<section class="panel"><div class="panel-heading"><h2>作業</h2><span class="muted">${tableNote(mode)}</span></div>${tableHtml(c, mode, actuals, logs)}</section>` +
+    `</div><aside class="detail-aside">${asideHtml(c, active)}</aside></div>`;
+}
+
+// ---- 気象 ----
+
+// 作付の定植・播種の日。記録があれば実績の開始日、なければ計画の開始日
+function plantedDate(c, actuals) {
+  const plant = c.ownWorks.find((work) => work.work_type === "plant" && !work.cancelled_on);
+  return plant ? actuals.get(plant.id)?.start || plant.plan_start || null : null;
+}
+
+// 作業の表の気温・降水量の列と、積算の欄に使う値。観測値はまだ読んでいなければ読みにいく
+function weatherView(c, actuals, active) {
+  const settings = weatherSettings();
+  const planted = c.planting && active ? plantedDate(c, actuals) : null;
+  const stations = [settings.temp_station, settings.rain_station].filter(Boolean);
+  if (!planted || stations.length < 2) {
+    return { planted, ready: false, configured: stations.length >= 2 };
+  }
+  const today = localToday();
+  const key = `${settings.temp_station}|${settings.rain_station}|${planted}|${today}`;
+  if (weather.key !== key && !weather.loading) {
+    weather.loading = true;
+    state()
+      .store.loadWeather([...new Set(stations)], planted, today)
+      .then((rows) => Object.assign(weather, { key, rows }))
+      .catch(() => Object.assign(weather, { key, rows: [] }))
+      .finally(() => {
+        weather.loading = false;
+        renderPlantingDetail();
+      });
+  }
+  if (!stationNames) {
+    fetchStations()
+      .then((list) => {
+        stationNames = new Map(list.map((item) => [item.code, item.name]));
+        renderPlantingDetail();
+      })
+      .catch(() => (stationNames = new Map()));
+  }
+  const rows = weather.key === key ? weather.rows || [] : null;
+  const temps = (rows || []).filter((row) => row.station === settings.temp_station);
+  const rains = (rows || []).filter((row) => row.station === settings.rain_station);
+  return {
+    planted,
+    configured: true,
+    ready: Boolean(rows),
+    settings,
+    // date の日の値と、定植からその日までの積算
+    at(date) {
+      const day = (list, field) => list.find((row) => row.date === date)?.[field] ?? null;
+      return {
+        temp: day(temps, "temp_mean"),
+        rain: day(rains, "precip"),
+        tempSum: accumulate(temps, planted, date, "temp_mean"),
+        rainSum: accumulate(rains, planted, date, "precip"),
+      };
+    },
+  };
+}
+
+function wxCell(date) {
+  if (!wx?.planted || !wx.configured || !date || date < wx.planted || date >= localToday()) {
+    return "<td></td>";
+  }
+  if (!wx.ready) {
+    return '<td class="muted">…</td>';
+  }
+  const value = wx.at(date);
+  const number = (v, digits) => (v === null || v === undefined ? "欠測" : Number(v).toFixed(digits));
+  return (
+    `<td><div class="wx-cell"><div><span class="wx-temp">${value.temp === null ? "欠測" : `${number(value.temp, 1)} ℃`}</span>` +
+    `<span class="wx-sum">積算 ${Math.round(value.tempSum.sum)} ℃日</span></div>` +
+    `<div><span class="wx-rain">${value.rain === null ? "欠測" : `${number(value.rain, 1)} mm`}</span>` +
+    `<span class="wx-sum">積算 ${value.rainSum.sum.toFixed(1)} mm</span></div></div></td>`
+  );
+}
+
+// ---- 右の欄 ----
+
+function asideHtml(c, active) {
+  if (!c.planting) {
+    return "";
+  }
+  return [famicEnabled() && active ? usageHtml(c) : "", accumulationHtml(), forecastHtml()].join("");
+}
+
+// 農薬の使用回数。有効成分ごと（その下に本剤ごと）の回数と上限
+function usageHtml(c) {
+  const logs = state().logs || [];
+  const table = usageTable(logs, c.planting.id, c.planting.crop_name);
+  if (!table.ingredients.length && !table.products.length) {
+    return '<section class="panel"><h2>農薬の使用回数</h2><p class="muted">この作付の防除の記録は、まだありません。</p></section>';
+  }
+  const over = (item) => item.max && item.count >= item.max;
+  const rows = [
+    ...table.ingredients.map(
+      (item) =>
+        `<tr><td>${escapeHtml(item.name)}</td><td class="num${over(item) ? " usage-over" : ""}">${item.count}</td><td class="num">${item.max ?? "-"}</td></tr>`
+    ),
+    ...table.products.map(
+      (item) =>
+        `<tr class="usage-product"><td>本剤 ${escapeHtml(item.name)}</td><td class="num${over(item) ? " usage-over" : ""}">${item.count}</td><td class="num">${item.max ?? "-"}</td></tr>`
+    ),
+  ].join("");
+  const notes = [
+    ...table.ingredients.filter(over).map((item) => `${item.name}は上限に達しています。`),
+    ...table.ingredients.filter((item) => item.condition).map((item) => `${item.name}の総使用回数には条件があります: ${item.condition}`),
+  ];
+  const first = firstHarvestDay(logs, c.planting.id, c.planting.crop_name);
+  return (
+    `<section class="panel"><h2>農薬の使用回数</h2><table class="work-table usage-table"><thead><tr><th>成分・本剤</th><th>回数</th><th>上限</th></tr></thead><tbody>${rows}</tbody></table>` +
+    (notes.length ? `<ul class="famic-warnings">${notes.map((text) => `<li>${escapeHtml(text)}</li>`).join("")}</ul>` : "") +
+    (first ? `<p class="muted">防除の使用時期の基準を満たす最初の収穫日: ${formatDay(first)}</p>` : "") +
+    `<p class="muted"><a href="${NOTICE_URL}" target="_blank" rel="noopener">総使用回数についての注意事項（FAMIC）</a></p></section>`
+  );
+}
+
+// 定植からの積算温度・積算降水量
+function accumulationHtml() {
+  const title = "<h2>定植からの積算温度・積算降水量</h2>";
+  if (!wx?.configured) {
+    return `<section class="panel">${title}<p class="muted">圃場図の「気象」の欄で、気温と雨量の観測所を選ぶと出ます。</p></section>`;
+  }
+  if (!wx.planted) {
+    return `<section class="panel">${title}<p class="muted">定植・播種の日が決まると出ます。</p></section>`;
+  }
+  if (!wx.ready) {
+    return `<section class="panel">${title}<p class="muted">読み込み中…</p></section>`;
+  }
+  const yesterday = addDays(localToday(), -1);
+  if (wx.planted > yesterday) {
+    return `<section class="panel">${title}<p class="muted">定植・播種の日（${formatDay(wx.planted)}）のあとから積算します。</p></section>`;
+  }
+  const value = wx.at(yesterday);
+  const missing = [...new Set([...value.tempSum.missing, ...value.rainSum.missing])].sort();
+  const name = (code) => stationNames?.get(code) || code;
+  return (
+    `<section class="panel">${title}<div class="wx-totals"><div><span class="muted">${formatDay(wx.planted)}から</span><strong class="wx-temp">${Math.round(value.tempSum.sum)} <small>℃日</small></strong></div>` +
+    `<div><span class="muted">${formatDay(wx.planted)}から</span><strong class="wx-rain">${value.rainSum.sum.toFixed(1)} <small>mm</small></strong></div></div>` +
+    `<p class="muted">気温: ${escapeHtml(name(wx.settings.temp_station))}・雨量: ${escapeHtml(name(wx.settings.rain_station))}。昨日までの合計です。</p>` +
+    (missing.length
+      ? `<p class="muted wx-missing">値のない日（欠測か、まだ取れていない日）: ${missing.length > 6 ? `${missing.slice(0, 6).map(shortDay).join("、")} ほか ${missing.length - 6} 日` : missing.map(shortDay).join("、")}。積算に含まれていません。</p>`
+      : "") +
+    '<p class="muted wx-source">気象庁のデータを加工して作成</p></section>'
+  );
+}
+
+const COMPASS_ARROW = (degrees) =>
+  `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(${degrees}deg)" aria-hidden="true"><path d="M12 4v16M6 14l6 6 6-6"></path></svg>`;
+const ICONS = {
+  sun: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d98a00" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>',
+  suncloud:
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3" stroke="#d98a00"></circle><path d="M9 2v1.5M3 8h1.5M4.8 3.8l1 1M13.2 3.8l-1 1" stroke="#d98a00"></path><path d="M9 20h9a3.5 3.5 0 000-7 5 5 0 00-9.6 1.4A3 3 0 009 20z" stroke="#6f8083"></path></svg>',
+  cloud: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6f8083" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18h10a4 4 0 000-8 6 6 0 00-11.3 1.5A3.5 3.5 0 007 18z"></path></svg>',
+  rain: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2f6fae" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 15h10a4 4 0 000-8 6 6 0 00-11.3 1.5A3.5 3.5 0 007 15z"></path><path d="M9 18l-1 3M13 18l-1 3M17 18l-1 3"></path></svg>',
+  snow: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6f8083" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"></path></svg>',
+};
+
+// これから 2 週間の予報。予報はまだ読んでいなければ読みにいく
+function forecastHtml() {
+  const settings = weatherSettings();
+  const title = "<h2>これから 2 週間の予報</h2>";
+  if (!settings.office) {
+    return `<section class="panel">${title}<p class="muted">圃場図の「気象」の欄で、府県予報区を選ぶと出ます。</p></section>`;
+  }
+  const today = localToday();
+  const key = `${settings.office}|${settings.area}|${settings.point}|${settings.twoweek}|${today}`;
+  if (forecast.key !== key && !forecast.loading) {
+    forecast.loading = true;
+    Promise.all([
+      officeForecast(settings.office),
+      settings.twoweek ? state().store.twoWeek(settings.twoweek).catch(() => null) : null,
+    ])
+      .then(([json, twoWeek]) => Object.assign(forecast, { key, days: addTwoWeek(parseForecast(json, settings, today), twoWeek, today), error: "" }))
+      .catch((error) => Object.assign(forecast, { key, days: null, error: error.message }))
+      .finally(() => {
+        forecast.loading = false;
+        renderPlantingDetail();
+      });
+  }
+  if (forecast.key !== key) {
+    return `<section class="panel">${title}<p class="muted">読み込み中…</p></section>`;
+  }
+  if (!forecast.days) {
+    return `<section class="panel">${title}<p class="muted">予報を取れませんでした（${escapeHtml(forecast.error)}）。</p></section>`;
+  }
+  const rows = forecast.days
+    .map((day, i) => {
+      const previous = forecast.days[i - 1];
+      const divider = previous && previous.source !== day.source ? " wx-divider" : "";
+      const icon = day.code ? weatherIcon(day.code) : null;
+      const [y, m, d] = day.date.split("-").map(Number);
+      const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+      const trend = day.source === "twoweek";
+      return (
+        `<tr class="${divider.trim()}${trend ? " wx-trend" : ""}"><td class="wx-day${weekday === 0 ? " is-sun" : weekday === 6 ? " is-sat" : ""}">${formatDay(day.date)}</td>` +
+        `<td class="wx-icon">${icon ? `<span role="img" aria-label="${ICON_LABELS[icon]}">${ICONS[icon]}</span>` : ""}</td>` +
+        `<td class="num wx-temps"><span class="wx-temp">${day.max === null ? "" : `${day.max}℃`}</span><br><span class="wx-rain">${day.min === null ? "" : `${day.min}℃`}</span></td>` +
+        `<td class="num wx-pop">${day.pop === null ? "" : `${day.pop}%`}</td>` +
+        `<td class="wx-wind">${
+          day.wind
+            ? `${day.wind.degrees === null ? "" : `<span role="img" aria-label="${escapeHtml(day.wind.direction)}の風">${COMPASS_ARROW(day.wind.degrees)}</span>`}<br><span class="${day.wind.level === "ふつう" ? "muted" : "wx-strong"}">${escapeHtml(day.wind.level)}</span>`
+            : ""
+        }</td></tr>`
+      );
+    })
+    .join("");
+  return (
+    `<section class="panel">${title}<table class="wx-forecast"><thead><tr><th>日</th><th>天気</th><th>気温</th><th>降水確率</th><th>風</th></tr></thead><tbody>${rows}</tbody></table>` +
+    '<p class="muted">風は 3 日目まで（矢印は風の吹いていく向き）。8 日目からは気温だけで、2 週間気温予報の値（薄い文字）。予報は先の日ほど外れやすい。</p>' +
+    '<p class="muted wx-source">気象庁の予報を加工して作成</p></section>'
+  );
 }
 
 function headHtml(c, active) {
@@ -280,9 +503,12 @@ function tableHtml(c, mode, actuals, logs) {
   if (!entries.length) {
     return '<p class="muted">作業も記録もまだありません。</p>';
   }
-  const cols = 1 + (showPlan ? 1 : 0) + (showActual ? 1 : 0) + (mode === "both" ? 1 : 0);
+  // 気温・降水量の列は、定植・播種の日が決まり、観測所を選んであり、実績を出しているときだけ
+  const showWeather = showActual && Boolean(wx?.planted && wx.configured);
+  const cols = 1 + (showPlan ? 1 : 0) + (showActual ? 1 : 0) + (mode === "both" ? 1 : 0) + (showWeather ? 1 : 0);
   const head =
-    `<tr><th>作業</th>${showPlan ? "<th>計画</th>" : ""}${showActual ? "<th>実績</th>" : ""}${mode === "both" ? "<th>ずれ</th>" : ""}</tr>`;
+    `<tr><th>作業</th>${showPlan ? "<th>計画</th>" : ""}${showActual ? "<th>実績</th>" : ""}${mode === "both" ? "<th>ずれ</th>" : ""}` +
+    `${showWeather ? '<th>気温・降水量<br><span class="muted">その日／定植からの積算</span></th>' : ""}</tr>`;
   const rows = [];
   let previousEnd = null;
   let todayShown = false;
@@ -296,7 +522,9 @@ function tableHtml(c, mode, actuals, logs) {
     if (entry.end && entry.end !== "9999-12-31" && (!previousEnd || entry.end > previousEnd)) {
       previousEnd = entry.end;
     }
-    rows.push(entry.work ? workRow(c, entry, mode, today) : logRow(entry.log, mode));
+    // 気温・降水量は、記録の日（つながる記録が複数あれば最後の日）の値
+    const date = entry.log ? entry.log.date : entry.linked?.at(-1)?.date || null;
+    rows.push((entry.work ? workRow(c, entry, mode, today) : logRow(entry.log, mode)).replace("</tr>", `${showWeather ? wxCell(date) : ""}</tr>`));
   }
   return `<div class="table-scroll"><table class="work-table detail-table"><thead>${head}</thead><tbody>${rows.join("")}</tbody></table></div>`;
 }

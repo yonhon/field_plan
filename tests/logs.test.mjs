@@ -5,8 +5,13 @@ import {
   bedAreas,
   compressedAxis,
   dayGap,
+  defaultDilution,
+  firstHarvestDay,
   lateWorks,
   matchWork,
+  pesticideCounts,
+  sprayWarnings,
+  usageTable,
   shiftAfterActual,
   specDiff,
   withActualDates,
@@ -201,4 +206,69 @@ test("作業のない期間を詰めた時間の軸", () => {
   // 2 日以下の空きは詰めない
   assert.equal(compressedAxis([["2026-03-01", "2026-03-01"], ["2026-03-05", "2026-03-05"]]).breaks.length, 0);
   assert.equal(compressedAxis([]), null);
+});
+
+// 防除の記録。standard は記録した時点の使用基準の写し
+const useRow = {
+  crop_name: "レタス",
+  crop: "レタス",
+  dilution_min: 1000,
+  dilution_max: 2000,
+  liquid_min: 100,
+  liquid_max: 300,
+  preharvest_days: 7,
+  times_max: 3,
+  total_max: [3, 2],
+  totals: ["3回以内", "2回以内(定植後は1回以内)"],
+};
+const pesticide = (regNo, ingredients) => ({ kind: "pesticide", reg_no: regNo, name: `剤${regNo}`, standard: { product: `剤${regNo}`, ingredients, rows: [useRow] } });
+const spray = (id, date, plantingIds, inputs) => ({ id, date, work_type: "spray", targets: plantingIds.map((plantingId) => ({ planting_id: plantingId })), inputs });
+
+test("農薬の使用回数は、作付ごとに、登録番号と有効成分で数える", () => {
+  const logs = [
+    spray("s1", "2026-03-01", ["p1", "p3"], [pesticide(100, ["成分A", "成分B"])]),
+    spray("s2", "2026-03-10", ["p1"], [pesticide(200, ["成分A", ""])]),
+    // 1 件の記録で、同じ成分を含む剤が 2 つあっても 1 回
+    spray("s3", "2026-03-12", ["p1"], [pesticide(100, ["成分A", "成分B"]), pesticide(200, ["成分A", ""])]),
+  ];
+  const counts = pesticideCounts(logs, "p1");
+  assert.deepEqual([...counts.products.entries()], [["100", 2], ["200", 2]]);
+  assert.deepEqual([...counts.ingredients.entries()], [["成分A", 3], ["成分B", 2]]);
+  assert.equal(pesticideCounts(logs, "p3").ingredients.get("成分A"), 1);
+  assert.equal(pesticideCounts(logs, "p1", "s3").ingredients.get("成分A"), 2);
+  const table = usageTable(logs, "p1", "レタス");
+  assert.deepEqual(
+    table.ingredients.map((item) => [item.name, item.count, item.max, Boolean(item.condition)]),
+    [["成分A", 3, 3, false], ["成分B", 2, 2, true]]
+  );
+  assert.deepEqual(table.products.map((item) => [item.reg_no, item.count, item.max]), [["100", 2, 3], ["200", 2, 3]]);
+  // 最後の防除（3/12）と、収穫 7 日前まで
+  assert.equal(firstHarvestDay(logs, "p1", "レタス"), "2026-03-19");
+  assert.equal(firstHarvestDay(logs, "p2", "レタス"), null);
+});
+
+test("防除の指摘", () => {
+  const none = { products: new Map(), ingredients: new Map() };
+  const used = { products: new Map([["100", 3]]), ingredients: new Map([["成分A", 3], ["成分B", 1]]) };
+  const base = { date: "2026-03-20", regNo: 100, ingredients: ["成分A", "成分B"] };
+  const group = (extra) => ({ name: "レタス", area: 100, liters: 2, row: useRow, plantings: [{ id: "p1", harvestStart: "2026-04-01" }], ...extra });
+  // 基準どおり（2000 倍、100 ㎡ に 20 L は 10 a あたり 200 L）。総使用回数の条件だけを知らせる
+  assert.deepEqual(sprayWarnings({ ...base, dilution: 2000, groups: [group({ liters: 20 })], countsOf: () => none }), [
+    "レタス: 成分B の総使用回数には条件があります。確かめてください: 2回以内(定植後は1回以内)",
+  ]);
+  const warnings = sprayWarnings({ ...base, dilution: 800, groups: [group({ plantings: [{ id: "p1", harvestStart: "2026-03-25" }] })], countsOf: () => used });
+  assert.ok(warnings.some((text) => text.includes("基準（1000 倍以上）より濃く")));
+  assert.ok(warnings.some((text) => text.includes("10 a あたり 20 L")));
+  assert.ok(warnings.some((text) => text.includes("本剤の使用回数が、この防除で 4 回")));
+  assert.ok(warnings.some((text) => text.includes("成分A を含む農薬の使用回数が、この防除で 4 回")));
+  assert.ok(!warnings.some((text) => text.includes("成分B を含む農薬の使用回数")));
+  assert.ok(warnings.some((text) => text.includes("収穫の開始（03/25）まで 5 日")));
+  assert.deepEqual(sprayWarnings({ ...base, dilution: 2000, groups: [group({ row: null })], countsOf: () => none }), [
+    "レタス: この品目には使用基準がありません（この品目には使えない農薬の可能性があります）",
+  ]);
+});
+
+test("初めの希釈倍率は、下限のうちいちばん大きいもの", () => {
+  assert.equal(defaultDilution([{ dilution_min: 1000 }, { dilution_min: 2000 }, null]), 2000);
+  assert.equal(defaultDilution([{ dilution_min: null }]), null);
 });

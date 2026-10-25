@@ -4,6 +4,7 @@ import { WORK_COLORS, localToday } from "./schedule.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { matchWork, productAmount, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
+import * as famic from "./pesticide.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -266,6 +267,8 @@ export async function openLogEditor(log = null, preset = {}) {
   }
   renderDialog();
   dialog.showModal();
+  updateTotals();
+  refreshUses(); // 直す記録の農薬は、使用基準を読み込んでから、使い方と指摘を出す
 }
 
 function defaultInputs(type) {
@@ -456,10 +459,15 @@ function inputRow(input, i) {
     `<label>単位<select data-in="${i}" data-k="unit">${units.map((unit) => `<option${input.unit === unit ? " selected" : ""}>${unit}</option>`).join("")}</select></label>`;
   const remove = `<button type="button" class="text-btn danger" data-act="removeInput" data-i="${i}">外す</button>`;
   if (input.kind === "pesticide") {
-    const methods = METHODS.map((method) => `<option${input.method === method ? " selected" : ""}>${method}</option>`).join("");
+    // 使用基準の使い方（FAMIC の使用方法）を選んだときは、それを使い方として持つ
+    const methodList = input.method && !METHODS.includes(input.method) ? [input.method, ...METHODS] : METHODS;
+    const methods = methodList.map((method) => `<option${input.method === method ? " selected" : ""}>${escapeHtml(method)}</option>`).join("");
+    const withFamic = famic.famicEnabled();
     return (
-      `<div class="log-input"><div class="form-grid">` +
-      field("name", "農薬の名前", input.name, 'type="text"') +
+      `<div class="log-input">` +
+      (withFamic ? field("name", "農薬の名前（名前の一部か登録番号で探す）", input.name, 'type="text" autocomplete="off"') + famic.pickerHtml(input, i, sprayGroups()) : "") +
+      `<div class="form-grid">` +
+      (withFamic ? "" : field("name", "農薬の名前", input.name, 'type="text"')) +
       `<label>使い方<select data-in="${i}" data-k="method">${methods}</select></label>` +
       field("dilution", "希釈倍率（倍）", input.dilution, numberAttrs) +
       field("amount", "製品の量", input.amount, numberAttrs) +
@@ -509,7 +517,66 @@ function spraySection(items) {
         `<input type="number" step="any" min="0" inputmode="decimal" data-spray="${escapeHtml(key)}" value="${draft.spray[key] ?? ""}" aria-label="${escapeHtml(group.name)}の散布液の量（L）" /> L</label>`
     )
     .join("");
-  return `<div class="log-section"><h3>実際に散布した液の量</h3>${rows}<p class="muted" id="logSprayTotal"></p></div>`;
+  // 農薬の使用基準（FAMIC）: 品目ごとの基準と基準散布量、希釈倍率をどの品目に合わせたか、指摘
+  let standards = "";
+  if (famic.famicEnabled()) {
+    const list = sprayGroups();
+    const boxes = famic.standardsHtml(draft.inputs, list, state().logs || [], draft.id);
+    const notes = draft.inputs
+      .filter((input) => input.kind === "pesticide" && input._dilutionBy)
+      .map((input) => `<p class="muted">${escapeHtml(input.name)}の希釈倍率は、いちばん厳しい${escapeHtml(input._dilutionBy)}の基準（${input._dilutionValue} 倍）に合わせました。直せます。</p>`)
+      .join("");
+    standards =
+      (draft.mode === "blocks" ? '<p class="muted">区画で選んだときは、品目の使用基準とは照らしません。</p>' : "") +
+      (boxes ? `<div class="log-section"><h3>品目ごとの使用基準</h3>${boxes}${notes}<p class="muted" id="logBaseline"></p>` +
+        `<p class="muted"><a href="${famic.NOTICE_URL}" target="_blank" rel="noopener">総使用回数についての注意事項（FAMIC）</a></p></div>` : "");
+  }
+  return `${standards}<div class="log-section"><h3>実際に散布した液の量</h3>${rows}<p class="muted" id="logSprayTotal"></p></div><ul class="famic-warnings" id="logWarnings" hidden></ul>`;
+}
+
+// 防除の対象の、品目のまとまり（区画で選ぶときは区画）。使用基準を照らすための形
+function sprayGroups(items = pickedItems()) {
+  const groups = new Map();
+  for (const item of items) {
+    if (!groups.has(item.group)) {
+      const choice = draft.mode === "crops" ? currentChoices().crops.find((group) => group.key === item.group) : null;
+      groups.set(item.group, {
+        key: item.group,
+        name: draft.mode === "blocks" ? item.label : sprayGroupName(item.group),
+        cropName: choice?.name || "",
+        area: 0,
+        plantingIds: [],
+        famicCrops: [],
+      });
+    }
+    const group = groups.get(item.group);
+    group.area += item.area_m2 || 0;
+    if (item.planting_id) {
+      group.plantingIds.push(item.planting_id);
+    }
+  }
+  for (const group of groups.values()) {
+    group.famicCrops = draft.mode === "crops" ? famic.famicCropsOf(group.plantingIds, data) : [];
+  }
+  return [...groups.values()];
+}
+
+// 作付の収穫が始まる日。収穫の計画の開始日か、収穫の記録のいちばん早い日（早いほう）
+function harvestStartOf(plantingId) {
+  const planned = data.works.filter((work) => work.planting_id === plantingId && work.work_type === "harvest" && !work.cancelled_on && work.plan_start).map((work) => work.plan_start);
+  const recorded = (state().logs || []).filter((log) => log.work_type === "harvest" && log.targets.some((target) => target.planting_id === plantingId)).map((log) => log.date);
+  return [...planned, ...recorded].sort()[0] || null;
+}
+
+// 選んだ農薬の使用基準を、対象の品目に合わせて読み込み直す（対象を変えたとき）
+function refreshUses() {
+  if (!famic.famicEnabled() || !draft) {
+    return;
+  }
+  const groups = sprayGroups();
+  draft.inputs
+    .filter((input) => input.kind === "pesticide" && input.reg_no)
+    .forEach((input) => famic.ensureUses(input, groups).catch((error) => showError(`使用基準を読めませんでした: ${error.message}`)));
 }
 
 function sprayGroupName(key) {
@@ -546,6 +613,35 @@ function updateTotals() {
       hint.textContent = amount === null ? "" : `液 ${fmt(total, 2)} L と希釈倍率から: 製品 ${fmt(amount, 1)} ${input.unit || "mL"}`;
     }
   });
+  if (!famic.famicEnabled() || draft.work_type !== "spray") {
+    return;
+  }
+  const groups = draft.mode === "crops" ? sprayGroups() : [];
+  // 基準散布量の合計と、そこから計算した製品の量（散布する前に、作る液の量を決めるため）
+  const baseline = famic.baselineLiters(draft.inputs, groups);
+  const baselineBox = dialog.querySelector("#logBaseline");
+  if (baselineBox) {
+    const first = draft.inputs.find((input) => input.kind === "pesticide" && num(input.dilution));
+    const low = baseline && first ? productAmount(baseline.low, num(first.dilution)) : null;
+    const high = baseline && first ? productAmount(baseline.high, num(first.dilution)) : null;
+    baselineBox.textContent = baseline
+      ? `基準散布量の合計 ${fmt(baseline.low, 1)}〜${fmt(baseline.high, 1)} L${low !== null ? ` → ${first.name || "製品"} ${fmt(low, 1)}〜${fmt(high, 1)} ${first.unit || "mL"}` : ""}`
+      : "";
+  }
+  const list = famic.warnings({
+    inputs: draft.inputs.map((input) => ({ ...input, dilution: num(input.dilution) })),
+    groups,
+    date: draft.date,
+    sprayOf: (key) => num(draft.spray[key]),
+    logs: state().logs || [],
+    excludeLogId: draft.id,
+    harvestStartOf,
+  });
+  const box = dialog.querySelector("#logWarnings");
+  if (box) {
+    box.hidden = !list.length;
+    box.innerHTML = list.map((text) => `<li>${escapeHtml(text)}</li>`).join("");
+  }
 }
 
 function setType(code) {
@@ -580,9 +676,18 @@ function onClick(event) {
     draft.mode = button.dataset.mode;
     renderDialog();
     updateTotals();
+    refreshUses();
   } else if (act === "bed") {
     const id = button.dataset.id;
     draft.beds.has(id) ? draft.beds.delete(id) : draft.beds.add(id);
+    renderDialog();
+    updateTotals();
+    refreshUses();
+  } else if (act === "famic-pick") {
+    const i = Number(button.closest(".log-input").querySelector("[data-results]").dataset.results);
+    famic.pick(draft.inputs[i], button.dataset.reg, sprayGroups()).catch((error) => showError(`使用基準を読めませんでした: ${error.message}`));
+  } else if (act === "famic-unpick") {
+    famic.unpick(draft.inputs[Number(button.dataset.i)]);
     renderDialog();
     updateTotals();
   } else if (act === "orphan") {
@@ -696,12 +801,24 @@ function onChange(event) {
     group.items.forEach((item) => (el.checked ? draft.beds.add(item.bed_id) : draft.beds.delete(item.bed_id)));
     renderDialog();
     updateTotals();
+    refreshUses();
   } else if (el.dataset.act === "block") {
     el.checked ? draft.blocks.add(el.dataset.id) : draft.blocks.delete(el.dataset.id);
     renderDialog();
     updateTotals();
   } else if (el.dataset.spec && el.type === "checkbox") {
     draft.spec[el.dataset.spec] = el.checked;
+  } else if (el.dataset.in !== undefined && el.dataset.k === "use_key") {
+    // 使い方・適用病害虫を選んだ: 使い方を使用基準のものにし、希釈倍率が空なら、いちばん厳しい品目の基準に合わせる
+    const input = draft.inputs[Number(el.dataset.in)];
+    input.use_key = el.value;
+    input.method = el.value ? el.value.split("|")[1] : input.method;
+    const suggested = famic.suggestedDilution(input, sprayGroups());
+    if (suggested && (num(input.dilution) === null || input._dilutionBy)) {
+      Object.assign(input, { dilution: suggested.value, _dilutionBy: suggested.by, _dilutionValue: suggested.value });
+    }
+    renderDialog();
+    updateTotals();
   } else if (el.dataset.in !== undefined && el.tagName === "SELECT") {
     const input = draft.inputs[Number(el.dataset.in)];
     input[el.dataset.k] = el.value || null;
@@ -722,6 +839,16 @@ function onInput(event) {
   } else if (el.dataset.in !== undefined && el.tagName === "INPUT") {
     const input = draft.inputs[Number(el.dataset.in)];
     input[el.dataset.k] = el.type === "number" ? num(el.value) : el.value;
+    if (el.dataset.k === "dilution") {
+      input._dilutionBy = null; // 手で直した倍率は、品目の基準に合わせ直さない
+    }
+    // 農薬の名前を打つと、農薬登録情報から探す。選んだ農薬の名前を書き換えたら、選び直しにする
+    if (el.dataset.k === "name" && input.kind === "pesticide" && famic.famicEnabled()) {
+      if (input.reg_no && input._product && el.value !== input._product.name) {
+        famic.unpick(input);
+      }
+      famic.search(input, el.value, el.closest(".log-input").querySelector("[data-results]"));
+    }
     updateTotals();
   } else if (el.dataset.spray !== undefined) {
     draft.spray[el.dataset.spray] = num(el.value);
@@ -777,6 +904,7 @@ function buildLog() {
       spec[key] = num(value);
     }
   }
+  const groups = kind === "pesticide" && famic.famicEnabled() && draft.mode === "crops" ? sprayGroups(items) : [];
   const inputs = draft.inputs
     .filter((input) => (input.name || "").trim() || input.fertilizer_id || input.amount !== null || input.dilution !== null)
     .map((input, seq) => {
@@ -785,7 +913,8 @@ function buildLog() {
         seq,
         kind: input.kind,
         reg_no: input.reg_no || null,
-        standard: input.standard || null,
+        // 記録した時点の使用基準を写して残す（あとで登録が変わったり失効したりしても、そのときの基準で読める）
+        standard: input.kind === "pesticide" && input.reg_no && famic.famicEnabled() ? famic.snapshot(input, groups) : input.standard || null,
         fertilizer_id: fertilizer?.id || null,
         name: fertilizer ? fertilizer.name : (input.name || "").trim(),
         method: input.method || "",
@@ -866,6 +995,16 @@ async function reload() {
 
 export function initLogs(context) {
   ctx = context;
+  famic.initPesticide({
+    state: context.state,
+    // 使用基準を読み終えたら、窓を描き直す（入れかけの文字は draft に入っている）
+    refresh: () => {
+      if (draft && dialog?.open) {
+        renderDialog();
+        updateTotals();
+      }
+    },
+  });
   $("logToggle").addEventListener("click", () => {
     showAll = !showAll;
     renderLogs();

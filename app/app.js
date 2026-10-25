@@ -38,6 +38,7 @@ import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
 import { initLogs, renderLogs } from "./log-view.js";
 import { initPlantingView, openPlantingDetail, renderPlantingDetail } from "./planting-view.js";
+import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule } from "./schedule-view.js";
@@ -1759,6 +1760,8 @@ async function openField(field) {
   await openPlan(plan);
   fitView();
   render();
+  renderWeatherSettings();
+  syncWeather();
 }
 
 function newField() {
@@ -2465,6 +2468,7 @@ function showView(view) {
   $("journalView").hidden = view !== "journal";
   if (view === "map") {
     render();
+    renderWeatherSettings();
   } else if (view === "schedule") {
     renderSchedule();
     renderLogs();
@@ -2624,6 +2628,9 @@ async function startApp() {
     setStatus: (text) => ($("saveStatus").textContent = text),
     refresh: refreshRecords,
   });
+  initWeather({ state, setStatus: (text) => ($("saveStatus").textContent = text), onWeatherChanged: renderPlantingDetail });
+  renderWeatherSettings();
+  syncWeather();
   // スマホは作業の確認が主なので、日程から開く。
   // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）
   if (window.matchMedia("(max-width: 800px)").matches) {

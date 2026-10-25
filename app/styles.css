@@ -2019,6 +2019,224 @@ body.plan-busy #scheduleView {
   }
 }
 
+/* 作付の詳細の、本体と右の欄 */
+.detail-layout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.detail-main {
+  flex: 999 1 600px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-aside {
+  flex: 1 1 300px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-aside:empty {
+  display: none;
+}
+
+/* 気温は茶、降水量は青。その日の値を大きく、積算を小さく */
+.wx-cell {
+  display: flex;
+  gap: 14px;
+}
+
+.wx-cell > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 70px;
+}
+
+.wx-temp {
+  color: #b5501d;
+  font-weight: 700;
+}
+
+.wx-rain {
+  color: #2f6fae;
+  font-weight: 700;
+}
+
+.wx-sum {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.wx-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.wx-totals > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.wx-totals strong {
+  font-family: "Zen Maru Gothic", "Zen Kaku Gothic New", sans-serif;
+  font-size: 24px;
+}
+
+.wx-totals small {
+  font-size: 13px;
+}
+
+.wx-source {
+  font-size: 11px;
+}
+
+.wx-forecast {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+.wx-forecast th {
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.wx-forecast th:first-child {
+  width: 34%;
+  text-align: left;
+}
+
+.wx-forecast td {
+  padding: 4px 2px;
+  border-bottom: 1px solid #eef3f3;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.wx-forecast td.wx-day {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.wx-day.is-sun {
+  color: #b23a2f;
+}
+
+.wx-day.is-sat {
+  color: #2f6fae;
+}
+
+.wx-forecast td.num {
+  text-align: right;
+}
+
+.wx-pop {
+  color: #2f6fae;
+  font-weight: 700;
+}
+
+.wx-strong {
+  font-weight: 700;
+  color: #b5501d;
+}
+
+.wx-forecast th:last-child {
+  width: 4.5em;
+}
+
+.wx-wind span:last-child {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.wx-forecast tr.wx-divider td {
+  border-top: 2px solid #d5e2e1;
+}
+
+.wx-trend .wx-temp,
+.wx-trend .wx-rain {
+  opacity: 0.55;
+}
+
+/* 農薬（FAMIC） */
+.famic-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.famic-result {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border-bottom: 1px solid #eef3f3;
+  text-align: left;
+}
+
+.famic-result:hover {
+  background: #f1f6f6;
+}
+
+.famic-result small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.famic-picked {
+  margin: 2px 0 6px;
+}
+
+.famic-warn {
+  color: #9c2f25;
+}
+
+.famic-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.famic-warnings {
+  margin: 8px 0;
+  padding: 8px 10px 8px 26px;
+  border-radius: 8px;
+  background: #fff3dc;
+  color: #6b4600;
+  font-size: 12px;
+}
+
+.usage-table {
+  font-size: 12px;
+}
+
+.usage-product td:first-child {
+  padding-left: 16px;
+  color: #3d5154;
+}
+
+.usage-over {
+  color: #9c2f25;
+  font-weight: 700;
+}
+
 /* ---- PDF 出力（印刷） ---- */
 
 .map-pdf {

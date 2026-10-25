@@ -351,6 +351,168 @@ create table if not exists field.mcp_access_log (
 
 create index if not exists works_plan_start_idx on field.works (plan_start);
 
+-- ---- 農薬の使用基準（FAMIC の農薬登録情報） ----
+-- FAMIC が配布する CSV（登録基本部、登録適用部）を、scripts/import_famic.py が丸ごと入れ替える。
+-- 文字は NFKC でそろえる（半角カナを全角に）。画面からは読むだけ
+
+-- 取り込んだ版。ファイル名に反映日が入る
+create table if not exists field.famic_imports (
+  id bigint generated always as identity primary key,
+  files text[] not null,
+  imported_at timestamptz not null default now(),
+  products int not null,
+  uses int not null
+);
+
+-- 登録基本部。有効成分ごとに 1 行（混合剤は複数行）。ord は登録番号の中の順番で、適用部の「有効成分①〜⑤を含む農薬の総使用回数」の番号にあたる
+create table if not exists field.famic_products (
+  reg_no int not null,                 -- 登録番号
+  ord int not null,
+  kind text not null default '',       -- 農薬の種類
+  name text not null default '',       -- 農薬の名称
+  holder text not null default '',     -- 登録を有する者の名称
+  ingredient text not null default '', -- 有効成分
+  count_ingredient text not null default '',  -- 総使用回数における有効成分。空なら回数に数えない
+  concentration text not null default '',
+  mix_count int,
+  use_type text not null default '',   -- 用途（殺虫剤など）
+  formulation text not null default '',  -- 剤型名
+  registered_on text not null default '',
+  name_search text not null default '', -- 検索用。カタカナにそろえた名前
+  primary key (reg_no, ord)
+);
+
+-- 登録適用部。作物ごとの使用基準。*_text は CSV の文のまま、数の列はそこから読み取った値（読めなければ空）
+create table if not exists field.famic_uses (
+  id bigint generated always as identity primary key,
+  reg_no int not null,
+  use_type text not null default '',
+  kind text not null default '',
+  name text not null default '',
+  holder text not null default '',
+  crop text not null default '',       -- 作物名（「野菜類」のようなまとめた名前もある）
+  place text not null default '',      -- 適用場所
+  target text not null default '',     -- 適用病害虫雑草名
+  purpose text not null default '',    -- 使用目的
+  dilution_text text not null default '',  -- 希釈倍数使用量
+  liquid_text text not null default '',    -- 散布液量
+  timing_text text not null default '',    -- 使用時期
+  times_text text not null default '',     -- 本剤の使用回数
+  method text not null default '',     -- 使用方法
+  fumigation_time text not null default '',
+  fumigation_temp text not null default '',
+  soil text not null default '',
+  region text not null default '',
+  applied_name text not null default '',
+  mix_count int,
+  totals text[] not null default '{}', -- 有効成分①〜⑤を含む農薬の総使用回数（文のまま）
+  dilution_min numeric,                -- 希釈倍数の下限・上限（倍）
+  dilution_max numeric,
+  liquid_min numeric,                  -- 散布液量の下限・上限（L/10 a）
+  liquid_max numeric,
+  preharvest_days int,                 -- 収穫の何日前まで使えるか
+  times_max int,                       -- 本剤の使用回数の上限
+  total_max int[] not null default '{}'  -- 有効成分①〜⑤の総使用回数の上限
+);
+
+create index if not exists famic_uses_reg_crop_idx on field.famic_uses (reg_no, crop);
+
+-- 適用部にある作物名の一覧（品目の画面で、FAMIC の作物名を選ぶときの候補）
+create or replace view field.famic_crop_names with (security_invoker = on) as
+  select distinct crop from field.famic_uses where crop <> '' order by crop;
+
+-- 品目に対応する FAMIC の作物名（複数）。防除の記録で選べる使用基準は、この作物名の行だけ
+alter table field.crops add column if not exists famic_crops text[] not null default '{}';
+
+-- 入れ替えの途中の表。取り込み係がここに分けて入れ、field.famic_finish() が本番の表と入れ替える
+create table if not exists field.famic_products_next (like field.famic_products including all);
+create table if not exists field.famic_uses_next (like field.famic_uses including all);
+
+-- ---- 取り込み係 ----
+-- GitHub Actions が、この利用者でログインして、気象の値と FAMIC の登録情報を入れる。
+-- 許すのは、気象の値の読み書き、FAMIC の入れ替え（下の関数を通す）、観測所の番号の読み取りだけ。
+-- DB の接続文字列を GitHub に置かずに済むようにするため
+create table if not exists field.importers (
+  user_id uuid primary key references auth.users (id) on delete cascade
+);
+
+create or replace function field.is_importer() returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (select 1 from field.importers where user_id = auth.uid());
+$$;
+
+-- 気象の値を取る観測所の番号（どの圃場かは返さない）
+create or replace function field.weather_stations() returns setof text
+language sql stable security definer set search_path = ''
+as $$
+  select distinct station
+  from field.fields f, lateral (values (f.weather ->> 'temp_station'), (f.weather ->> 'rain_station')) as v (station)
+  where station is not null and station <> '' and (field.is_importer() or field.is_owner());
+$$;
+
+-- FAMIC の入れ替えを始める（途中の表を空にする）
+create or replace function field.famic_begin() returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if not field.is_importer() then
+    raise exception '取り込み係だけが呼べます';
+  end if;
+  truncate field.famic_products_next, field.famic_uses_next;
+end;
+$$;
+
+-- FAMIC の入れ替えを終える。途中の表の行数が、取り込み係の数えた行数と合えば、本番の表と入れ替えて版を残す
+create or replace function field.famic_finish(files text[], products int, uses int) returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  got_products int := (select count(*) from field.famic_products_next);
+  got_uses int := (select count(*) from field.famic_uses_next);
+begin
+  if not field.is_importer() then
+    raise exception '取り込み係だけが呼べます';
+  end if;
+  if got_products <> products or got_uses <> uses then
+    raise exception '行数が合いません（基本部 % / %、適用部 % / %）', got_products, products, got_uses, uses;
+  end if;
+  truncate field.famic_uses, field.famic_products;
+  insert into field.famic_products select * from field.famic_products_next;
+  insert into field.famic_uses (
+    reg_no, use_type, kind, name, holder, crop, place, target, purpose, dilution_text, liquid_text, timing_text,
+    times_text, method, fumigation_time, fumigation_temp, soil, region, applied_name, mix_count, totals,
+    dilution_min, dilution_max, liquid_min, liquid_max, preharvest_days, times_max, total_max
+  )
+  select
+    reg_no, use_type, kind, name, holder, crop, place, target, purpose, dilution_text, liquid_text, timing_text,
+    times_text, method, fumigation_time, fumigation_temp, soil, region, applied_name, mix_count, totals,
+    dilution_min, dilution_max, liquid_min, liquid_max, preharvest_days, times_max, total_max
+  from field.famic_uses_next;
+  insert into field.famic_imports (files, products, uses) values (files, products, uses);
+  truncate field.famic_products_next, field.famic_uses_next;
+end;
+$$;
+
+-- ---- 気象 ----
+
+-- 圃場の気象の設定。{ temp_station, rain_station（アメダスの観測所の番号）, office（府県予報区）, area（一次細分区域）,
+--   point（予報の気温の地点）, twoweek（2 週間気温予報の地点）}
+alter table field.fields add column if not exists weather jsonb not null default '{}';
+
+-- 日ごとの気象。アメダスの観測所ごと。画面が気象庁から直近の日を取って入れる。古い日は気象庁の CSV から入れる
+create table if not exists field.weather_daily (
+  station text not null,               -- アメダスの観測所の番号
+  date date not null,
+  temp_mean numeric,                   -- 日平均気温（℃）。毎正時の 24 回の平均。欠けが多い日は空
+  temp_max numeric,
+  temp_min numeric,
+  precip numeric,                      -- 日降水量（mm）
+  source text not null default '',     -- amedas（画面が取った値）、csv（CSV から入れた値）
+  fetched_at timestamptz not null default now(),
+  primary key (station, date)
+);
+
 -- 操作の記録。計画の表の行を足す・変える・消すたびに、DB が変える前と後の行をそのまま残す。
 -- 開発日誌のための変更の記録（changes）とは別で、事故を調べたり、消えた行を戻したりするために使う。
 -- 画面からは読み書きしない（許可を作らない）。DB が一緒に消した行（区画を消したときの畝など）も残る。
@@ -428,6 +590,16 @@ revoke all on function field.is_owner() from public, anon;
 grant execute on function field.is_owner() to authenticated;
 revoke all on function field.save_work_log(jsonb, jsonb, jsonb) from public, anon;
 grant execute on function field.save_work_log(jsonb, jsonb, jsonb) to authenticated;
+revoke all on field.importers from authenticated;
+alter table field.importers enable row level security;
+revoke all on function field.is_importer() from public, anon;
+grant execute on function field.is_importer() to authenticated;
+revoke all on function field.weather_stations() from public, anon;
+grant execute on function field.weather_stations() to authenticated;
+revoke all on function field.famic_begin() from public, anon;
+grant execute on function field.famic_begin() to authenticated;
+revoke all on function field.famic_finish(text[], int, int) from public, anon;
+grant execute on function field.famic_finish(text[], int, int) to authenticated;
 
 alter table field.owners enable row level security;
 alter table field.mcp_access_log enable row level security;
@@ -440,7 +612,7 @@ begin
   foreach t in array array[
     'fields', 'backdrops', 'plans', 'zones', 'blocks', 'work_types',
     'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'dev_notes',
-    'work_logs', 'work_log_targets', 'work_log_inputs'
+    'work_logs', 'work_log_targets', 'work_log_inputs', 'weather_daily'
   ] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists owner_all on field.%I', t);
@@ -449,6 +621,40 @@ begin
       'using (field.is_owner()) with check (field.is_owner())', t);
   end loop;
 end $$;
+
+-- FAMIC の表は、画面からは読むだけ。入れ替えは DB に直接つないで行う（scripts/import_famic.py）
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['famic_imports', 'famic_products', 'famic_uses'] loop
+    execute format('alter table field.%I enable row level security', t);
+    execute format('drop policy if exists owner_read on field.%I', t);
+    execute format('create policy owner_read on field.%I for select to authenticated using (field.is_owner())', t);
+    execute format('revoke insert, update, delete on field.%I from authenticated', t);
+  end loop;
+end $$;
+
+-- 取り込み係の許可。FAMIC は、版を読むことと、途中の表に入れることだけ（本番の表は field.famic_finish() が入れ替える）。
+-- 気象の値は読み書きできる
+drop policy if exists importer_read on field.famic_imports;
+create policy importer_read on field.famic_imports for select to authenticated using (field.is_importer());
+
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['famic_products_next', 'famic_uses_next'] loop
+    execute format('alter table field.%I enable row level security', t);
+    execute format('drop policy if exists importer_insert on field.%I', t);
+    execute format('create policy importer_insert on field.%I for insert to authenticated with check (field.is_importer())', t);
+    execute format('revoke select, update, delete on field.%I from authenticated', t);
+  end loop;
+end $$;
+
+drop policy if exists importer_all on field.weather_daily;
+create policy importer_all on field.weather_daily for all to authenticated
+  using (field.is_importer()) with check (field.is_importer());
 
 -- 下絵の画像の置き場。地番や氏名が写っていることがあるので、非公開にする
 insert into storage.buckets (id, name, public) values ('field-plan', 'field-plan', false)

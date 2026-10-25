@@ -56,12 +56,19 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `app/journal.js` | 変更の記録と、記録の画面 |
 | `app/logs.js` | 作業の記録の計算（畝＋通路の面積、記録の対象、つながる計画の作業、実績の日） |
 | `app/log-view.js` | 作業の記録の画面（最近の記録、記録を入れる窓、完了と取りやめ） |
-| `app/planting-view.js` | 作付の詳細の画面（計画と実績、計画との差） |
+| `app/planting-view.js` | 作付の詳細の画面（計画と実績、計画との差、気温・降水量、農薬の使用回数、予報） |
+| `app/pesticide.js` | 防除の記録で使う、農薬の使用基準（FAMIC）。この部分は切り離せる（`app/config.js` の `famic`） |
+| `app/weather.js` | 気象の計算と、気象庁のデータの読み取り（観測所、日ごとの観測値、予報） |
+| `app/weather-view.js` | 圃場図の「気象」の欄と、直近の観測値の取得 |
 | `app/history.js` | 元に戻す、やり直す |
 | `app/print.js` | PDF 出力（ブラウザーの印刷を使う） |
 | `app/updates.json` | アプリの更新の一覧（記録の画面に出る） |
 | `app/store.js` | データの読み書き |
 | `supabase/functions/field-mcp/` | 計画を Claude.ai から読むための MCP サーバー（Supabase Edge Function） |
+| `supabase/functions/field-weather/` | 2 週間気温予報を画面に渡す関数（ブラウザーから気象庁のこのデータを読めないため） |
+| `scripts/import_famic.py` | FAMIC の農薬登録情報（CSV）を DB に取り込む。`.github/workflows/famic.yml` が週に 1 回動かす |
+| `scripts/fetch-weather.mjs` | 気象の値（アメダスの日ごとの観測値）を気象庁から取って DB に入れる。`.github/workflows/weather.yml` が毎日動かす |
+| `scripts/import_jma_csv.py` | 気象庁の過去の気象データ（日別の CSV）を DB に入れる（取りこぼした日を埋める） |
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
 | `tests/` | 図形、日程、苗数と施肥量の計算、作業の記録の計算、元に戻すと、MCP サーバーのテスト |
 | `data/` | 下絵の画像など、圃場ごとの資料。**Git の対象外** |
@@ -86,6 +93,9 @@ fields（圃場。active_plan_id で実際に使うプランを指す）
 
 work_types（作業の種類と目安の日数。plannable が false の種類は記録だけに使う）、crops（品目の設定値）、fertilizers（肥料）、
 dev_notes（開発日誌のメモ）は、すべての圃場で共通
+
+weather_daily（アメダスの観測所ごとの日ごとの気温と降水量）、
+famic_imports・famic_products・famic_uses（FAMIC の農薬登録情報。画面からは読むだけ）も共通
 ```
 
 圃場はいくつも持てます。外形、下絵、プランは圃場ごとです。
@@ -112,6 +122,14 @@ dev_notes（開発日誌のメモ）は、すべての圃場で共通
    ```sql
    insert into field.owners (user_id) values ('利用者の ID');
    ```
+
+5. 2 週間気温予報の関数を配備します（配備済み）。
+
+   ```
+   bun x supabase functions deploy field-weather --project-ref byhthaiwbutqstrqbwwc
+   ```
+
+6. GitHub Actions が気象の値（毎日、`weather.yml`）と FAMIC の農薬登録情報（週に 1 回、`famic.yml`）を入れるために、取り込み係の利用者を作ります（作成済み）。Supabase Auth に利用者を作って `field.importers` に登録し、そのメールアドレスとパスワードを、GitHub のリポジトリの Settings > Secrets and variables > Actions に `FIELD_IMPORTER_EMAIL`、`FIELD_IMPORTER_PASSWORD` として置きます。取り込み係にできるのは、気象の値と FAMIC の入れ替えだけです。DB の接続文字列は GitHub に置きません。
 
 ## 5. 圃場の作図
 
