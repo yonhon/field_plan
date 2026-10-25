@@ -582,8 +582,6 @@ function newWork(owner, workType, seq) {
     seq,
     plan_start: null,
     plan_end: null,
-    actual_start: null,
-    actual_end: null,
     note: "",
   };
 }

@@ -17,7 +17,19 @@ export const DEFAULT_WORK_TYPES = [
   { code: "plant", label: "定植・播種", sort: 110, default_days: 3, min_gap_days: 0, scope: "bed" },
   { code: "harvest", label: "収穫", sort: 120, default_days: 30, min_gap_days: 0, scope: "bed" },
   { code: "residue", label: "残渣処理", sort: 130, default_days: 1, min_gap_days: 0, scope: "bed" },
-];
+  { code: "nursery_sow", label: "育苗の播種", sort: 85, default_days: 1, min_gap_days: 0, scope: "bed" },
+  // ここから下は記録だけに使う（計画には置かない）
+  { code: "water", label: "灌水", sort: 200, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "check", label: "発芽確認", sort: 210, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "weed", label: "除草", sort: 220, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "spray", label: "防除", sort: 230, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "topdress", label: "追肥", sort: 240, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "install", label: "資材の設置", sort: 250, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "other", label: "その他", sort: 260, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+].sort((a, b) => a.sort - b.sort);
+
+// 計画に置ける作業の種類か。DB の plannable が false のものは記録だけに使う
+export const isPlannable = (type) => type.plannable !== false;
 
 // 工程のひな形。区画は畝立ての前まで（「両方」は学校で習った順序）、畝は畝立てから収穫と残渣処理まで
 export const TEMPLATES = {
@@ -50,6 +62,14 @@ export const WORK_COLORS = {
   plant: "#0b6b72",
   harvest: "#d81b60",
   residue: "#6d4c41",
+  nursery_sow: "#7cb342",
+  water: "#3b82c4",
+  check: "#8d8a1e",
+  weed: "#558b2f",
+  spray: "#b3261e",
+  topdress: "#8e24aa",
+  install: "#78909c",
+  other: "#90a4ae",
 };
 
 const HARVEST = "harvest";

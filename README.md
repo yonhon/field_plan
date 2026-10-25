@@ -26,7 +26,7 @@
 2. 耕起対象区画、畝、作付と、その作業の計画（済み）
 3. 日程の逆算と警告（済み）
 4. 品目の設定値からの苗数、施肥量の計算（済み）
-5. 作業の記録（これから。[計画](docs/actuals-plan.md)）
+5. 作業の記録（作り始めた。[計画](docs/actuals-plan.md)）
 
 ### 計算式
 
@@ -54,13 +54,15 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `app/crops-view.js` | 品目の画面 |
 | `app/dialog.js` | お知らせの窓（文をコピーできる） |
 | `app/journal.js` | 変更の記録と、記録の画面 |
+| `app/logs.js` | 作業の記録の計算（畝＋通路の面積、記録の対象、つながる計画の作業、実績の日） |
+| `app/log-view.js` | 作業の記録の画面（最近の記録、記録を入れる窓） |
 | `app/history.js` | 元に戻す、やり直す |
 | `app/print.js` | PDF 出力（ブラウザーの印刷を使う） |
 | `app/updates.json` | アプリの更新の一覧（記録の画面に出る） |
 | `app/store.js` | データの読み書き |
 | `supabase/functions/field-mcp/` | 計画を Claude.ai から読むための MCP サーバー（Supabase Edge Function） |
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
-| `tests/` | 図形、日程、苗数と施肥量の計算、元に戻すと、MCP サーバーのテスト |
+| `tests/` | 図形、日程、苗数と施肥量の計算、作業の記録の計算、元に戻すと、MCP サーバーのテスト |
 | `data/` | 下絵の画像など、圃場ごとの資料。**Git の対象外** |
 
 画面のコードは公開されますが、データはログインした本人しか読めません。
@@ -68,8 +70,11 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 ### テーブル
 
 ```
-fields（圃場）
+fields（圃場。active_plan_id で実際に使うプランを指す）
 ├─ backdrops（下絵の位置合わせ）
+├─ work_logs（作業の記録。プランではなく圃場に付ける）
+│  ├─ work_log_targets（対象の畝・区画と、つながる計画の作業）
+│  └─ work_log_inputs（使った資材）
 └─ plans（プラン）
    └─ zones（区域。有効圃場、物置、井戸、通路など）
       └─ blocks（耕起対象区画。始まる日となくなる日を持つ）
@@ -78,7 +83,7 @@ fields（圃場）
             └─ plantings（作付）
                └─ works（畝立てから後の作業）
 
-work_types（作業の種類と目安の日数）、crops（品目の設定値）、fertilizers（肥料）、
+work_types（作業の種類と目安の日数。plannable が false の種類は記録だけに使う）、crops（品目の設定値）、fertilizers（肥料）、
 dev_notes（開発日誌のメモ）は、すべての圃場で共通
 ```
 

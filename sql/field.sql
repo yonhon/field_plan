@@ -183,11 +183,120 @@ create table if not exists field.works (
   seq int not null,                    -- 区画または作付の中の順番
   plan_start date,
   plan_end date,
-  actual_start date,
-  actual_end date,
   note text not null default '',
   check ((block_id is null) <> (planting_id is null))
 );
+
+-- 実績の日は作業の記録（work_logs）から求めるので、作業には持たない。2026-10 に消した
+alter table field.works drop column if exists actual_start;
+alter table field.works drop column if exists actual_end;
+-- やらないことにした作業。取りやめた日と理由。空なら取りやめていない
+alter table field.works add column if not exists cancelled_on date;
+alter table field.works add column if not exists cancel_note text not null default '';
+
+-- 作業の種類のうち、計画に置けるもの。false は記録だけに使う（灌水、防除など）
+alter table field.work_types add column if not exists plannable boolean not null default true;
+
+insert into field.work_types (code, label, sort, default_days, min_gap_days, scope, plannable) values
+  ('nursery_sow', '育苗の播種',   85, 1, 0, 'bed', true),
+  ('water',       '灌水',        200, 1, 0, 'bed', false),
+  ('check',       '発芽確認',    210, 1, 0, 'bed', false),
+  ('weed',        '除草',        220, 1, 0, 'bed', false),
+  ('spray',       '防除',        230, 1, 0, 'bed', false),
+  ('topdress',    '追肥',        240, 1, 0, 'bed', false),
+  ('install',     '資材の設置',  250, 1, 0, 'bed', false),
+  ('other',       'その他',      260, 1, 0, 'bed', false)
+on conflict (code) do nothing;
+
+-- 実際に使うプラン。作業の記録は、このプランの畝・作付・作業につなぐ。空なら記録を入れられない
+alter table field.fields add column if not exists active_plan_id uuid references field.plans (id) on delete set null;
+
+-- 作業の記録。1 日の 1 作業で 1 行。プランではなく圃場に付けるので、プランを消しても残る
+create table if not exists field.work_logs (
+  id uuid primary key default gen_random_uuid(),
+  field_id uuid not null references field.fields (id) on delete cascade,
+  date date not null,                  -- 作業をした日。2 日がかりの作業は日ごとに 1 行
+  work_type text not null references field.work_types (code),
+  finishes boolean not null default false,  -- この記録で、つながる計画の作業を終えたか
+  spec jsonb not null default '{}',    -- 実際の仕様（株間、条間など）。作業の種類ごとに項目が違う
+  note text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists work_logs_field_date_idx on field.work_logs (field_id, date);
+
+-- 記録の対象。1 件の記録に畝（作付）を何本でも付ける。区画の作業では区画を付ける。
+-- つながる計画の作業は、作付ごとに違うので、ここに持つ。先が消えても記録は残り、label の名前で読める
+create table if not exists field.work_log_targets (
+  id uuid primary key default gen_random_uuid(),
+  log_id uuid not null references field.work_logs (id) on delete cascade,
+  planting_id uuid references field.plantings (id) on delete set null,
+  bed_id uuid references field.beds (id) on delete set null,
+  block_id uuid references field.blocks (id) on delete set null,
+  work_id uuid references field.works (id) on delete set null,  -- つながる計画の作業
+  label text not null default '',      -- 記録した時点の名前。例: 区画A 畝3 キャベツ
+  crop_name text not null default '',  -- 記録した時点の品目の名前
+  area_m2 numeric,                     -- 記録した時点の畝＋通路（区画の作業では区画）の面積
+  spray_l numeric                      -- 防除で、この畝に散布した液の量（L）
+);
+
+create index if not exists work_log_targets_log_idx on field.work_log_targets (log_id);
+create index if not exists work_log_targets_planting_idx on field.work_log_targets (planting_id);
+
+-- 記録で使った資材
+create table if not exists field.work_log_inputs (
+  id uuid primary key default gen_random_uuid(),
+  log_id uuid not null references field.work_logs (id) on delete cascade,
+  seq int not null default 0,
+  kind text not null check (kind in ('pesticide', 'fertilizer', 'seed', 'material')),
+  reg_no text,                         -- 農薬の登録番号
+  standard jsonb,                      -- 記録した時点の農薬の使用基準の写し
+  fertilizer_id uuid references field.fertilizers (id) on delete set null,
+  name text not null default '',       -- 名前。銘柄を選ばないもの、名前が分からないものは文字で入れる
+  method text not null default '',     -- 使い方（散布、土壌混和、浸漬など）
+  dilution numeric,                    -- 希釈倍率（倍）
+  amount numeric,                      -- 使った製品の量
+  unit text not null default ''
+);
+
+create index if not exists work_log_inputs_log_idx on field.work_log_inputs (log_id);
+
+-- 記録を 1 件、対象と資材ごと保存する。対象と資材は、渡したもので置き換える。
+-- 画面から呼ぶ。呼んだ利用者の権限で動くので、RLS がそのまま効く
+create or replace function field.save_work_log(log jsonb, targets jsonb, inputs jsonb) returns uuid
+language plpgsql set search_path = ''
+as $$
+declare
+  new_id uuid := coalesce((log ->> 'id')::uuid, gen_random_uuid());
+begin
+  insert into field.work_logs (id, field_id, date, work_type, finishes, spec, note)
+  values (
+    new_id, (log ->> 'field_id')::uuid, (log ->> 'date')::date, log ->> 'work_type',
+    coalesce((log ->> 'finishes')::boolean, false), coalesce(log -> 'spec', '{}'::jsonb), coalesce(log ->> 'note', '')
+  )
+  on conflict (id) do update set
+    date = excluded.date, work_type = excluded.work_type, finishes = excluded.finishes,
+    spec = excluded.spec, note = excluded.note;
+
+  delete from field.work_log_targets where log_id = new_id;
+  insert into field.work_log_targets (id, log_id, planting_id, bed_id, block_id, work_id, label, crop_name, area_m2, spray_l)
+  select
+    coalesce((t ->> 'id')::uuid, gen_random_uuid()), new_id,
+    (t ->> 'planting_id')::uuid, (t ->> 'bed_id')::uuid, (t ->> 'block_id')::uuid, (t ->> 'work_id')::uuid,
+    coalesce(t ->> 'label', ''), coalesce(t ->> 'crop_name', ''), (t ->> 'area_m2')::numeric, (t ->> 'spray_l')::numeric
+  from jsonb_array_elements(coalesce(targets, '[]'::jsonb)) as t;
+
+  delete from field.work_log_inputs where log_id = new_id;
+  insert into field.work_log_inputs (id, log_id, seq, kind, reg_no, standard, fertilizer_id, name, method, dilution, amount, unit)
+  select
+    coalesce((i ->> 'id')::uuid, gen_random_uuid()), new_id, coalesce((i ->> 'seq')::int, 0), i ->> 'kind',
+    i ->> 'reg_no', i -> 'standard', (i ->> 'fertilizer_id')::uuid, coalesce(i ->> 'name', ''),
+    coalesce(i ->> 'method', ''), (i ->> 'dilution')::numeric, (i ->> 'amount')::numeric, coalesce(i ->> 'unit', '')
+  from jsonb_array_elements(coalesce(inputs, '[]'::jsonb)) as i;
+
+  return new_id;
+end;
+$$;
 
 -- 変更の記録。計画を変えるたびに、何を変えたかを 1 行ずつ残す。プランからは独立していて、番号は全体の通し番号。
 -- 文は、その時点の名前で書く（あとで名前を変えても、記録の文は変わらない）
@@ -289,7 +398,7 @@ declare
 begin
   foreach t in array array[
     'fields', 'backdrops', 'plans', 'zones', 'blocks', 'beds', 'plantings', 'works',
-    'crops', 'fertilizers', 'work_types'
+    'crops', 'fertilizers', 'work_types', 'work_logs', 'work_log_targets', 'work_log_inputs'
   ] loop
     execute format('drop trigger if exists write_audit_log on field.%I', t);
     execute format(
@@ -317,6 +426,8 @@ revoke all on field.audit_log from authenticated;
 revoke all on function field.write_audit_log() from public, anon, authenticated;
 revoke all on function field.is_owner() from public, anon;
 grant execute on function field.is_owner() to authenticated;
+revoke all on function field.save_work_log(jsonb, jsonb, jsonb) from public, anon;
+grant execute on function field.save_work_log(jsonb, jsonb, jsonb) to authenticated;
 
 alter table field.owners enable row level security;
 alter table field.mcp_access_log enable row level security;
@@ -328,7 +439,8 @@ declare
 begin
   foreach t in array array[
     'fields', 'backdrops', 'plans', 'zones', 'blocks', 'work_types',
-    'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'dev_notes'
+    'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'dev_notes',
+    'work_logs', 'work_log_targets', 'work_log_inputs'
   ] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists owner_all on field.%I', t);

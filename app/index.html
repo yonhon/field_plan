@@ -121,6 +121,10 @@
             <button id="renamePlanBtn" class="text-btn">名前を変更</button>
             <button id="deletePlanBtn" class="text-btn danger">削除</button>
           </div>
+          <p id="activePlanInfo" class="muted"></p>
+          <div class="row edit-only">
+            <button id="activePlanBtn" class="text-btn">このプランを実際に使う</button>
+          </div>
         </section>
 
         <section class="panel">
@@ -212,6 +216,15 @@
       <section class="panel">
         <h2 id="weekTitle">今週やること</h2>
         <ul id="weekList" class="week-list"></ul>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2 id="logTitle">最近の記録</h2>
+          <button id="logToggle" class="text-btn" hidden>すべて</button>
+        </div>
+        <p id="logNote" class="muted" hidden></p>
+        <ul id="logList" class="week-list log-list"></ul>
       </section>
 
       <section id="problemPanel" class="panel problem-panel" hidden>
@@ -327,6 +340,8 @@
           </table>
         </section>
       </div>
+
+      <button id="logAddBtn" class="fab" type="button">＋ 記録する</button>
     </main>
 
     <main id="cropsView" class="schedule" hidden>
@@ -360,7 +375,7 @@
     <script type="module">
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // 読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js"];
       try {
         await Promise.all(parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })));
         await import("./app.js");

@@ -132,6 +132,30 @@ export function createSupabaseStore(client, options) {
     async saveWorkType(type) {
       check(await client.from("work_types").upsert(type));
     },
+    // 実際に使うプラン。空（null）にもできる
+    async setActivePlan(fieldId, planId) {
+      check(await client.from("fields").update({ active_plan_id: planId }).eq("id", fieldId));
+    },
+    // 作業の記録。圃場ごとに、対象と資材を付けて、新しい順に
+    async loadLogs(fieldId) {
+      const rows = check(
+        await client
+          .from("work_logs")
+          .select("*, targets:work_log_targets(*), inputs:work_log_inputs(*)")
+          .eq("field_id", fieldId)
+          .order("date", { ascending: false })
+          .order("created_at", { ascending: false })
+      );
+      rows.forEach((row) => row.inputs.sort((a, b) => a.seq - b.seq));
+      return rows;
+    },
+    // 記録を 1 件、対象と資材ごと保存する（DB の関数が 1 つのトランザクションで置き換える）
+    async saveLog({ targets, inputs, ...log }) {
+      return check(await client.rpc("save_work_log", { log, targets, inputs }));
+    },
+    async deleteLog(id) {
+      check(await client.from("work_logs").delete().eq("id", id));
+    },
   };
 }
 
@@ -192,6 +216,7 @@ export function createLocalStore() {
         const plans = (data.plans || []).filter((plan) => plan.field_id === id).map((plan) => plan.id);
         data.fields = data.fields.filter((field) => field.id !== id);
         data.plans = (data.plans || []).filter((plan) => plan.field_id !== id);
+        data.workLogs = (data.workLogs || []).filter((log) => log.field_id !== id);
         for (const table of Object.keys(PLAN_TABLES)) {
           data[table] = (data[table] || []).filter((row) => !plans.includes(row.plan_id));
         }
@@ -264,7 +289,12 @@ export function createLocalStore() {
       update((data) => removeRows(data, table, ids));
     },
     async loadWorkTypes() {
-      return read().workTypes || DEFAULT_WORK_TYPES.map((type) => ({ ...type }));
+      // 前に保存した種類に、あとから増えた種類（記録だけに使う種類など）を足す
+      const saved = read().workTypes || [];
+      const known = new Set(saved.map((type) => type.code));
+      return [...saved, ...DEFAULT_WORK_TYPES.filter((type) => !known.has(type.code)).map((type) => ({ ...type }))].sort(
+        (a, b) => a.sort - b.sort
+      );
     },
     async listChanges() {
       return (read().changes || []).sort((a, b) => b.no - a.no);
@@ -293,7 +323,39 @@ export function createLocalStore() {
     async saveWorkType(type) {
       update((data) => {
         const types = data.workTypes || DEFAULT_WORK_TYPES.map((item) => ({ ...item }));
-        data.workTypes = types.map((item) => (item.code === type.code ? type : item));
+        data.workTypes = types.some((item) => item.code === type.code)
+          ? types.map((item) => (item.code === type.code ? type : item))
+          : [...types, type];
+      });
+    },
+    async setActivePlan(fieldId, planId) {
+      update((data) => {
+        data.fields.find((field) => field.id === fieldId).active_plan_id = planId;
+      });
+    },
+    async loadLogs(fieldId) {
+      return (read().workLogs || [])
+        .filter((log) => log.field_id === fieldId)
+        .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
+    },
+    async saveLog({ targets, inputs, ...log }) {
+      const id = log.id || crypto.randomUUID();
+      update((data) => {
+        const old = (data.workLogs || []).find((item) => item.id === id);
+        const saved = {
+          created_at: old?.created_at || new Date().toISOString(),
+          ...log,
+          id,
+          targets: targets.map((target) => ({ ...target, id: target.id || crypto.randomUUID(), log_id: id })),
+          inputs: inputs.map((input) => ({ ...input, id: input.id || crypto.randomUUID(), log_id: id })),
+        };
+        data.workLogs = [...(data.workLogs || []).filter((item) => item.id !== id), saved];
+      });
+      return id;
+    },
+    async deleteLog(id) {
+      update((data) => {
+        data.workLogs = (data.workLogs || []).filter((log) => log.id !== id);
       });
     },
   };

@@ -36,8 +36,9 @@ import { initCrops, renderCrops } from "./crops-view.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
+import { initLogs, renderLogs } from "./log-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
-import { existsOn, harvestEnd, localToday, worksRange } from "./schedule.js";
+import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore } from "./store.js";
 
@@ -108,7 +109,9 @@ const state = {
   beds: [],
   plantings: [], // 作付（畝ごとの、畝立てから収穫までの 1 回ぶん）
   works: [],
-  workTypes: [],
+  workTypes: [], // 計画に置ける作業の種類
+  allWorkTypes: [], // 記録だけに使う種類（灌水、防除など）も含めた、すべての作業の種類
+  logs: [], // 作業の記録（圃場ごと。新しい順）
   crops: [], // 品目の設定値（すべてのプランで共通）
   fertilizers: [],
   changes: [], // 変更の記録（新しい順。プランによらず 1 本）
@@ -1730,13 +1733,14 @@ async function loadFieldData(field) {
     backdropUrl = await state.store.imageUrl(backdrop.storage_path);
     backdrop.size = await imageSize(backdropUrl).catch(() => null);
   }
+  const logs = await state.store.loadLogs(field.id);
   let currentId = null;
   try {
     currentId = localStorage.getItem(CURRENT_PLAN_KEY);
   } catch {
     // 読めなければ先頭のプランを開く
   }
-  Object.assign(state, { field, plans, backdrop, backdropUrl, alignment: null });
+  Object.assign(state, { field, plans, backdrop, backdropUrl, logs, alignment: null });
   return plans.find((plan) => plan.id === currentId) || plans[0];
 }
 
@@ -1798,13 +1802,19 @@ async function deleteField() {
 }
 
 function renderPlans() {
+  const activeId = state.field.active_plan_id;
   $("schedulePlanName").textContent = state.plan.name;
   $("planSelect").innerHTML = state.plans
-    .map((plan) => `<option value="${plan.id}">${escapeHtml(plan.name)}</option>`)
+    .map((plan) => `<option value="${plan.id}">${escapeHtml(plan.name)}${plan.id === activeId ? "（実際に使う）" : ""}</option>`)
     .join("");
   $("planSelect").value = state.plan.id;
+  const active = state.plans.find((plan) => plan.id === activeId);
+  $("activePlanInfo").textContent = active
+    ? `実際に使うプラン: ${active.name}。作業の記録は、このプランの畝につなぎます。`
+    : "実際に使うプランが決まっていません。決めると、作業の記録を入れられます。";
   renderFields();
   renderPlanButtons();
+  renderLogs();
 }
 
 const PLAN_CONTROLS = ["fieldSelect", "newFieldBtn", "deleteFieldBtn", "planSelect", "newPlanBtn", "copyPlanBtn", "renamePlanBtn", "deletePlanBtn"];
@@ -1813,7 +1823,37 @@ function renderPlanButtons() {
   PLAN_CONTROLS.forEach((id) => ($(id).disabled = state.planBusy));
   $("deleteFieldBtn").disabled = state.planBusy || state.fields.length <= 1;
   $("deletePlanBtn").disabled = state.planBusy || state.plans.length <= 1;
+  $("activePlanBtn").disabled = state.planBusy || state.field.active_plan_id === state.plan.id;
   document.body.classList.toggle("plan-busy", state.planBusy);
+}
+
+// 開いているプランを、実際に使うプランにする。作業の記録は、このプランの畝・作付・作業につなぐ
+function useThisPlan() {
+  const plan = state.plan;
+  if (state.planBusy || state.field.active_plan_id === plan.id) {
+    return;
+  }
+  planTask(async () => {
+    await state.store.setActivePlan(state.field.id, plan.id);
+    state.field.active_plan_id = plan.id;
+    record({ kind: "plan.active", target: ["plan", plan.id], text: `プラン「${plan.name}」を、実際に使うプランに設定` });
+  });
+}
+
+// 実際に使うプランの区画・畝・作付・作業。開いているプランならそれを、違えば読み込む。決まっていなければ null
+async function activePlanData() {
+  const id = state.field.active_plan_id;
+  if (!id) {
+    return null;
+  }
+  if (id === state.plan.id) {
+    return { blocks: state.blocks, beds: state.beds, plantings: state.plantings, works: state.works, crops: state.crops };
+  }
+  const loaded = { crops: state.crops };
+  for (const table of ["blocks", "beds", "plantings", "works"]) {
+    loaded[table] = await state.store.list(table, id);
+  }
+  return loaded;
 }
 
 // 圃場とプランの作成・コピー・名前の変更・削除・切り替えを、1 つずつ行う。
@@ -1933,6 +1973,10 @@ async function deletePlan() {
   // 確認の窓に出すプランと、消すプランを同じものにする
   const plan = state.plan;
   if (state.planBusy || state.plans.length <= 1 || $("planSelect").value !== plan.id) {
+    return;
+  }
+  if (plan.id === state.field.active_plan_id) {
+    notify("このプランは、実際に使うプランなので削除できません。先に、ほかのプランを実際に使うプランにしてください。");
     return;
   }
   const ok = await confirmDelete("このプランを削除します。区域、区画、畝、日程がすべて消えます。", `プラン「${plan.name}」`);
@@ -2294,6 +2338,7 @@ $("planSelect").addEventListener("change", (event) => {
 $("newPlanBtn").addEventListener("click", newPlan);
 $("renamePlanBtn").addEventListener("click", renamePlan);
 $("copyPlanBtn").addEventListener("click", copyPlan);
+$("activePlanBtn").addEventListener("click", useThisPlan);
 $("deletePlanBtn").addEventListener("click", deletePlan);
 $("deleteVertexBtn").addEventListener("click", deleteSelectedVertex);
 $("deleteShapeBtn").addEventListener("click", deleteSelectedShape);
@@ -2417,6 +2462,7 @@ function showView(view) {
     render();
   } else if (view === "schedule") {
     renderSchedule();
+    renderLogs();
   } else if (view === "crops") {
     renderCrops();
   } else {
@@ -2516,7 +2562,8 @@ async function startApp() {
     } catch {
       // 読めなければ先頭の圃場を開く
     }
-    state.workTypes = await state.store.loadWorkTypes();
+    state.allWorkTypes = await state.store.loadWorkTypes();
+    state.workTypes = state.allWorkTypes.filter(isPlannable);
     state.crops = await state.store.listAll("crops");
     state.fertilizers = await state.store.listAll("fertilizers");
     await loadPlanData(await loadFieldData(state.fields.find((field) => field.id === fieldId) || state.fields[0]));
@@ -2552,6 +2599,7 @@ async function startApp() {
     setStatus: (text) => ($("saveStatus").textContent = text),
     renderWarnings,
   });
+  initLogs({ state, activePlanData, setStatus: (text) => ($("saveStatus").textContent = text) });
   // スマホは作業の確認が主なので、日程から開く。
   // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）
   if (window.matchMedia("(max-width: 800px)").matches) {
@@ -2584,6 +2632,7 @@ async function startApp() {
       renderSchedule();
       renderCrops();
       renderJournal();
+      renderLogs();
     },
   });
 }
