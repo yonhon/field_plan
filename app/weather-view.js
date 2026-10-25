@@ -94,9 +94,14 @@ export async function renderWeatherSettings() {
   }
   $("forecastPoint").innerHTML = option("", points.length ? "選んでください" : "先に府県予報区を選んでください", settings.point || "") + points.map(([code, name]) => option(code, name, settings.point)).join("");
   if (!twoWeekList) {
-    twoWeekList = await state()
+    // 気象庁の一覧は、県庁所在地などが先にまとまっている（那覇がほかの沖縄の地点から離れている）。
+    // 地域の番号（fuk。北から南へ）でまとめ直す。同じ地域の中は、気象庁の順のまま
+    twoWeekList = (await state()
       .store.twoWeekStations()
-      .catch(() => []);
+      .catch(() => []))
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => a.item.fuk - b.item.fuk || a.index - b.index)
+      .map(({ item }) => item);
   }
   $("twoweekStation").innerHTML =
     option("", (twoWeekList || []).length ? "選んでください" : "地点の一覧を読めませんでした", String(settings.twoweek || "")) +
