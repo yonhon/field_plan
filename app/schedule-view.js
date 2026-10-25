@@ -20,6 +20,7 @@ import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, logForWork, moveLogs, openLogEditor } from "./log-view.js";
 import { lateWorks, layoutBars, withActualDates, workActuals, workStatus } from "./logs.js";
+import { loadPref, savePref } from "./prefs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
 
@@ -308,28 +309,20 @@ function renderProblems() {
     .join("");
 }
 
-// 工程表の表示。plan（計画）、act（実績）、both（計画と実績）。工程表と作付の詳細で共有し、ブラウザーが覚える
-const GANTT_MODE_KEY = "field_plan_gantt_mode";
+// 工程表の表示。plan（計画）、act（実績）、both（計画と実績）。工程表と作付の詳細で共有し、ブラウザーが圃場ごとに覚える
+const GANTT_MODE_KEY = "field_plan_gantt_mode"; // 圃場ごとに覚える前の、1 つだけの値
 const GANTT_MODES = { plan: "計画", act: "実績", both: "計画と実績" };
 
 export function ganttMode() {
   if (!isActivePlan()) {
     return "plan";
   }
-  try {
-    const saved = localStorage.getItem(GANTT_MODE_KEY);
-    return GANTT_MODES[saved] ? saved : "plan";
-  } catch {
-    return "plan";
-  }
+  const saved = loadPref(state().field.id, "ganttMode", GANTT_MODE_KEY);
+  return GANTT_MODES[saved] ? saved : "plan";
 }
 
 export function setGanttMode(mode) {
-  try {
-    localStorage.setItem(GANTT_MODE_KEY, mode);
-  } catch {
-    // 覚えられなくても、いまの表示は切り替わる
-  }
+  savePref(state().field.id, "ganttMode", mode);
 }
 
 // 表示の切り替えのボタン（工程表と作付の詳細で同じ形）

@@ -1,9 +1,9 @@
 // 「作付の詳細」の画面。作付 1 つ（または区画 1 つ）について、計画と実績を 1 つの画面で見る。
 // 工程表の行の名前から開く。表示（計画／実績／計画と実績）は工程表と共有する
-import { notify } from "./dialog.js";
+import { confirmAction, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { inputText, openLogEditor, specText, uncancelWork } from "./log-view.js";
-import { bedAreas, compressedAxis, dayGap, firstHarvestDay, shiftAfterActual, specDiff, usageTable } from "./logs.js";
+import { bedAreas, compressedAxis, dayGap, firstHarvestDay, plantingStart, shiftAfterActual, specDiff, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, localToday } from "./schedule.js";
 import { ICON_LABELS, accumulate, addTwoWeek, fetchStations, parseForecast, weatherIcon } from "./weather.js";
@@ -101,8 +101,16 @@ function plannedSpec(planting) {
   return { plant_gap_cm: value("plant_gap_cm"), row_gap_cm: value("row_gap_cm"), row_count: value("row_count"), staggered: Boolean(value("staggered")) };
 }
 
+// 品目の設定値（作付に値がなければ使う値。次に作付を作るときの初期値）
+function cropSpec(crop) {
+  return { plant_gap_cm: crop.plant_gap_cm ?? null, row_gap_cm: crop.row_gap_cm ?? null, row_count: crop.row_count ?? null, staggered: Boolean(crop.staggered) };
+}
+
 function plannedSpecText(planting) {
-  const spec = plannedSpec(planting);
+  return specSummary(plannedSpec(planting));
+}
+
+function specSummary(spec) {
   return [
     spec.plant_gap_cm ? `株間 ${spec.plant_gap_cm}cm` : "",
     spec.row_gap_cm ? `条間 ${spec.row_gap_cm}cm` : "",
@@ -134,11 +142,11 @@ export function renderPlantingDetail() {
   $("plantingBody").innerHTML =
     headHtml(c, active) +
     `<div class="row detail-modes">${active ? `<div class="log-modes" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}` +
-    `<span class="muted">${active ? "工程表で選んでいた表示のまま開きます。" : "実績は、実際に使うプランを開くと出せます。"}</span></div>` +
+    `${active ? "" : '<span class="muted">実績は、実際に使うプランを開くと出せます。</span>'}</div>` +
     `<div class="detail-layout"><div class="detail-main">` +
     `<section class="panel">${timelineHtml(c, mode, actuals)}</section>` +
     (mode === "both" ? diffHtml(c, actuals, logs) : "") +
-    `<section class="panel"><div class="panel-heading"><h2>作業</h2><span class="muted">${tableNote(mode)}</span></div>${tableHtml(c, mode, actuals, logs)}</section>` +
+    `<section class="panel"><div class="panel-heading"><h2>作業</h2>${tableNote(mode) ? `<span class="muted">${tableNote(mode)}</span>` : ""}</div>${tableHtml(c, mode, actuals, logs)}</section>` +
     `</div><aside class="detail-aside">${asideHtml(c, active)}</aside></div>`;
 }
 
@@ -393,7 +401,6 @@ const tableNote = (mode) =>
   ({
     plan: "計画の作業です。行を押すと、日程の画面で作業の計画を開きます。",
     act: "記録だけです。日付を押すと、記録を直す画面を開きます。",
-    both: "計画の作業と、つながる記録を同じ行に並べます。計画にない作業は、計画の欄が「－」です。",
   })[mode];
 
 // 工程の小さな図。作業の種類ごとの行に、計画の帯と実績の帯を重ねる。作業のない期間は詰める
@@ -472,7 +479,14 @@ function diffHtml(c, actuals, logs) {
       const text = diff
         .map((item) => `${item.label}は、記録が ${item.key === "staggered" ? (item.actual ? "千鳥" : "千鳥なし") : `${item.actual}${item.unit}`}、計画が ${item.key === "staggered" ? (item.planned ? "千鳥" : "千鳥なし") : `${item.planned ?? "なし"}${item.planned === null ? "" : item.unit}`}`)
         .join("。");
-      parts.push(`<p>定植の${escapeHtml(text)}です。</p><button type="button" class="chip-btn" data-act="apply-spec" data-spec-log="${plantLog.id}">記録の仕様を計画に反映</button>`);
+      // 計画は書き換えない。次からの作付のために、品目の設定値を記録に合わせられる
+      const crop = state().crops.find((item) => item.id === c.planting.crop_id);
+      const action = !crop
+        ? '<p class="muted">品目の一覧にない品目なので、品目の設定値には合わせられません。</p>'
+        : specDiff(plantLog.spec, cropSpec(crop)).length
+          ? `<button type="button" class="chip-btn" data-act="apply-spec" data-spec-log="${plantLog.id}">品目の設定値を記録に合わせる</button>`
+          : '<p class="muted">品目の設定値は、記録と同じです。</p>';
+      parts.push(`<p>定植の${escapeHtml(text)}です。</p>${action}`);
     }
   }
   const shift = shiftAfterActual(c.planting ? c.ownWorks : c.works, actuals);
@@ -591,33 +605,69 @@ function logRow(log, mode) {
 
 // ---- 操作 ----
 
+// 品目の設定値を、定植の記録の仕様に合わせる。今回の作付の計画は書き換えない。
+// 品目の設定値を使っている作付（作付に値がない作付）のうち、今回の作付と、このプランですでに始まった作付には、
+// いまの品目の値を写してから変える。まだ始まっていない作付は、新しい設定値になる
 async function applySpec(logId) {
   const c = context();
   const log = (state().logs || []).find((item) => item.id === logId);
-  if (!c?.planting || !log) {
+  const crop = c?.planting && state().crops.find((item) => item.id === c.planting.crop_id);
+  if (!crop || !log) {
     return;
   }
-  const diff = specDiff(log.spec, plannedSpec(c.planting));
+  const diff = specDiff(log.spec, cropSpec(crop));
   if (!diff.length) {
     return;
   }
-  const planting = c.planting;
-  const before = plannedSpecText(planting);
+  const today = localToday();
+  const keys = diff.map((item) => item.key);
+  const frozen = state().plantings.filter(
+    (planting) =>
+      planting.crop_id === crop.id &&
+      (planting.id === c.planting.id || (plantingStart(planting, state().works, state().logs || []) || "9999") <= today) &&
+      keys.some((key) => planting[key] === null || planting[key] === undefined)
+  );
+  const before = specSummary(cropSpec(crop));
+  const after = specSummary({ ...cropSpec(crop), ...Object.fromEntries(diff.map((item) => [item.key, item.key === "staggered" ? Boolean(item.actual) : Number(item.actual)])) });
+  const ok = await confirmAction({
+    message:
+      `品目「${crop.name}」の設定値を「${before || "なし"}」から「${after || "なし"}」に変えます。今回の作付の計画は変わりません。` +
+      "まだ始まっていない作付で、作付に値を入れていないものは、新しい設定値になります（ほかの圃場とプランも同じです）。",
+    action: "合わせる",
+  });
+  if (!ok) {
+    return;
+  }
+  const savedCrop = { ...crop };
+  const savedPlantings = frozen.map((planting) => ({ ...planting }));
+  frozen.forEach((planting) => {
+    keys.forEach((key) => {
+      if (planting[key] === null || planting[key] === undefined) {
+        planting[key] = crop[key] ?? (key === "staggered" ? false : null);
+      }
+    });
+  });
   diff.forEach((item) => {
-    planting[item.key] = item.key === "staggered" ? Boolean(item.actual) : Number(item.actual);
+    crop[item.key] = item.key === "staggered" ? Boolean(item.actual) : Number(item.actual);
   });
   try {
-    await state().store.upsert("plantings", [planting]);
+    if (frozen.length) {
+      await state().store.upsert("plantings", frozen);
+    }
+    await state().store.upsert("crops", [crop]);
     record({
-      kind: "planting.spec",
-      target: ["planting", planting.id],
-      text: `${c.block.name} 畝${c.bed.seq}（${planting.crop_name}）の仕様を、定植の記録に合わせた`,
+      kind: "crops.spec",
+      target: ["crop", crop.id],
+      plan: false,
+      text: `品目「${crop.name}」の設定値を、${c.block.name} 畝${c.bed.seq} の定植の記録に合わせた`,
       before,
-      after: plannedSpecText(planting),
+      after,
     });
-    ctx.setStatus("計画に反映しました");
+    ctx.setStatus("品目の設定値を合わせました");
   } catch (error) {
-    notify(`計画に反映できませんでした: ${error.message}`);
+    Object.assign(crop, savedCrop);
+    savedPlantings.forEach((saved) => Object.assign(state().plantings.find((planting) => planting.id === saved.id), saved));
+    notify(`品目の設定値を合わせられませんでした: ${error.message}`);
   }
   ctx.refresh();
 }

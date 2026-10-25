@@ -38,6 +38,7 @@ import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
 import { initLogs, renderLogs } from "./log-view.js";
 import { initPlantingView, openPlantingDetail, renderPlantingDetail } from "./planting-view.js";
+import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
@@ -76,14 +77,10 @@ const CURRENT_PLAN_KEY = "field_plan_current_plan";
 const CURRENT_FIELD_KEY = "field_plan_current_field";
 const VIEW_DATE_KEY = "field_plan_view_date";
 
-// 前に開いたときの表示日。覚えていなければ今日
-function savedViewDate() {
-  try {
-    const saved = localStorage.getItem(VIEW_DATE_KEY);
-    return /^\d{4}-\d{2}-\d{2}$/.test(saved || "") ? saved : localToday();
-  } catch {
-    return localToday();
-  }
+// 前にその圃場を開いたときの表示日。覚えていなければ今日
+function savedViewDate(fieldId) {
+  const saved = loadPref(fieldId, "viewDate", VIEW_DATE_KEY);
+  return /^\d{4}-\d{2}-\d{2}$/.test(saved || "") ? saved : localToday();
 }
 const MIN_RECT_PX = 6;
 const MAX_FRAME_GAPS = 4;
@@ -118,7 +115,7 @@ const state = {
   fertilizers: [],
   changes: [], // 変更の記録（新しい順。プランによらず 1 本）
   notes: [], // 日ごとのメモ
-  viewDate: savedViewDate(), // 圃場図に出す日。区画と畝は、この日にあるものだけを描く
+  viewDate: localToday(), // 圃場図に出す日。区画と畝は、この日にあるものだけを描く（圃場を開くときに、その圃場で覚えた日にする）
   mode: "select",
   selected: null, // "outline" か、区域・区画・畝の ID
   selectedVertex: null,
@@ -1736,13 +1733,9 @@ async function loadFieldData(field) {
     backdrop.size = await imageSize(backdropUrl).catch(() => null);
   }
   const logs = await state.store.loadLogs(field.id);
-  let currentId = null;
-  try {
-    currentId = localStorage.getItem(CURRENT_PLAN_KEY);
-  } catch {
-    // 読めなければ先頭のプランを開く
-  }
-  Object.assign(state, { field, plans, backdrop, backdropUrl, logs, alignment: null });
+  // 前にその圃場で開いていたプランと表示日。覚えていなければ、先頭のプランと今日
+  const currentId = loadPref(field.id, "plan", CURRENT_PLAN_KEY);
+  Object.assign(state, { field, plans, backdrop, backdropUrl, logs, viewDate: savedViewDate(field.id), alignment: null });
   return plans.find((plan) => plan.id === currentId) || plans[0];
 }
 
@@ -1756,6 +1749,7 @@ async function openField(field) {
     // 保存できなくても、次に開くときに先頭の圃場になるだけ
   }
   $("fieldName").value = field.name;
+  $("viewDate").value = state.viewDate;
   setMode("select");
   await openPlan(plan);
   fitView();
@@ -1897,11 +1891,7 @@ async function openPlan(plan) {
   state.selected = null;
   state.selectedVertex = null;
   state.draft = [];
-  try {
-    localStorage.setItem(CURRENT_PLAN_KEY, plan.id);
-  } catch {
-    // 保存できなくても、次に開くときに先頭のプランになるだけ
-  }
+  savePref(state.field.id, "plan", plan.id);
   renderPlans();
   render();
   renderSchedule();
@@ -2355,11 +2345,7 @@ $("openScheduleBtn").addEventListener("click", () => {
 $("viewDate").addEventListener("change", (event) => {
   state.viewDate = event.target.value || localToday();
   event.target.value = state.viewDate;
-  try {
-    localStorage.setItem(VIEW_DATE_KEY, state.viewDate);
-  } catch {
-    // 覚えられなくても、次に開くときに今日になるだけ
-  }
+  savePref(state.field.id, "viewDate", state.viewDate);
   // 表示日に存在しない畝を選んだままにしない
   const found = state.selected && state.selected !== "outline" ? findShape(state.selected) : null;
   if (found && found.kind === "bed" && !bedExists(found.item)) {
