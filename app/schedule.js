@@ -196,6 +196,12 @@ export function typesForCrop(workTypes, crop, works = []) {
 const monthDay = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
 
 // 1 つの区画、または 1 つの作付の作業の並びから、無理を探す。index は works の中の位置
+// かかる日数が 1 日の作業は「0〜1 日」とみなし、前後の作業と同じ日に重ねてよい（畝立てとマルチ張りを同じ日に行うなど）。
+// gap は、前の作業の終了日と次の作業の開始日のあいだの日数（同じ日なら -1）。前の作業のあとに空ける日数があるときは重ねない
+export function sharesDay(before, after, gap, needed = 0) {
+  return gap === -1 && needed === 0 && (workDays(before) === 1 || workDays(after) === 1);
+}
+
 export function sequenceProblems(works, workTypes) {
   const types = typeMap(workTypes);
   const label = (work) => types.get(work.work_type)?.label || work.work_type;
@@ -216,7 +222,9 @@ export function sequenceProblems(works, workTypes) {
     if (previous) {
       const gap = diffDays(previous.plan_end, work.plan_start) - 1;
       const needed = gapAfter(previous, types);
-      if (gap < 0) {
+      if (sharesDay(previous, work, gap, needed)) {
+        // 同じ日に重ねてよい（かかる日数が 1 日の作業）
+      } else if (gap < 0) {
         problems.push({ index, message: `前の作業（${label(previous)}）と重なっているか、順番が逆です。` });
       } else if (gap < needed) {
         problems.push({ index, message: `${label(previous)}のあとは ${needed} 日あけるのが目安です（いま ${gap} 日）。` });
@@ -280,17 +288,21 @@ export function planProblems({ blocks, beds, plantings, works, workTypes, crops 
           if (!previous && last) {
             const gap = diffDays(last.plan_end, span.start) - 1;
             const needed = gapAfter(last, types);
-            if (gap < 0) {
+            if (sharesDay(last, first, gap, needed)) {
+              // 区画の最後の作業と、畝の最初の作業を同じ日に行う
+            } else if (gap < 0) {
               add(mine, first, `区画の作業（${label(last)}、${monthDay(last.plan_end)} まで）が終わる前に始まっています。`);
             } else if (gap < needed) {
               add(mine, first, `区画の${label(last)}のあとは ${needed} 日あけるのが目安です（いま ${gap} 日）。`);
             }
           }
+          // 前の作付の最後の日と同じ日に始めてよいのは、どちらかが 1 日の作業のとき
+          const sameDay = (date, work) => span.start === date && (workDays(first) === 1 || (work && workDays(work) === 1));
           if (previous && !previous.end) {
             add(mine, first, "前の作付の収穫完了予定日が決まっていません。");
-          } else if (previous && span.start <= previous.end) {
+          } else if (previous && span.start <= previous.end && !sameDay(previous.end, previous.harvest)) {
             add(mine, first, `前の作付の収穫完了予定日（${monthDay(previous.end)}）より前に始まっています。`);
-          } else if (previous && previous.last && span.start <= previous.last) {
+          } else if (previous && previous.last && span.start <= previous.last && !sameDay(previous.last, previous.lastWork)) {
             // 収穫のあとの残渣処理などが、まだ終わっていない
             add(mine, first, `前の作付の作業が終わる日（${monthDay(previous.last)}）より前に始まっています。`);
           }
@@ -301,7 +313,13 @@ export function planProblems({ blocks, beds, plantings, works, workTypes, crops 
             add(mine, null, `畝をなくす日（${monthDay(bed.removed_on)}）以降に作業があります。`);
           }
         }
-        previous = { end: harvestEnd(own), last: span?.end || null };
+        const dated = own.filter((work) => work.plan_start && work.plan_end);
+        previous = {
+          end: harvestEnd(own),
+          harvest: dated.filter((work) => work.work_type === HARVEST).sort((a, b) => a.plan_end.localeCompare(b.plan_end)).at(-1) || null,
+          last: span?.end || null,
+          lastWork: dated.sort((a, b) => a.plan_end.localeCompare(b.plan_end)).at(-1) || null,
+        };
       }
     }
   }

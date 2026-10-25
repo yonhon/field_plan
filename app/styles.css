@@ -1570,6 +1570,18 @@ body.plan-busy #scheduleView {
   margin: 4px 0 12px;
 }
 
+/* 作業をした日の欄と、その右の「本日」のボタン */
+.log-date {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.log-date input {
+  flex: 1;
+  min-width: 0;
+}
+
 .log-section h3 {
   margin: 0 0 6px;
 }

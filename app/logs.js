@@ -407,6 +407,40 @@ export function defaultDilution(rows) {
   return lows.length ? Math.max(...lows) : null;
 }
 
+// 工程表の同じ行で、日が重なる帯を上下の段に分ける（1 日の作業は、ほかの作業と同じ日に重ねられるため）。
+// items は { start, end }（日付）。返り値は items と同じ順の { lane（何段目か）, lanes（そのまとまりの段の数） }。
+// 段の数は、重なりのあるまとまりごとに数える（重なっていない帯は、行の高さいっぱいのまま）
+export function stackLanes(items) {
+  const order = items.map((item, i) => ({ ...item, i })).sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+  const result = new Array(items.length);
+  let cluster = [];
+  let clusterEnd = null;
+  let laneEnds = [];
+  const close = () => {
+    cluster.forEach((item) => (result[item.i].lanes = laneEnds.length));
+    cluster = [];
+    laneEnds = [];
+  };
+  for (const item of order) {
+    if (clusterEnd !== null && item.start > clusterEnd) {
+      close();
+      clusterEnd = null;
+    }
+    let lane = laneEnds.findIndex((end) => end < item.start);
+    if (lane < 0) {
+      lane = laneEnds.length;
+      laneEnds.push(item.end);
+    } else {
+      laneEnds[lane] = item.end;
+    }
+    result[item.i] = { lane, lanes: 1 };
+    cluster.push(item);
+    clusterEnd = clusterEnd === null || item.end > clusterEnd ? item.end : clusterEnd;
+  }
+  close();
+  return result;
+}
+
 // 品目ごとに入れた液の量（L）を、その品目の畝に面積の比で分ける。面積が分からなければ等分
 export function splitByArea(items, liters) {
   if (!items.length || !(liters > 0)) {

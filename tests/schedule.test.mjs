@@ -76,7 +76,8 @@ test("並びの中の重なりと、間隔の不足を指摘する", () => {
   const works = worksOf(["green_sow", "mow", "rotary", "amend"]);
   Object.assign(works[0], { plan_start: "2027-04-01", plan_end: "2027-04-01" });
   Object.assign(works[1], { plan_start: "2027-05-01", plan_end: "2027-05-01" });
-  Object.assign(works[2], { plan_start: "2027-05-01", plan_end: "2027-05-01" });
+  // 前の作業（伐採、5/1）より前に始まるロータリー。1 日の作業どうしでも、前の日より前は重なり
+  Object.assign(works[2], { plan_start: "2027-04-30", plan_end: "2027-04-30" });
   const found = sequenceProblems(works, types);
   assert.deepEqual(found.map((problem) => problem.index), [1, 2, 3]);
   assert.match(found[0].message, /緑肥の播種のあとは 50 日あけるのが目安です（いま 29 日）/);
@@ -124,15 +125,19 @@ test("作付どうしの重なりと、収穫完了予定日が未定の作付",
   assert.equal(overlap[0].work_id, second[0].id);
   assert.match(overlap[0].message, /前の作付の収穫完了予定日（8\/11）より前に始まっています/);
 
-  // 収穫完了の翌日は、まだ残渣処理をしている
   const restart = (date) => {
     data.works = data.works.filter((work) => work.planting_id !== "p2");
     data.works.push(...scheduleForward(worksOf(TEMPLATES.bed.bare.codes, { planting_id: "p2" }), types, date));
     return planProblems(data);
   };
-  assert.match(restart(addDays(end, 1))[0].message, /前の作付の作業が終わる日（8\/12）より前に始まっています/);
-  // 残渣処理の翌日からなら指摘なし
-  assert.deepEqual(restart(addDays(end, 2)), []);
+  // 収穫完了の日に、2 日かかる畝立てを始めるのは、収穫と重なる
+  assert.match(restart(end)[0].message, /前の作付の収穫完了予定日（8\/11）より前に始まっています/);
+  // 残渣処理（1 日、8/12）の日に、次の作付の畝立てを始めてもよい（1 日の作業は同じ日に重ねられる）
+  assert.deepEqual(restart(addDays(end, 1)), []);
+  // 残渣処理より前（収穫完了の翌日に残渣処理が来る前）に始まるのは、前の作付の作業と重なる
+  data.works = data.works.map((work) => (work.planting_id === "p1" && work.work_type === "residue" ? { ...work, plan_start: "2027-08-13", plan_end: "2027-08-13" } : work));
+  assert.match(restart(addDays(end, 1))[0].message, /前の作付の作業が終わる日（8\/13）より前に始まっています/);
+  data.works = data.works.map((work) => (work.planting_id === "p1" && work.work_type === "residue" ? { ...work, plan_start: "2027-08-12", plan_end: "2027-08-12" } : work));
 
   // 前の作付から収穫を外すと、収穫完了予定日が決まらない
   data.works = data.works.filter((work) => !(work.planting_id === "p1" && work.work_type === "harvest"));
@@ -184,4 +189,19 @@ test("区画や畝がその日にあるか", () => {
   // なくなる日には、もうない
   assert.equal(existsOn(null, "2027-11-01", "2027-10-31"), true);
   assert.equal(existsOn(null, "2027-11-01", "2027-11-01"), false);
+});
+
+test("かかる日数が 1 日の作業は、前後の作業と同じ日に重ねてよい", () => {
+  const work = (code, start, end) => ({ id: code, work_type: code, plan_start: start, plan_end: end });
+  // 畝立てとマルチ張りを同じ日に（どちらも 1 日）
+  assert.deepEqual(sequenceProblems([work("ridge", "2027-06-01", "2027-06-01"), work("mulch", "2027-06-01", "2027-06-01")], types), []);
+  // 2 日かかる畝立ての最後の日に、1 日のマルチ張り
+  assert.deepEqual(sequenceProblems([work("ridge", "2027-06-01", "2027-06-02"), work("mulch", "2027-06-02", "2027-06-02")], types), []);
+  // どちらも 2 日以上なら重なり
+  assert.equal(sequenceProblems([work("ridge", "2027-06-01", "2027-06-02"), work("mulch", "2027-06-02", "2027-06-03")], types).length, 1);
+  // 同じ日でも、前の日より前に始まるのは重なり
+  assert.equal(sequenceProblems([work("ridge", "2027-06-02", "2027-06-02"), work("mulch", "2027-06-01", "2027-06-01")], types).length, 1);
+  // あとに空ける日数がある作業（すき込みのあとの 21 日）は、1 日でも同じ日に重ねない
+  const incorporate = sequenceProblems([work("incorporate", "2027-06-01", "2027-06-01"), work("ridge", "2027-06-01", "2027-06-01")], types);
+  assert.equal(incorporate.length, 1);
 });

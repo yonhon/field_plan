@@ -19,7 +19,7 @@ import { cropLabel, plantingNumbers, summarize } from "./crops.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, logForWork, moveLogs, openLogEditor } from "./log-view.js";
-import { lateWorks, withActualDates, workActuals, workStatus } from "./logs.js";
+import { lateWorks, stackLanes, withActualDates, workActuals, workStatus } from "./logs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
 
@@ -207,7 +207,8 @@ function weekItem({ work, works, places }, actuals, late) {
     ? ""
     : done
       ? `<button class="text-btn" data-week="edit-log" data-ids="${ids}">修正</button>`
-      : `<button class="chip-btn" data-week="edit" data-ids="${ids}">修正</button><button class="primary-btn" data-week="done" data-ids="${ids}">完了</button>`;
+      : `<button class="chip-btn" data-week="edit" data-ids="${ids}" title="日付や内容を入れて記録します（初めは計画の日）">修正</button>` +
+        `<button class="primary-btn" data-week="done" data-ids="${ids}" title="計画どおりの日に行ったものとして記録します">完了</button>`;
   return (
     `<li class="${done ? "is-done" : ""}"><span class="week-date">${done ? "✓ " : ""}${formatRange(work)}</span>` +
     `<span class="week-work"><span class="swatch" style="background:${TYPE_COLORS[work.work_type] || "#888"}"></span>${escapeHtml(typeLabel(work.work_type))}</span>` +
@@ -422,33 +423,40 @@ function renderGantt() {
     months.push(`<span class="gantt-month" style="left:${x(day)}px">${Number(day.slice(0, 4))}年${Number(day.slice(5, 7))}月</span>`);
   }
   const flaggedWorks = new Set(problems.map((problem) => problem.work_id).filter(Boolean));
-  const bars = (works, extra = "") =>
-    works
-      .filter(isDated)
-      .map((work) => {
+  // 同じ行で日が重なる帯は、上下の段に分けて細くする（1 日の作業は、ほかの作業と同じ日に重ねられるため）
+  const laneStyle = ({ lane, lanes }) => (lanes > 1 ? `top:${(lane * 100) / lanes}%;height:${100 / lanes}%;bottom:auto;` : "");
+  // entries は { work, extra }（extra は、帯の説明に添える品目の名前）
+  const bars = (entries) => {
+    const dated = entries.filter(({ work }) => isDated(work));
+    const lanes = stackLanes(dated.map(({ work }) => ({ start: work.plan_start, end: work.plan_end })));
+    return dated
+      .map(({ work, extra = "" }, i) => {
         const days = workDays(work);
         const tip = `<strong>${escapeHtml(typeLabel(work.work_type))}${escapeHtml(extra)}</strong>${fullDay(work.plan_start)} 〜 ${fullDay(work.plan_end)}（${days} 日）`;
         return (
           `<span class="gantt-bar${picked.has(work.id) ? " is-picked" : ""}${flaggedWorks.has(work.id) ? " is-flagged" : ""}" data-id="${work.id}" data-tip="${escapeHtml(tip)}" ` +
-          `style="left:${x(work.plan_start)}px;width:${days * DAY_PX}px;background-color:${TYPE_COLORS[work.work_type] || "#888"}">` +
-          `${days * DAY_PX > 60 ? escapeHtml(typeLabel(work.work_type)) : ""}</span>`
+          `style="left:${x(work.plan_start)}px;width:${days * DAY_PX}px;${laneStyle(lanes[i])}background-color:${TYPE_COLORS[work.work_type] || "#888"}">` +
+          `${days * DAY_PX > 60 && lanes[i].lanes === 1 ? escapeHtml(typeLabel(work.work_type)) : ""}</span>`
         );
       })
       .join("");
-  const actualBars = (spans) =>
-    spans
-      .map((span) => {
+  };
+  const actualBars = (spans) => {
+    const lanes = stackLanes(spans);
+    return spans
+      .map((span, i) => {
         const days = diffDays(span.start, span.end) + 1;
         const range = span.start === span.end ? fullDay(span.start) : `${fullDay(span.start)} 〜 ${fullDay(span.end)}`;
         const tip = `<strong>${escapeHtml(anyTypeLabel(span.type))}（実績${span.open ? "。まだ終わっていない" : ""}）</strong>${range}${canEdit() ? "<br>ドラッグで記録の日を動かせます" : ""}`;
         return (
           `<span class="gantt-actual-bar${span.open ? " is-open" : ""}" data-tip="${escapeHtml(tip)}" data-logs="${span.logs.join(",")}" ` +
           `data-start="${span.start}" data-end="${span.end}" data-type="${span.type}" ` +
-          `style="left:${x(span.start)}px;width:${days * DAY_PX}px;background-color:${TYPE_COLORS[span.type] || "#888"}">` +
-          `${days * DAY_PX > 60 ? escapeHtml(anyTypeLabel(span.type)) : ""}</span>`
+          `style="left:${x(span.start)}px;width:${days * DAY_PX}px;${laneStyle(lanes[i])}background-color:${TYPE_COLORS[span.type] || "#888"}">` +
+          `${days * DAY_PX > 60 && lanes[i].lanes === 1 ? escapeHtml(anyTypeLabel(span.type)) : ""}</span>`
         );
       })
       .join("");
+  };
   const openRow = sel.target === "block" ? `data-block="${sel.blockId}"` : `data-bed="${sel.target}"`;
   const lane = (text) => (mode === "both" ? `<span class="gantt-lane">${text}</span>` : "");
   // 計画の段（帯をドラッグできる）と、実績の段（ドラッグできない）
@@ -463,7 +471,7 @@ function renderGantt() {
   for (const block of state().blocks) {
     const name = link("block", block.id, block.name);
     if (showPlan) {
-      rows.push(row("block", name, bars(blockWorks(block.id)), `data-block="${block.id}"`));
+      rows.push(row("block", name, bars(blockWorks(block.id).map((work) => ({ work }))), `data-block="${block.id}"`));
     }
     if (showActual) {
       rows.push(actualRow("block", name, actualBars(spansOf.get(block.id)), `data-actual-block="${block.id}" data-name="${escapeHtml(block.name)}"`));
@@ -475,7 +483,10 @@ function renderGantt() {
       const gone = bed.removed_on ? `（〜${formatDay(bed.removed_on)}）` : "";
       const name = `畝${bed.seq}${crops ? ` ${crops}` : ""}${gone}`;
       if (showPlan) {
-        const content = plantings.map((planting) => bars(plantingWorks(planting.id), planting.crop_name ? `（${planting.crop_name}）` : "")).join("");
+        // 作付が複数あっても、1 本の畝の帯はまとめて段に分ける
+        const content = bars(
+          plantings.flatMap((planting) => plantingWorks(planting.id).map((work) => ({ work, extra: planting.crop_name ? `（${planting.crop_name}）` : "" })))
+        );
         rows.push(row("bed", name, content, `data-bed="${bed.id}"`));
       }
       if (showActual) {

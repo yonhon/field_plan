@@ -14,6 +14,7 @@ import {
   usageTable,
   shiftAfterActual,
   specDiff,
+  stackLanes,
   withActualDates,
   workStatus,
   plantingOnDate,
@@ -271,4 +272,24 @@ test("防除の指摘", () => {
 test("初めの希釈倍率は、下限のうちいちばん大きいもの", () => {
   assert.equal(defaultDilution([{ dilution_min: 1000 }, { dilution_min: 2000 }, null]), 2000);
   assert.equal(defaultDilution([{ dilution_min: null }]), null);
+});
+
+test("日が重なる帯を、重なりのまとまりごとに上下の段に分ける", () => {
+  const lanes = stackLanes([
+    { start: "2026-03-01", end: "2026-03-02" }, // 畝立て
+    { start: "2026-03-02", end: "2026-03-02" }, // 同じ日のマルチ張り
+    { start: "2026-03-05", end: "2026-03-05" }, // 重ならない定植
+    { start: "2026-03-10", end: "2026-03-20" }, // 収穫
+    { start: "2026-03-12", end: "2026-03-12" }, // 収穫中の防除
+    { start: "2026-03-15", end: "2026-03-15" }, // 収穫中の防除（上の段が空いている）
+  ]);
+  assert.deepEqual(lanes, [
+    { lane: 0, lanes: 2 },
+    { lane: 1, lanes: 2 },
+    { lane: 0, lanes: 1 },
+    { lane: 0, lanes: 2 },
+    { lane: 1, lanes: 2 },
+    { lane: 1, lanes: 2 },
+  ]);
+  assert.deepEqual(stackLanes([]), []);
 });

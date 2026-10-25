@@ -154,14 +154,17 @@ function targetForWork(work, date) {
   };
 }
 
-// 計画の作業を、画面を開かずに今日の日付で完了にする。works は同じ種類の作業（畝ごと）
+// 計画の作業を、画面を開かずに、計画どおりに行ったものとして完了にする。works は同じ種類・同じ計画の日の作業（畝ごと）。
+// 記録の日は計画の日。計画が 1 日ならその日に完了の記録を 1 件、何日かにわたるなら開始日の記録と終了日の完了の記録の 2 件を作る
+// （実績の期間が計画どおりになるように）。計画の日が入っていない作業は、今日の日付にする
 export async function completeWorks(works) {
   if (!works.length || !(await loadData())) {
     return;
   }
-  const date = localToday();
+  const start = works[0].plan_start || localToday();
+  const end = works[0].plan_end || start;
   const targets = works.map((work) => {
-    const item = targetForWork(work, date);
+    const item = targetForWork(work, end);
     return {
       planting_id: item.planting_id || null,
       bed_id: item.bed_id || null,
@@ -173,11 +176,15 @@ export async function completeWorks(works) {
       spray_l: null,
     };
   });
+  const base = { field_id: state().field.id, work_type: works[0].work_type, spec: {}, note: "", inputs: [] };
   ctx.setStatus("記録を保存中…");
   try {
-    await state().store.saveLog({ field_id: state().field.id, date, work_type: works[0].work_type, finishes: true, spec: {}, note: "", targets, inputs: [] });
+    if (start < end) {
+      await state().store.saveLog({ ...base, date: start, finishes: false, targets });
+    }
+    await state().store.saveLog({ ...base, date: end, finishes: true, targets });
     await reload();
-    ctx.setStatus(`${typeLabel(works[0].work_type)}を完了にしました`);
+    ctx.setStatus(`${typeLabel(works[0].work_type)}を、計画どおり（${start === end ? formatDay(end) : `${formatDay(start)}〜${formatDay(end)}`}）に完了にしました`);
   } catch (error) {
     ctx.setStatus("");
     notify(`記録を保存できませんでした: ${error.message}`);
@@ -268,7 +275,8 @@ export async function openLogEditor(log = null, preset = {}) {
   const type = log?.work_type || presetWorks[0]?.work_type || "";
   draft = {
     id: log?.id || null,
-    date: log?.date || localToday(),
+    // 計画の作業から開いたときは、計画の日（「この日で終わり」に印が付くので、終了日）。それ以外は今日
+    date: log?.date || presetWorks[0]?.plan_end || presetWorks[0]?.plan_start || localToday(),
     work_type: type,
     finishes: log ? log.finishes : true,
     spec: { ...(log?.spec || {}) },
@@ -397,7 +405,8 @@ function renderDialog() {
     `<button type="button" class="text-btn" data-act="close" aria-label="閉じる">閉じる</button></div>` +
     `<div class="log-body">` +
     `<p class="muted">プラン「${escapeHtml(plan?.name || "")}」の畝につなぎます。</p>` +
-    `<label>作業をした日<input type="date" data-f="date" value="${draft.date}" required /></label>` +
+    `<label>作業をした日<span class="log-date"><input type="date" data-f="date" value="${draft.date}" required />` +
+    `<button type="button" class="chip-btn" data-act="today">本日</button></span></label>` +
     typeSection() +
     targetSection(choices, area) +
     specSection() +
@@ -738,6 +747,8 @@ function onClick(event) {
   const act = button.dataset.act;
   if (act === "close") {
     dialog.close();
+  } else if (act === "today") {
+    setDate(localToday());
   } else if (act === "type") {
     setType(button.dataset.code);
   } else if (act === "mode") {
@@ -791,7 +802,7 @@ async function cancelFromDialog() {
     return;
   }
   try {
-    await setCancelled(works, draft.date, draft.note.trim());
+    await setCancelled(works, localToday(), draft.note.trim());
     dialog.close();
   } catch (error) {
     showError(`取りやめにできませんでした: ${error.message}`);
@@ -844,19 +855,23 @@ export async function uncancelWork(work) {
   }
 }
 
+// 作業をした日を変える。その日にない畝や区画は、選びから外れる
+function setDate(date) {
+  draft.date = date;
+  const choices = currentChoices();
+  const beds = new Set(choices.crops.flatMap((group) => group.items.map((item) => item.bed_id)));
+  const blocks = new Set(choices.blocks.map((item) => item.block_id));
+  draft.beds = new Set([...draft.beds].filter((id) => beds.has(id)));
+  draft.blocks = new Set([...draft.blocks].filter((id) => blocks.has(id)));
+  renderDialog();
+  updateTotals();
+}
+
 function onChange(event) {
   const el = event.target;
   if (el.dataset.f === "date") {
     if (el.value) {
-      draft.date = el.value;
-      // その日にない畝や区画は、選びから外れる
-      const choices = currentChoices();
-      const beds = new Set(choices.crops.flatMap((group) => group.items.map((item) => item.bed_id)));
-      const blocks = new Set(choices.blocks.map((item) => item.block_id));
-      draft.beds = new Set([...draft.beds].filter((id) => beds.has(id)));
-      draft.blocks = new Set([...draft.blocks].filter((id) => blocks.has(id)));
-      renderDialog();
-      updateTotals();
+      setDate(el.value);
     }
   } else if (el.dataset.f === "typeOther") {
     if (el.value) {
