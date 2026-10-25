@@ -3,7 +3,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   bedAreas,
+  compressedAxis,
+  dayGap,
+  lateWorks,
   matchWork,
+  shiftAfterActual,
+  specDiff,
+  withActualDates,
+  workStatus,
   plantingOnDate,
   productAmount,
   splitByArea,
@@ -129,4 +136,69 @@ test("対象を品目ごとの本数で短く表す", () => {
     ]),
     "レタス 2 本、ニンジン、区画A"
   );
+});
+
+test("作業の状態と、遅れている作業", () => {
+  const actuals = workActuals([log("l1", "2026-03-10", "w1", true), log("l2", "2026-03-11", "w5")]);
+  const today = "2026-03-15";
+  assert.equal(workStatus(works[0], actuals, today), "done");
+  assert.equal(workStatus(works[4], actuals, today), "late"); // 始めたが、予定の終了日を過ぎた
+  assert.equal(workStatus(works[3], actuals, today), "planned");
+  assert.equal(workStatus({ ...works[4], cancelled_on: "2026-03-12" }, actuals, today), "cancelled");
+  assert.equal(workStatus({ id: "x", plan_end: "2026-03-20" }, workActuals([log("l3", "2026-03-14", "x")]), today), "started");
+  // 遅れているのは、予定の終了日を過ぎて終わっていない作業。終了日の早い順、同じ日なら順番の順
+  assert.deepEqual(lateWorks(works, actuals, today).map((work) => work.id), ["w7", "w5", "w2"]);
+});
+
+test("計画と実績のずれは、終了日どうしで比べる", () => {
+  const work = { plan_end: "2026-03-12" };
+  assert.equal(dayGap(work, { start: "2026-03-10", end: "2026-03-12" }), "予定どおり");
+  assert.equal(dayGap(work, { start: "2026-03-10", end: "2026-03-14" }), "2 日遅れ");
+  assert.equal(dayGap(work, { start: "2026-03-10", end: "2026-03-11" }), "1 日早い");
+  assert.equal(dayGap(work, { start: "2026-03-10", end: null }), "");
+});
+
+test("実績のある作業は、実績の日に置き換える", () => {
+  const actuals = workActuals([log("l1", "2026-03-11", "w2", true), log("l2", "2026-03-13", "w5")]);
+  const moved = withActualDates(works, actuals);
+  assert.deepEqual([moved[1].plan_start, moved[1].plan_end], ["2026-03-11", "2026-03-11"]);
+  // 始めただけなら、開始日だけ。予定の終了日が開始日より前なら、開始日にそろえる
+  assert.deepEqual([moved[4].plan_start, moved[4].plan_end], ["2026-03-13", "2026-03-13"]);
+  assert.equal(moved[0], works[0]);
+});
+
+test("実績に合わせて、終わっていない後ろの作業を、遅れた日数だけずらす", () => {
+  const own = works.filter((work) => work.planting_id === "p1");
+  // 定植が 3/14 に終わった（予定は 3/12）。収穫を 2 日後ろへずらし、間隔と日数はそのまま
+  const actuals = workActuals([log("l1", "2026-03-02", "w1", true), log("l2", "2026-03-14", "w2", true)]);
+  const shift = shiftAfterActual(own, actuals);
+  assert.equal(shift.days, 2);
+  assert.deepEqual(shift.works.map((work) => [work.id, work.plan_start, work.plan_end]), [["w3", "2026-04-22", "2026-05-02"]]);
+  // 早く終われば前へ。予定どおりなら、ずらす作業はない
+  assert.equal(shiftAfterActual(own, workActuals([log("l3", "2026-03-11", "w2", true)])).days, -1);
+  assert.deepEqual(shiftAfterActual(own, workActuals([log("l4", "2026-03-12", "w2", true)])).works, []);
+  // 終わった作業がなければ、ずらせない
+  assert.equal(shiftAfterActual(own, new Map()), null);
+});
+
+test("定植の仕様の、計画との差", () => {
+  const diff = specDiff({ plant_gap_cm: 30, row_gap_cm: 20, staggered: true }, { plant_gap_cm: 25, row_gap_cm: 20, row_count: 3, staggered: false });
+  assert.deepEqual(diff.map((item) => [item.key, item.planned, item.actual]), [["plant_gap_cm", 25, 30], ["staggered", false, true]]);
+  assert.deepEqual(specDiff({}, { plant_gap_cm: 25 }), []);
+});
+
+test("作業のない期間を詰めた時間の軸", () => {
+  // 3/1〜3/2 と 3/20 の作業。前後 1 日を残し、間の 15 日（3/4〜3/18）を 2 日ぶんに詰める
+  const axis = compressedAxis([["2026-03-01", "2026-03-02"], ["2026-03-20", "2026-03-20"]]);
+  assert.equal(axis.first, "2026-02-28");
+  assert.equal(axis.last, "2026-03-21");
+  assert.deepEqual(axis.breaks.map((item) => [item.x, item.width, item.days, item.start]), [[4, 2, 15, "2026-03-04"]]);
+  assert.equal(axis.x("2026-03-01"), 1);
+  assert.equal(axis.x("2026-03-19"), 6);
+  assert.equal(axis.x("2026-03-20"), 7);
+  assert.equal(axis.total, 9);
+  assert.deepEqual(axis.ticks.map((tick) => [tick.x, tick.day]), [[0, "2026-03-01"], [6, "2026-03-20"]]);
+  // 2 日以下の空きは詰めない
+  assert.equal(compressedAxis([["2026-03-01", "2026-03-01"], ["2026-03-05", "2026-03-05"]]).breaks.length, 0);
+  assert.equal(compressedAxis([]), null);
 });

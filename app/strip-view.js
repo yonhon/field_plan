@@ -4,6 +4,7 @@ import { cropLabel, plantingNumbers } from "./crops.js";
 import { notify } from "./dialog.js";
 import { bedAngle, edgeAngles, rectSize, viewAxes } from "./geometry.js";
 import { record } from "./journal.js";
+import { workActuals } from "./logs.js";
 import { WORK_COLORS, existsOn, harvestEnd } from "./schedule.js";
 
 const $ = (id) => document.getElementById(id);
@@ -42,12 +43,17 @@ function workItems(works) {
     return '<p class="strip-empty">作業なし</p>';
   }
   const label = (code) => ctx.state.workTypes.find((type) => type.code === code)?.label || code;
+  // 実際に使うプランなら、終わった作業に済みの印、取りやめた作業に取り消し線を付ける
+  const active = ctx.state.field.active_plan_id === ctx.state.plan.id;
+  const actuals = active ? workActuals(ctx.state.logs || []) : new Map();
   return `<ul>${works
     .map((work) => {
       const dates = work.plan_start && work.plan_end
         ? work.plan_start === work.plan_end ? formatDay(work.plan_start) : `${formatDay(work.plan_start)}〜${formatDay(work.plan_end)}`
         : "日付なし";
-      return `<li><span class="swatch" style="background:${WORK_COLORS[work.work_type] || "#888"}"></span>${escapeHtml(label(work.work_type))}<small>${dates}</small></li>`;
+      const done = actuals.get(work.id)?.end ? '<span class="done-mark" title="完了">✓</span>' : "";
+      const cancelled = active && work.cancelled_on ? ' class="is-cancelled" title="取りやめ"' : "";
+      return `<li${cancelled}><span class="swatch" style="background:${WORK_COLORS[work.work_type] || "#888"}"></span>${escapeHtml(label(work.work_type))}${done}<small>${dates}</small></li>`;
     })
     .join("")}</ul>`;
 }

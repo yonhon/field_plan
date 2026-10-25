@@ -1681,6 +1681,344 @@ body.plan-busy #scheduleView {
   }
 }
 
+/* 今週やること・遅れている作業の「完了」「修正」 */
+.week-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.week-actions .primary-btn,
+.week-actions .chip-btn {
+  min-height: 36px;
+}
+
+.week-list li.is-done {
+  opacity: 0.6;
+}
+
+.late-box {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid #e7b7b1;
+  border-radius: 10px;
+  background: #fffafa;
+}
+
+.late-box h2 {
+  color: #b23a2f;
+}
+
+/* 区画と畝の図の、済みの印と取りやめ */
+.done-mark {
+  margin-left: 4px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.is-cancelled {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.actual-cell {
+  white-space: nowrap;
+}
+
+/* 工程表の実績の段。計画の段と同じ並びで、ドラッグはできない */
+.gantt-actual {
+  position: relative;
+  padding: 1px 0;
+}
+
+.gantt-actual.block .gantt-name {
+  font-weight: 700;
+}
+
+.gantt-actual.bed {
+  padding: 1px 0 1px 12px;
+}
+
+.gantt-actual.bed .gantt-name {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.gantt-actual .gantt-track {
+  height: 14px;
+  background: rgba(11, 107, 114, 0.07);
+}
+
+.gantt-actual.is-sub {
+  padding-top: 0;
+}
+
+.gantt-actual-bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 10px;
+  line-height: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.gantt-actual-bar.is-open {
+  opacity: 0.55;
+}
+
+.gantt-lane {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.gantt-link {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.gantt-link:hover {
+  color: var(--accent);
+}
+
+/* ---- 作付の詳細 ---- */
+
+.detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+
+.detail-head h2 {
+  margin: 0;
+  font-family: "Zen Maru Gothic", "Zen Kaku Gothic New", sans-serif;
+  font-size: 19px;
+}
+
+.detail-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.detail-modes {
+  gap: 10px;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+
+.tl-row {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid #eef3f3;
+}
+
+.tl-axis {
+  border-top: 0;
+}
+
+.tl-label {
+  flex: 0 0 120px;
+  color: #3d5154;
+}
+
+.tl-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+}
+
+.tl-ticks,
+.tl-gaps {
+  height: 18px;
+}
+
+.tl-ticks span,
+.tl-gaps span {
+  position: absolute;
+  top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tl-gaps span {
+  text-align: center;
+}
+
+.tl-break,
+.tl-key.tl-break {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(135deg, #eef3f3 0 4px, #fff 4px 8px);
+}
+
+.tl-today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 2px solid var(--danger);
+}
+
+.tl-plan,
+.tl-actual {
+  position: absolute;
+  min-width: 5px;
+  border-radius: 3px;
+}
+
+.tl-plan {
+  top: 6px;
+  height: 12px;
+  opacity: 0.85;
+}
+
+.tl-plan.is-both {
+  top: 3px;
+  height: 10px;
+  opacity: 0.35;
+}
+
+.tl-plan.is-cancelled {
+  opacity: 0.2;
+}
+
+.tl-actual {
+  top: 6px;
+  height: 12px;
+}
+
+.tl-actual.is-both {
+  top: 15px;
+  height: 7px;
+}
+
+.tl-actual.is-open {
+  opacity: 0.55;
+}
+
+.tl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tl-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tl-key {
+  position: relative;
+  display: inline-block;
+  width: 18px;
+  height: 10px;
+  background: var(--accent);
+}
+
+.tl-key.tl-plan,
+.tl-key.tl-actual,
+.tl-key.tl-break {
+  position: relative;
+  top: 0;
+}
+
+.tl-key.tl-actual.is-both {
+  height: 6px;
+}
+
+.tl-today-key {
+  width: 2px;
+  height: 12px;
+  background: var(--danger);
+}
+
+.detail-diff p {
+  margin: 0 0 6px;
+}
+
+.detail-diff .chip-btn {
+  margin: 0 8px 8px 0;
+}
+
+.detail-table td {
+  vertical-align: top;
+}
+
+.detail-plan {
+  cursor: pointer;
+}
+
+.detail-line {
+  font-size: 12px;
+  color: #3d5154;
+}
+
+.detail-gap td {
+  padding: 2px 8px;
+  background: #f7f9f9;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.detail-gap.is-today td {
+  background: #fdf0ee;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.detail-gap-cell {
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+  color: #b5651d;
+}
+
+.detail-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detail-badge.is-missing {
+  background: #fbe6e3;
+  color: #9c2f25;
+}
+
+.detail-badge.is-cancelled-badge {
+  border: 1px solid var(--line);
+  background: #f1f3f3;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+@media (max-width: 800px) {
+  .tl-label {
+    flex-basis: 72px;
+  }
+}
+
 /* ---- PDF 出力（印刷） ---- */
 
 .map-pdf {

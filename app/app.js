@@ -37,6 +37,7 @@ import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
 import { initLogs, renderLogs } from "./log-view.js";
+import { initPlantingView, openPlantingDetail, renderPlantingDetail } from "./planting-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule } from "./schedule-view.js";
@@ -1901,6 +1902,7 @@ async function openPlan(plan) {
   renderPlans();
   render();
   renderSchedule();
+  renderPlantingDetail();
   resetHistory(); // 前のプランの履歴は使えない。開き終えた状態から数え直す
 }
 
@@ -2450,12 +2452,15 @@ $("rotation").addEventListener("change", (event) => {
 
 // ---- 圃場図と日程の切り替え ----
 
+// 作付の詳細（planting）は、日程のタブの中の画面として扱う
 function showView(view) {
+  const tab = view === "planting" ? "schedule" : view;
   document.querySelectorAll(".tab-btn").forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.view === view);
+    button.classList.toggle("is-active", button.dataset.view === tab);
   });
   $("appView").hidden = view !== "map";
   $("scheduleView").hidden = view !== "schedule";
+  $("plantingView").hidden = view !== "planting";
   $("cropsView").hidden = view !== "crops";
   $("journalView").hidden = view !== "journal";
   if (view === "map") {
@@ -2463,6 +2468,9 @@ function showView(view) {
   } else if (view === "schedule") {
     renderSchedule();
     renderLogs();
+  } else if (view === "planting") {
+    renderPlantingDetail();
+    window.scrollTo(0, 0);
   } else if (view === "crops") {
     renderCrops();
   } else {
@@ -2598,8 +2606,24 @@ async function startApp() {
     },
     setStatus: (text) => ($("saveStatus").textContent = text),
     renderWarnings,
+    openDetail: (kind, id) => {
+      openPlantingDetail(kind, id);
+      showView("planting");
+    },
   });
-  initLogs({ state, activePlanData, setStatus: (text) => ($("saveStatus").textContent = text) });
+  // 記録や取りやめが変わったら、日程と作付の詳細を描き直す
+  const refreshRecords = () => {
+    renderSchedule();
+    renderPlantingDetail();
+  };
+  initLogs({ state, activePlanData, setStatus: (text) => ($("saveStatus").textContent = text), onLogsChanged: refreshRecords });
+  initPlantingView({
+    state,
+    showView,
+    openInSchedule,
+    setStatus: (text) => ($("saveStatus").textContent = text),
+    refresh: refreshRecords,
+  });
   // スマホは作業の確認が主なので、日程から開く。
   // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）
   if (window.matchMedia("(max-width: 800px)").matches) {
@@ -2633,6 +2657,7 @@ async function startApp() {
       renderCrops();
       renderJournal();
       renderLogs();
+      renderPlantingDetail();
     },
   });
 }

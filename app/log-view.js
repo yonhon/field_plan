@@ -1,7 +1,8 @@
 // 作業の記録の画面。日程の画面の「最近の記録」の欄と「記録する」のボタン、記録を入れる窓。
 // 記録は、実際に使うプランの区画・畝・作付・作業につなぐ。計画はスマホでは直せないが、記録はスマホでも入れられる。
 import { WORK_COLORS, localToday } from "./schedule.js";
-import { confirmDelete, notify } from "./dialog.js";
+import { confirmAction, confirmDelete, notify } from "./dialog.js";
+import { record } from "./journal.js";
 import { matchWork, productAmount, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 
 const $ = (id) => document.getElementById(id);
@@ -64,7 +65,16 @@ const activePlan = () => state().plans.find((plan) => plan.id === state().field.
 
 // ---- 最近の記録 ----
 
-function inputText(input) {
+// 記録の仕様を短い文にする。例: 株間（cm） 30・条数 3・千鳥
+export function specText(type, spec = {}) {
+  return (SPEC_FIELDS[type] || [])
+    .filter(([key]) => spec[key] !== undefined && spec[key] !== null && spec[key] !== "" && spec[key] !== false)
+    .map(([key, label, kind]) => (kind === "check" ? label : `${label.replace(/（.*）/, "")} ${spec[key]}${(label.match(/（(cm|kg)）/) || [])[1] || ""}`))
+    .join("・");
+}
+
+// 記録の資材を短い文にする。例: テスト乳剤 2000 倍 散布
+export function inputText(input) {
   if (input.kind === "pesticide") {
     return [input.name || "農薬", input.dilution ? `${input.dilution} 倍` : "", input.method].filter(Boolean).join(" ");
   }
@@ -105,19 +115,88 @@ export function renderLogs() {
 
 // ---- 記録を入れる窓 ----
 
-// 窓を開く。log を渡すとその記録を直す
-export async function openLogEditor(log = null) {
+async function loadData() {
   if (!state().field.active_plan_id) {
     notify("記録を入れるには、先に圃場図の「プラン」の欄で、実際に使うプランを決めてください。");
-    return;
+    return false;
   }
   try {
     data = await ctx.activePlanData();
+    return true;
   } catch (error) {
     notify(`実際に使うプランを読み込めませんでした: ${error.message}`);
+    return false;
+  }
+}
+
+// 計画の作業の対象（作付の畝、または区画）。その日の対象の一覧から取り、なければ名前だけで作る
+function targetForWork(work, date) {
+  const choices = targetChoices(data, date);
+  if (work.block_id) {
+    const block = data.blocks.find((item) => item.id === work.block_id);
+    return choices.blocks.find((item) => item.block_id === work.block_id) || { block_id: work.block_id, label: block?.name || "", crop_name: "", area_m2: null };
+  }
+  const found = choices.crops.flatMap((group) => group.items).find((item) => item.planting_id === work.planting_id);
+  if (found) {
+    return found;
+  }
+  const planting = data.plantings.find((item) => item.id === work.planting_id);
+  const bed = planting && data.beds.find((item) => item.id === planting.bed_id);
+  const block = bed && data.blocks.find((item) => item.id === bed.block_id);
+  return {
+    planting_id: work.planting_id,
+    bed_id: bed?.id || null,
+    block_id: block?.id || null,
+    label: `${block?.name || ""} 畝${bed?.seq ?? ""} ${planting?.crop_name || ""}`.trim(),
+    crop_name: planting?.crop_name || "",
+    area_m2: null,
+  };
+}
+
+// 計画の作業を、画面を開かずに今日の日付で完了にする。works は同じ種類の作業（畝ごと）
+export async function completeWorks(works) {
+  if (!works.length || !(await loadData())) {
     return;
   }
-  const type = log?.work_type || "";
+  const date = localToday();
+  const targets = works.map((work) => {
+    const item = targetForWork(work, date);
+    return {
+      planting_id: item.planting_id || null,
+      bed_id: item.bed_id || null,
+      block_id: item.block_id || null,
+      work_id: work.id,
+      label: item.label,
+      crop_name: item.crop_name || "",
+      area_m2: round(item.area_m2 ?? null, 2),
+      spray_l: null,
+    };
+  });
+  ctx.setStatus("記録を保存中…");
+  try {
+    await state().store.saveLog({ field_id: state().field.id, date, work_type: works[0].work_type, finishes: true, spec: {}, note: "", targets, inputs: [] });
+    await reload();
+    ctx.setStatus(`${typeLabel(works[0].work_type)}を完了にしました`);
+  } catch (error) {
+    ctx.setStatus("");
+    notify(`記録を保存できませんでした: ${error.message}`);
+  }
+}
+
+// 計画の作業を終えた記録（いちばん新しいもの）。なければ null
+export function logForWork(workId) {
+  return (state().logs || []).find((log) => log.finishes && log.targets.some((target) => target.work_id === workId)) || null;
+}
+
+// 窓を開く。log を渡すとその記録を直す。
+// preset.works を渡すと、その計画の作業（同じ種類、畝ごと）の記録として、種類と対象とつながりを入れて開く。
+// preset.plantingId を渡すと、その作付の畝を対象に入れて開く
+export async function openLogEditor(log = null, preset = {}) {
+  if (!(await loadData())) {
+    return;
+  }
+  const presetWorks = !log && preset.works?.length ? preset.works : [];
+  const type = log?.work_type || presetWorks[0]?.work_type || "";
   draft = {
     id: log?.id || null,
     date: log?.date || localToday(),
@@ -125,18 +204,29 @@ export async function openLogEditor(log = null) {
     finishes: log ? log.finishes : true,
     spec: { ...(log?.spec || {}) },
     note: log?.note || "",
-    mode: log ? (log.targets.some((target) => target.bed_id || target.planting_id) || !log.targets.length ? "crops" : "blocks") : "crops",
+    mode: log
+      ? log.targets.some((target) => target.bed_id || target.planting_id) || !log.targets.length
+        ? "crops"
+        : "blocks"
+      : presetWorks.some((work) => work.block_id)
+        ? "blocks"
+        : "crops",
     beds: new Set(),
     blocks: new Set(),
-    orphans: [], // いまのプランにない対象（畝や区画を消した記録）。そのまま残す
+    orphans: [], // 対象の一覧にない対象（畝や区画を消した記録など）。そのまま残す
     spray: {}, // 品目のまとまり（または区画）ごとの散布液の量（L）
     inputs: (log?.inputs || []).map((input) => ({ ...input })),
+    cancellable: presetWorks.map((work) => work.id), // 取りやめにできる計画の作業
   };
-  if (log) {
+  const existing = log ? log.targets : presetWorks.map((work) => ({ ...targetForWork(work, draft.date), work_id: work.id }));
+  if (!log && preset.plantingId) {
+    existing.push(targetForWork({ planting_id: preset.plantingId }, draft.date));
+  }
+  if (existing.length) {
     const choices = currentChoices();
     const bedIds = new Set(choices.crops.flatMap((group) => group.items.map((item) => item.bed_id)));
     const blockIds = new Set(choices.blocks.map((item) => item.block_id));
-    for (const target of log.targets) {
+    for (const target of existing) {
       if (target.bed_id && bedIds.has(target.bed_id)) {
         draft.beds.add(target.bed_id);
       } else if (!target.bed_id && target.block_id && blockIds.has(target.block_id)) {
@@ -145,6 +235,20 @@ export async function openLogEditor(log = null) {
         draft.orphans.push(target);
       }
     }
+  }
+  // 定植・播種の計画の作業から開いたときは、仕様の欄に計画の値を入れておく（違うところだけ直せるように）
+  if (type === "plant" && presetWorks.length) {
+    const planting = data.plantings.find((item) => item.id === presetWorks[0].planting_id);
+    const crop = planting && data.crops.find((item) => item.id === planting.crop_id);
+    for (const key of ["plant_gap_cm", "row_gap_cm", "row_count", "staggered"]) {
+      const value = planting?.[key] ?? crop?.[key];
+      if (value !== null && value !== undefined) {
+        draft.spec[key] = value;
+      }
+    }
+  }
+  if (log) {
+    const choices = currentChoices();
     // 散布液の量は、まとまりごとの合計に戻す
     for (const group of choices.crops) {
       const liters = log.targets.filter((target) => group.items.some((item) => item.bed_id === target.bed_id)).reduce((sum, target) => sum + (num(target.spray_l) || 0), 0);
@@ -232,6 +336,7 @@ function renderDialog() {
     `<p class="error" id="logError" role="alert"></p>` +
     `</div>` +
     `<div class="log-foot">${draft.id ? '<button type="button" class="text-btn danger" data-act="delete">この記録を削除</button>' : ""}` +
+    `${!draft.id && draft.cancellable.length ? '<button type="button" class="text-btn danger" data-act="cancelWork">この作業を取りやめる</button>' : ""}` +
     `<span class="log-spacer"></span><button type="button" class="text-btn" data-act="close">キャンセル</button>` +
     `<button type="button" class="primary-btn" data-act="save">記録する</button></div>`;
   // 品目の一部の畝だけを選んでいるときは、品目のチェックを「一部」の表示にする
@@ -298,7 +403,7 @@ function targetSection(choices, area) {
       : '<p class="muted">この日に作付のある畝はありません。区画の作業なら「区画で選ぶ」に切り替えてください。</p>';
   }
   const orphans = draft.orphans.length
-    ? `<p class="muted">いまのプランにない対象（そのまま残します）: ${draft.orphans
+    ? `<p class="muted">この日の一覧にない対象（そのまま残します）: ${draft.orphans
         .map((target, i) => `${escapeHtml(target.label)} <button type="button" class="text-btn danger" data-act="orphan" data-i="${i}">外す</button>`)
         .join("、")}</p>`
     : "";
@@ -495,6 +600,74 @@ function onClick(event) {
     save();
   } else if (act === "delete") {
     remove();
+  } else if (act === "cancelWork") {
+    cancelFromDialog();
+  }
+}
+
+// 「修正」から開いた計画の作業を取りやめる。記録は作らず、計画の作業に取りやめの日と理由（メモ欄）を付ける
+async function cancelFromDialog() {
+  const ids = draft.cancellable;
+  const works = data.works.filter((work) => ids.includes(work.id));
+  const ok = await confirmAction({
+    message: "この作業を取りやめます。記録は作らず、計画の作業に取りやめの印を付けます。メモ欄の文は、取りやめの理由として残ります。作付の詳細から元に戻せます。",
+    name: `${typeLabel(works[0]?.work_type)}（${works.length} 件）`,
+    action: "取りやめる",
+  });
+  if (!ok || !draft) {
+    return;
+  }
+  try {
+    await setCancelled(works, draft.date, draft.note.trim());
+    dialog.close();
+  } catch (error) {
+    showError(`取りやめにできませんでした: ${error.message}`);
+  }
+}
+
+// 計画の作業の取りやめを付け外しする。date が null なら元に戻す。
+// 開いているプランの作業なら、画面の中の行も同じに直す（元に戻すの履歴に乗る）
+async function setCancelled(works, date, note = "") {
+  const rows = works.map((work) => ({ ...work, cancelled_on: date, cancel_note: date ? note : "" }));
+  await state().store.upsert("works", rows);
+  for (const row of rows) {
+    const live = state().works.find((work) => work.id === row.id);
+    if (live) {
+      Object.assign(live, { cancelled_on: row.cancelled_on, cancel_note: row.cancel_note });
+    }
+    const loaded = data?.works.find((work) => work.id === row.id);
+    if (loaded && loaded !== live) {
+      Object.assign(loaded, { cancelled_on: row.cancelled_on, cancel_note: row.cancel_note });
+    }
+  }
+  const plan = activePlan();
+  const label = typeLabel(works[0].work_type);
+  record({
+    kind: date ? "work.cancel" : "work.uncancel",
+    target: ["work", works[0].id],
+    plan,
+    text: date ? `作業「${label}」${works.length} 件を取りやめ${note ? `（${note}）` : ""}` : `作業「${label}」${works.length} 件の取りやめを元に戻した`,
+  });
+  ctx.setStatus(date ? "作業を取りやめにしました" : "取りやめを元に戻しました");
+  ctx.onLogsChanged?.();
+}
+
+// 取りやめた計画の作業を、元に戻す（作付の詳細から呼ぶ）
+export async function uncancelWork(work) {
+  if (!(await loadData())) {
+    return;
+  }
+  const ok = await confirmAction({
+    message: `この作業の取りやめを元に戻します。${work.cancel_note ? `取りやめの理由: ${work.cancel_note}` : ""}`,
+    name: typeLabel(work.work_type),
+    action: "元に戻す",
+  });
+  if (ok) {
+    try {
+      await setCancelled([data.works.find((item) => item.id === work.id) || work], null);
+    } catch (error) {
+      notify(`元に戻せませんでした: ${error.message}`);
+    }
   }
 }
 

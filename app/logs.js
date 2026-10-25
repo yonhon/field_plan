@@ -1,7 +1,7 @@
 // 作業の記録の計算。画面（log-view.js）とテストから使う。
 // 記録はプランではなく圃場に付け、実際に使うプランの区画・畝・作付・作業へは ID でつなぐ。
 import { bedAngle, centroid, crossRange, polygonArea, rectSize } from "./geometry.js";
-import { existsOn, worksRange } from "./schedule.js";
+import { addDays, diffDays, existsOn, worksRange } from "./schedule.js";
 
 const bySeq = (a, b) => a.seq - b.seq;
 
@@ -121,6 +121,145 @@ export function matchWork(works, owner, workType, actuals) {
       .sort(bySeq)
       .find((work) => !actuals.get(work.id)?.end) || null
   );
+}
+
+// 計画の作業の状態。cancelled（取りやめ）、done（完了）、late（予定日を過ぎて未完了）、started（始めたが未完了）、planned（これから）
+export function workStatus(work, actuals, today) {
+  if (work.cancelled_on) {
+    return "cancelled";
+  }
+  const actual = actuals.get(work.id);
+  if (actual?.end) {
+    return "done";
+  }
+  if (work.plan_end && work.plan_end < today) {
+    return "late";
+  }
+  return actual ? "started" : "planned";
+}
+
+// 予定日を過ぎても終わっていない作業。予定日の早い順
+export function lateWorks(works, actuals, today) {
+  return works
+    .filter((work) => workStatus(work, actuals, today) === "late")
+    .sort((a, b) => a.plan_end.localeCompare(b.plan_end) || a.seq - b.seq);
+}
+
+// 計画と実績の日のずれ。終了日どうしで比べる。終わっていなければ空
+export function dayGap(work, actual) {
+  if (!actual?.end || !work.plan_end) {
+    return "";
+  }
+  const days = diffDays(work.plan_end, actual.end);
+  return days === 0 ? "予定どおり" : days > 0 ? `${days} 日遅れ` : `${-days} 日早い`;
+}
+
+// 計画の日付を、実績のある作業は実績の日に置き換える（日程の無理を、実績の日で見るため）。
+// 始めただけの作業は、開始日だけを置き換える
+export function withActualDates(works, actuals) {
+  return works.map((work) => {
+    const actual = actuals.get(work.id);
+    if (!actual || work.cancelled_on) {
+      return work;
+    }
+    const end = actual.end || (work.plan_end && work.plan_end > actual.start ? work.plan_end : actual.start);
+    return { ...work, plan_start: actual.start, plan_end: end };
+  });
+}
+
+// 実績に合わせて後ろを並べ直す。works は 1 つの区画または作付の作業（順番どおり）。
+// 終わった作業のうち最後のものについて、実績の終了日と計画の終了日の差の日数だけ、そのあとの終わっていない作業をずらす。
+// 作業どうしの間隔は保つ（計画で手で空けた間隔や、品目の設定値のない作付の収穫までの間隔を崩さないため）。
+// 返り値は { days, works }（days はずらす日数、works はずらした作業）。終わった作業がなければ null
+export function shiftAfterActual(works, actuals) {
+  const sorted = [...works].sort(bySeq);
+  let anchor = -1;
+  sorted.forEach((work, i) => {
+    if (actuals.get(work.id)?.end && work.plan_end) {
+      anchor = i;
+    }
+  });
+  if (anchor < 0) {
+    return null;
+  }
+  const last = sorted[anchor];
+  const days = diffDays(last.plan_end, actuals.get(last.id).end);
+  const rest = sorted.slice(anchor + 1).filter((work) => !work.cancelled_on && !actuals.get(work.id)?.end && work.plan_start && work.plan_end);
+  return {
+    days,
+    works: days ? rest.map((work) => ({ ...work, plan_start: addDays(work.plan_start, days), plan_end: addDays(work.plan_end, days) })) : [],
+  };
+}
+
+// 定植・播種の仕様のうち、計画と実績で違うもの。planned は作付の値（なければ品目の値）
+const SPEC_KEYS = [
+  ["plant_gap_cm", "株間", "cm"],
+  ["row_gap_cm", "条間", "cm"],
+  ["row_count", "条数", "条"],
+  ["staggered", "千鳥", ""],
+];
+export function specDiff(spec, planned) {
+  return SPEC_KEYS.filter(([key]) => spec[key] !== undefined && spec[key] !== null)
+    .filter(([key]) => (key === "staggered" ? Boolean(spec[key]) !== Boolean(planned[key]) : Number(spec[key]) !== Number(planned[key])))
+    .map(([key, label, unit]) => ({ key, label, unit, planned: planned[key] ?? null, actual: spec[key] }));
+}
+
+// 作業のない期間を詰めた時間の軸。spans は [開始, 終了] の日付の組。作業のある日の前後 margin 日を残し、
+// minGap 日以上の空きは gapWidth 日ぶんの幅に詰める。x(日付) は軸の上の位置（日の単位）、total は軸の長さ。
+// breaks は詰めた空き（位置、幅、日数）、ticks は詰めた空きのあとに作業が始まる位置と日付
+export function compressedAxis(spans, { margin = 1, minGap = 3, gapWidth = 2 } = {}) {
+  const valid = spans.filter(([start, end]) => start && end);
+  if (!valid.length) {
+    return null;
+  }
+  const first = addDays(valid.map(([start]) => start).sort()[0], -margin);
+  const last = addDays(valid.map(([, end]) => end).sort().at(-1), margin);
+  const length = diffDays(first, last) + 1;
+  const active = new Array(length).fill(false);
+  for (const [start, end] of valid) {
+    for (let i = Math.max(diffDays(first, start) - margin, 0); i <= Math.min(diffDays(first, end) + margin, length - 1); i += 1) {
+      active[i] = true;
+    }
+  }
+  const positions = new Array(length);
+  const breaks = [];
+  const ticks = [];
+  let x = 0;
+  let i = 0;
+  let fresh = true;
+  while (i < length) {
+    if (active[i]) {
+      if (fresh) {
+        ticks.push({ x, day: addDays(first, Math.min(i + margin, length - 1)) });
+      }
+      positions[i] = x;
+      x += 1;
+      i += 1;
+      fresh = false;
+      continue;
+    }
+    let k = i;
+    while (k < length && !active[k]) {
+      k += 1;
+    }
+    const days = k - i;
+    if (days >= minGap) {
+      breaks.push({ x, width: gapWidth, days, start: addDays(first, i) });
+      for (let j = i; j < k; j += 1) {
+        positions[j] = x + ((j - i) / days) * gapWidth;
+      }
+      x += gapWidth;
+      fresh = true;
+    } else {
+      for (let j = i; j < k; j += 1) {
+        positions[j] = x;
+        x += 1;
+      }
+    }
+    i = k;
+  }
+  const at = (iso) => positions[Math.min(Math.max(diffDays(first, iso), 0), length - 1)];
+  return { first, last, total: x, x: at, breaks, ticks };
 }
 
 // 品目ごとに入れた液の量（L）を、その品目の畝に面積の比で分ける。面積が分からなければ等分

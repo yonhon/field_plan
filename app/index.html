@@ -214,6 +214,10 @@
 
     <main id="scheduleView" class="schedule" hidden>
       <section class="panel">
+        <div id="lateBox" class="late-box" hidden>
+          <h2 id="lateTitle">遅れている作業</h2>
+          <ul id="lateList" class="week-list"></ul>
+        </div>
         <h2 id="weekTitle">今週やること</h2>
         <ul id="weekList" class="week-list"></ul>
       </section>
@@ -305,10 +309,12 @@
           <div class="panel-heading">
             <h2>工程表</h2>
             <div class="row">
+              <div id="ganttModes" class="log-modes" role="group" aria-label="工程表の表示" hidden></div>
               <p class="muted">プラン: <span id="schedulePlanName"></span></p>
               <button id="ganttPdfBtn" class="chip-btn" title="工程表の全体を PDF にします">PDF出力</button>
             </div>
           </div>
+          <p id="ganttModeNote" class="muted" hidden></p>
           <div class="row edit-only gantt-tools">
             <span id="pickInfo" class="muted"></span>
             <button id="copyPickedBtn" class="chip-btn">コピー</button>
@@ -344,6 +350,10 @@
       <button id="logAddBtn" class="fab" type="button">＋ 記録する</button>
     </main>
 
+    <main id="plantingView" class="schedule" hidden>
+      <div id="plantingBody" class="schedule-body"></div>
+    </main>
+
     <main id="cropsView" class="schedule" hidden>
       <section class="panel">
         <div class="panel-heading">
@@ -375,7 +385,7 @@
     <script type="module">
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // 読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js"];
       try {
         await Promise.all(parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })));
         await import("./app.js");

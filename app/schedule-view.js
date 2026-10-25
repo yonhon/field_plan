@@ -18,6 +18,8 @@ import {
 import { cropLabel, plantingNumbers, summarize } from "./crops.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
+import { completeWorks, logForWork, openLogEditor } from "./log-view.js";
+import { lateWorks, withActualDates, workActuals, workStatus } from "./logs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
 
@@ -63,6 +65,11 @@ const blockBeds = (blockId) => state().beds.filter((bed) => bed.block_id === blo
 const bedPlantings = (bedId) => state().plantings.filter((planting) => planting.bed_id === bedId).sort(bySeq);
 const blockWorks = (blockId) => state().works.filter((work) => work.block_id === blockId).sort(bySeq);
 const plantingWorks = (plantingId) => state().works.filter((work) => work.planting_id === plantingId).sort(bySeq);
+
+// 開いているプランが、実際に使うプランか。記録がつながるのはこのときだけなので、完了のボタンや実績もこのときだけ出す
+export const isActivePlan = () => state().field.active_plan_id === state().plan.id;
+// 計画の作業の実績（作業の ID → { start, end }）。実際に使うプランでなければ空
+export const currentActuals = () => (isActivePlan() ? workActuals(state().logs || []) : new Map());
 
 const kindOf = (owner) => (owner.block_id ? "block" : "bed");
 const worksOf = (owner) => (owner.block_id ? blockWorks(owner.block_id) : plantingWorks(owner.planting_id));
@@ -148,7 +155,9 @@ export function renderSchedule() {
   $("scheduleEmpty").hidden = blocks.length > 0;
   $("scheduleBody").hidden = blocks.length === 0;
   renderWeek();
-  problems = planProblems(state());
+  // 取りやめた作業は見ない。実績のある作業は、実績の日で無理を見る
+  const live = state().works.filter((work) => !work.cancelled_on);
+  problems = planProblems({ ...state(), works: isActivePlan() ? withActualDates(live, currentActuals()) : live });
   renderProblems();
   ctx.renderWarnings();
   renderSummary();
@@ -161,27 +170,89 @@ export function renderSchedule() {
   renderTypes();
 }
 
-function renderWeek() {
-  const { due, upcoming } = dueWorks(state().works, localToday());
-  // 同じ日の同じ作業は、場所をまとめて 1 行にする
+// 同じ日の同じ作業は、場所をまとめて 1 行にする
+function weekLines(works) {
   const lines = new Map();
-  for (const work of due.length ? due : upcoming) {
+  for (const work of works) {
     const key = `${work.plan_start}|${work.plan_end}|${work.work_type}`;
     if (!lines.has(key)) {
-      lines.set(key, { work, places: [] });
+      lines.set(key, { work, works: [], places: [] });
     }
+    lines.get(key).works.push(work);
     lines.get(key).places.push(placeOf(work));
   }
-  const items = [...lines.values()].map(({ work, places }) => {
-    const where = places.length > 4 ? `${places[0]} ほか ${places.length - 1} か所` : places.join("、");
-    return (
-      `<li><span class="week-date">${formatRange(work)}</span>` +
-      `<span class="week-work"><span class="swatch" style="background:${TYPE_COLORS[work.work_type] || "#888"}"></span>${escapeHtml(typeLabel(work.work_type))}</span>` +
-      `<span class="muted">${escapeHtml(where)}${places.length === 1 && work.note ? ` / ${escapeHtml(work.note)}` : ""}</span></li>`
-    );
-  });
+  return [...lines.values()];
+}
+
+// 今週やることと遅れている作業の 1 行。実際に使うプランなら「完了」と「修正」のボタンを付ける。
+// 完了した行は ✓ と実施日を付けて薄くし、「修正」でその記録を開く
+function weekItem({ work, works, places }, actuals, late) {
+  const today = localToday();
+  const where = places.length > 4 ? `${places[0]} ほか ${places.length - 1} か所` : places.join("、");
+  const ids = works.map((item) => item.id).join(",");
+  const done = isActivePlan() && works.every((item) => workStatus(item, actuals, today) === "done");
+  const started = works.map((item) => actuals.get(item.id)?.start).filter(Boolean).sort()[0];
+  const ends = works.map((item) => actuals.get(item.id)?.end).filter(Boolean).sort();
+  let status = "";
+  if (done) {
+    const first = works.map((item) => actuals.get(item.id).start).sort()[0];
+    status = `${first === ends.at(-1) ? formatDay(first) : `${formatDay(first)}〜${formatDay(ends.at(-1))}`} に実施`;
+  } else if (late) {
+    status = `${diffDays(work.plan_end, today)} 日遅れ${started ? `・${formatDay(started)} に開始` : ""}`;
+  } else if (started) {
+    status = `${formatDay(started)} に開始`;
+  }
+  const buttons = !isActivePlan()
+    ? ""
+    : done
+      ? `<button class="text-btn" data-week="edit-log" data-ids="${ids}">修正</button>`
+      : `<button class="chip-btn" data-week="edit" data-ids="${ids}">修正</button><button class="primary-btn" data-week="done" data-ids="${ids}">完了</button>`;
+  return (
+    `<li class="${done ? "is-done" : ""}"><span class="week-date">${done ? "✓ " : ""}${formatRange(work)}</span>` +
+    `<span class="week-work"><span class="swatch" style="background:${TYPE_COLORS[work.work_type] || "#888"}"></span>${escapeHtml(typeLabel(work.work_type))}</span>` +
+    `<span class="muted">${escapeHtml(where)}${places.length === 1 && work.note ? ` / ${escapeHtml(work.note)}` : ""}${status ? `・${escapeHtml(status)}` : ""}</span>` +
+    `${buttons ? `<span class="week-actions">${buttons}</span>` : ""}</li>`
+  );
+}
+
+function renderWeek() {
+  const today = localToday();
+  const actuals = currentActuals();
+  const live = state().works.filter((work) => !work.cancelled_on);
+  const { due, upcoming } = dueWorks(live, today);
+  const late = isActivePlan() ? lateWorks(live, actuals, today) : [];
+  $("lateBox").hidden = !late.length;
+  $("lateTitle").textContent = `遅れている作業（${weekLines(late).length}）`;
+  $("lateList").innerHTML = weekLines(late)
+    .map((line) => weekItem(line, actuals, true))
+    .join("");
+  const items = weekLines(due.length ? due : upcoming).map((line) => weekItem(line, actuals, false));
   $("weekTitle").textContent = due.length || !upcoming.length ? "今週やること" : "次の作業（今週の予定はありません）";
   $("weekList").innerHTML = items.length ? items.join("") : '<li class="muted">予定はありません</li>';
+}
+
+// 今週やることの「完了」「修正」
+async function onWeekClick(event) {
+  const button = event.target.closest("[data-week]");
+  if (!button) {
+    return;
+  }
+  const ids = button.dataset.ids.split(",");
+  const works = ids.map((id) => state().works.find((work) => work.id === id)).filter(Boolean);
+  if (!works.length) {
+    return;
+  }
+  if (button.dataset.week === "done") {
+    button.disabled = true;
+    await completeWorks(works);
+  } else if (button.dataset.week === "edit") {
+    openLogEditor(null, { works: works.filter((work) => !currentActuals().get(work.id)?.end) });
+  } else {
+    const log = logForWork(works[0].id);
+    if (log) {
+      openLogEditor(log);
+    }
+  }
 }
 
 // 作業の期間を「6/17（木）〜6/29（火）」の形にする。日付がなければ「日付なし」
@@ -235,15 +306,106 @@ function renderProblems() {
     .join("");
 }
 
+// 工程表の表示。plan（計画）、act（実績）、both（計画と実績）。工程表と作付の詳細で共有し、ブラウザーが覚える
+const GANTT_MODE_KEY = "field_plan_gantt_mode";
+const GANTT_MODES = { plan: "計画", act: "実績", both: "計画と実績" };
+
+export function ganttMode() {
+  if (!isActivePlan()) {
+    return "plan";
+  }
+  try {
+    const saved = localStorage.getItem(GANTT_MODE_KEY);
+    return GANTT_MODES[saved] ? saved : "plan";
+  } catch {
+    return "plan";
+  }
+}
+
+export function setGanttMode(mode) {
+  try {
+    localStorage.setItem(GANTT_MODE_KEY, mode);
+  } catch {
+    // 覚えられなくても、いまの表示は切り替わる
+  }
+}
+
+// 表示の切り替えのボタン（工程表と作付の詳細で同じ形）
+export function modeButtons(mode) {
+  return Object.entries(GANTT_MODES)
+    .map(([key, label]) => `<button type="button" class="chip-btn${key === mode ? " is-on" : ""}" data-gantt-mode="${key}" aria-pressed="${key === mode}">${label}</button>`)
+    .join("");
+}
+
+// 記録だけに使う種類（灌水など）も含めた、作業の種類の名前
+export const anyTypeLabel = (code) => (state().allWorkTypes || state().workTypes).find((type) => type.code === code)?.label || code;
+
+// 区画または畝の実績の帯。計画の作業につながった記録は、開始から終了まで（終わっていなければ開始の日だけ）。
+// 計画にない作業の記録は、その日だけ
+export function actualSpans(ownerWorks, matchesTarget, actuals) {
+  const spans = [];
+  for (const work of ownerWorks) {
+    const actual = actuals.get(work.id);
+    if (actual) {
+      spans.push({ type: work.work_type, start: actual.start, end: actual.end || actual.start, open: !actual.end });
+    }
+  }
+  const seen = new Set();
+  for (const log of state().logs || []) {
+    if (log.targets.some((target) => !target.work_id && matchesTarget(target))) {
+      const key = `${log.work_type}|${log.date}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        spans.push({ type: log.work_type, start: log.date, end: log.date, open: false, log: log.id });
+      }
+    }
+  }
+  return spans;
+}
+
+// 区画の記録か（畝の記録ではなく）
+export const blockTarget = (blockId) => (target) => !target.bed_id && !target.planting_id && target.block_id === blockId;
+// その畝（の作付）の記録か
+export const bedTarget = (bed, plantingIds) => (target) => target.bed_id === bed.id || plantingIds.includes(target.planting_id);
+
 function renderGantt() {
+  const mode = ganttMode();
+  $("ganttModes").hidden = !isActivePlan();
+  $("ganttModes").innerHTML = modeButtons(mode);
+  $("ganttModeNote").textContent = isActivePlan()
+    ? mode === "both"
+      ? "区画と畝ごとに、上の段が計画、下の段が実績です。計画の段の帯は、ドラッグで動かせます。"
+      : mode === "act"
+        ? "記録の日です。計画にない作業（灌水、防除など）も出ます。"
+        : ""
+    : "実績は、実際に使うプランを開くと出せます。";
+  $("ganttModeNote").hidden = !$("ganttModeNote").textContent;
+  const showPlan = mode !== "act";
+  const showActual = mode !== "plan";
+  const actuals = currentActuals();
   const isDated = (work) => work.plan_start && work.plan_end && work.plan_end >= work.plan_start;
   const dated = state().works.filter(isDated);
-  if (!dated.length) {
+  // 区画と畝ごとの実績の帯を、先に集めておく（表示の範囲を決めるのにも使う）
+  const spansOf = new Map();
+  if (showActual) {
+    for (const block of state().blocks) {
+      spansOf.set(block.id, actualSpans(blockWorks(block.id), blockTarget(block.id), actuals));
+      for (const bed of blockBeds(block.id)) {
+        const plantings = bedPlantings(bed.id);
+        spansOf.set(
+          bed.id,
+          actualSpans(plantings.flatMap((planting) => plantingWorks(planting.id)), bedTarget(bed, plantings.map((planting) => planting.id)), actuals)
+        );
+      }
+    }
+  }
+  const allSpans = [...spansOf.values()].flat();
+  if (!dated.length && !allSpans.length) {
     $("gantt").innerHTML = '<p class="muted">日付の入った作業がまだありません。</p>';
     renderPickTools();
     return;
   }
-  const all = dated.flatMap((work) => [work.plan_start, work.plan_end]).sort();
+  const all = [...dated.flatMap((work) => [work.plan_start, work.plan_end]), ...allSpans.flatMap((span) => [span.start, span.end])].sort();
   const first = `${addDays(all[0], -3).slice(0, 8)}01`;
   const last = addDays(all.at(-1), 7);
   const x = (iso) => diffDays(first, iso) * DAY_PX;
@@ -268,25 +430,56 @@ function renderGantt() {
         );
       })
       .join("");
+  const actualBars = (spans) =>
+    spans
+      .map((span) => {
+        const days = diffDays(span.start, span.end) + 1;
+        const range = span.start === span.end ? fullDay(span.start) : `${fullDay(span.start)} 〜 ${fullDay(span.end)}`;
+        const tip = `<strong>${escapeHtml(anyTypeLabel(span.type))}（実績${span.open ? "。まだ終わっていない" : ""}）</strong>${range}`;
+        return (
+          `<span class="gantt-actual-bar${span.open ? " is-open" : ""}" data-tip="${escapeHtml(tip)}" ` +
+          `style="left:${x(span.start)}px;width:${days * DAY_PX}px;background-color:${TYPE_COLORS[span.type] || "#888"}">` +
+          `${days * DAY_PX > 60 ? escapeHtml(anyTypeLabel(span.type)) : ""}</span>`
+        );
+      })
+      .join("");
   const openRow = sel.target === "block" ? `data-block="${sel.blockId}"` : `data-bed="${sel.target}"`;
+  const lane = (text) => (mode === "both" ? `<span class="gantt-lane">${text}</span>` : "");
+  // 計画の段（帯をドラッグできる）と、実績の段（ドラッグできない）
   const row = (cls, name, content, attrs) =>
-    `<div class="gantt-row ${cls}${attrs === openRow ? " is-open" : ""}" ${attrs}><div class="gantt-name">${escapeHtml(name)}</div><div class="gantt-track">${content}</div></div>`;
+    `<div class="gantt-row ${cls}${attrs === openRow ? " is-open" : ""}" ${attrs}><div class="gantt-name">${name}${lane("計画")}</div><div class="gantt-track">${content}</div></div>`;
+  const actualRow = (cls, name, content) =>
+    `<div class="gantt-actual ${cls}${mode === "both" ? " is-sub" : ""}"><div class="gantt-name">${mode === "both" ? "" : name}${lane("実績")}</div><div class="gantt-track">${content}</div></div>`;
+  const link = (kind, id, text) => `<a href="#" class="gantt-link" data-detail="${kind}" data-id="${id}">${escapeHtml(text)}</a>`;
 
   const rows = [];
   for (const block of state().blocks) {
-    rows.push(row("block", block.name, bars(blockWorks(block.id)), `data-block="${block.id}"`));
+    const name = link("block", block.id, block.name);
+    if (showPlan) {
+      rows.push(row("block", name, bars(blockWorks(block.id)), `data-block="${block.id}"`));
+    }
+    if (showActual) {
+      rows.push(actualRow("block", name, actualBars(spansOf.get(block.id))));
+    }
     for (const bed of blockBeds(block.id)) {
       const plantings = bedPlantings(bed.id);
-      const crops = plantings.map((planting) => planting.crop_name).filter(Boolean).join(" → ");
+      // 作付ごとに、品目の名前を作付の詳細へのリンクにする
+      const crops = plantings.map((planting) => link("planting", planting.id, planting.crop_name || `作付 ${planting.seq}`)).join(" → ");
       const gone = bed.removed_on ? `（〜${formatDay(bed.removed_on)}）` : "";
-      const content = plantings.map((planting) => bars(plantingWorks(planting.id), planting.crop_name ? `（${planting.crop_name}）` : "")).join("");
-      rows.push(row("bed", `畝${bed.seq}${crops ? ` ${crops}` : ""}${gone}`, content, `data-bed="${bed.id}"`));
+      const name = `畝${bed.seq}${crops ? ` ${crops}` : ""}${gone}`;
+      if (showPlan) {
+        const content = plantings.map((planting) => bars(plantingWorks(planting.id), planting.crop_name ? `（${planting.crop_name}）` : "")).join("");
+        rows.push(row("bed", name, content, `data-bed="${bed.id}"`));
+      }
+      if (showActual) {
+        rows.push(actualRow("bed", name, actualBars(spansOf.get(bed.id))));
+      }
     }
   }
 
-  const used = new Set(dated.map((work) => work.work_type));
-  const legend = state()
-    .workTypes.filter((type) => used.has(type.code))
+  const used = new Set([...(showPlan ? dated.map((work) => work.work_type) : []), ...allSpans.map((span) => span.type)]);
+  const legend = (state().allWorkTypes || state().workTypes)
+    .filter((type) => used.has(type.code))
     .map((type) => `<span><span class="swatch" style="background:${TYPE_COLORS[type.code] || "#888"}"></span>${escapeHtml(type.label)}</span>`)
     .join("");
   const mark = today >= first && today <= last ? `<span class="gantt-mark today" style="left:${x(today)}px"><span>今日</span></span>` : "";
@@ -389,6 +582,21 @@ function worksBlock(owner) {
     })
     .join("");
   const choice = arrangeFor(owner);
+  const actuals = currentActuals();
+  // 実績の列。記録から求めた開始日と終了日。始めただけなら「〜」で終わる
+  const actualText = (work) => {
+    if (isActivePlan() && work.cancelled_on) {
+      return "取りやめ";
+    }
+    const actual = actuals.get(work.id);
+    if (!actual) {
+      return "-";
+    }
+    if (!actual.end) {
+      return `${formatDay(actual.start)}〜`;
+    }
+    return actual.start === actual.end ? formatDay(actual.start) : `${formatDay(actual.start)}〜${formatDay(actual.end)}`;
+  };
   // 相手に合う種類を先に、それ以外を後ろに出す
   const groups = [kind, kind === "block" ? "bed" : "block"];
   const typeOptions = (selected) =>
@@ -410,6 +618,7 @@ function worksBlock(owner) {
             `<td><select data-field="work_type">${typeOptions(work.work_type)}</select></td>` +
             `<td><input type="date" data-field="plan_start" value="${work.plan_start || ""}" /></td>` +
             `<td><input type="date" data-field="plan_end" value="${work.plan_end || ""}" /></td>` +
+            `<td class="actual-cell">${escapeHtml(actualText(work))}</td>` +
             `<td class="num">${days ?? "-"}</td>` +
             `<td class="num">${gap === null ? "-" : gap}</td>` +
             `<td><input type="text" data-field="note" value="${escapeHtml(work.note)}" /></td>` +
@@ -420,14 +629,14 @@ function worksBlock(owner) {
           );
         })
         .join("")
-    : `<tr><td colspan="8" class="muted">作業がまだありません。${kind === "bed" ? "下の「作付を追加」で入れるか" : "ひな形から作るか"}、「作業を追加」で足してください。</td></tr>`;
+    : `<tr><td colspan="9" class="muted">作業がまだありません。${kind === "bed" ? "下の「作付を追加」で入れるか" : "ひな形から作るか"}、「作業を追加」で足してください。</td></tr>`;
   return (
     `<div class="row edit-only schedule-tools"${works.length ? "" : " hidden"}>` +
     `<select data-field="arrange-mode" aria-label="並べ直しの基準">${optionList(Object.entries(ARRANGE_MODES[kind]), choice.mode)}</select>` +
     `<input type="date" data-field="arrange-date" aria-label="基準にする日" value="${choice.date}" />` +
     `<button class="chip-btn" data-action="arrange">並べ直す</button></div>` +
     `<ul class="error warning-list">${warnings}</ul>` +
-    `<div class="table-scroll"><table class="work-table"><thead><tr><th></th><th>作業</th><th>開始日</th><th>終了日</th><th>日数</th>` +
+    `<div class="table-scroll"><table class="work-table"><thead><tr><th></th><th>作業</th><th>開始日</th><th>終了日</th><th>実績</th><th>日数</th>` +
     `<th>前との間隔</th><th>メモ</th><th class="edit-only"></th></tr></thead><tbody>${rows}</tbody></table></div>` +
     `<button class="text-btn edit-only" data-action="add-work">＋ 作業を追加</button>`
   );
@@ -1172,8 +1381,15 @@ function initGanttEditing() {
   gantt.addEventListener("pointerup", finish);
   gantt.addEventListener("pointercancel", finish);
 
-  // 帯のない所をクリックすると、選択を外して、その行を「作業の計画」で開く
+  // 帯のない所をクリックすると、選択を外して、その行を「作業の計画」で開く。
+  // 行の名前の品目（区画の名前）は、作付の詳細へのリンク
   gantt.addEventListener("click", (event) => {
+    const link = event.target.closest("[data-detail]");
+    if (link) {
+      event.preventDefault();
+      ctx.openDetail(link.dataset.detail, link.dataset.id);
+      return;
+    }
     const row = event.target.closest(".gantt-row");
     if (pressedBar || event.target.closest(".gantt-bar") || !row) {
       return;
@@ -1247,13 +1463,22 @@ export function initSchedule(context) {
   });
   initEditor();
   initGanttEditing();
+  $("weekList").addEventListener("click", onWeekClick);
+  $("lateList").addEventListener("click", onWeekClick);
+  $("ganttModes").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-gantt-mode]");
+    if (button) {
+      setGanttMode(button.dataset.ganttMode);
+      renderSchedule();
+    }
+  });
   // 工程表の帯にマウスを乗せると、開始日と終了日を出す
   const tip = $("ganttTip");
   $("gantt").addEventListener("pointermove", (event) => {
     if (barDrag) {
       return; // ドラッグ中は、動かした先の日付を別に出している
     }
-    const bar = event.target.closest(".gantt-bar");
+    const bar = event.target.closest(".gantt-bar, .gantt-actual-bar");
     tip.hidden = !bar;
     if (bar) {
       tip.innerHTML = bar.dataset.tip;
