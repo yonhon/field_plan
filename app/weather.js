@@ -96,6 +96,74 @@ export async function fetchDay(station, date) {
   return dailyFromRecords(records, date);
 }
 
+// ---- 気象庁の過去の気象データ（正式な値） ----
+// 日別の表（etrn）は、品質を確かめた正式な値で、昨日の分まで、いつの日の分も取れる。ブラウザーからは読めない（CORS を
+// 許していない）ので、GitHub Actions（scripts/fetch-weather.mjs）が読む。アプリの表示用の JSON より、こちらを優先する
+export const ETRN = "https://www.data.jma.go.jp/stats/etrn";
+
+const cellText = (html) => html.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+
+// 府県の地点の一覧のページ（select/prefecture.php）から、地点の [{ kind（s は気象台など、a はアメダス）, block, name, lat, lng }]
+export function parseEtrnPoints(html) {
+  const seen = new Map();
+  for (const match of html.matchAll(/viewPoint\(([^)]*)\)/g)) {
+    const [kind, block, name, , latD, latM, lngD, lngM] = match[1].split(",").map((part) => part.trim().replace(/^'|'$/g, ""));
+    if ((kind === "s" || kind === "a") && /^\d+$/.test(block) && !seen.has(`${kind}${block}`)) {
+      seen.set(`${kind}${block}`, { kind, block, name, lat: Number(latD) + Number(latM) / 60, lng: Number(lngD) + Number(lngM) / 60 });
+    }
+  }
+  return [...seen.values()];
+}
+
+// アメダスの観測所（parseStations の形）にあたる、日別の表の地点。名前が同じ地点のうち、いちばん近いもの（2 km 以内）
+export function matchEtrnPoint(points, station) {
+  return (
+    points
+      .filter((point) => point.name === station.name)
+      .map((point) => ({ ...point, km: distanceKm(station.lat, station.lng, point.lat, point.lng) }))
+      .filter((point) => point.km <= 2)
+      .sort((a, b) => a.km - b.km || (a.kind === "s" ? -1 : 1))[0] || null
+  );
+}
+
+// 表の値。「)」（準正常値）は使い、「]」（資料不足値）、「×」（欠測）、「///」、「#」（疑わしい値）、空は欠測。
+// 「--」（現象なし）は、降水量では 0
+function etrnValue(text, zeroIfNone = false) {
+  const value = text.replace(/\s/g, "");
+  if (value === "--") {
+    return zeroIfNone ? 0 : null;
+  }
+  if (!value || /[\]×#/]/.test(value)) {
+    return null;
+  }
+  const number = Number(value.replace(/\)$/, ""));
+  return Number.isFinite(number) ? number : null;
+}
+
+// 日別の表（view/daily_s1.php か daily_a1.php）から、その月の日ごとの値 [{ date, temp_mean, temp_max, temp_min, precip }]。
+// まだ値のない日（今日より後の「///」の行など）は返さない
+export function parseEtrnDaily(html, kind, year, month) {
+  const columns = kind === "s" ? { precip: 3, mean: 6, max: 7, min: 8 } : { precip: 1, mean: 4, max: 5, min: 6 };
+  const days = [];
+  for (const row of html.matchAll(/<tr class="mtx"[^>]*>([\s\S]*?)<\/tr>/g)) {
+    const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((cell) => cellText(cell[1]));
+    if (!/^\d+$/.test(cells[0] || "")) {
+      continue;
+    }
+    const value = {
+      date: `${year}-${String(month).padStart(2, "0")}-${String(cells[0]).padStart(2, "0")}`,
+      temp_mean: etrnValue(cells[columns.mean] || ""),
+      temp_max: etrnValue(cells[columns.max] || ""),
+      temp_min: etrnValue(cells[columns.min] || ""),
+      precip: etrnValue(cells[columns.precip] || "", true),
+    };
+    if (value.temp_mean !== null || value.temp_max !== null || value.precip !== null) {
+      days.push(value);
+    }
+  }
+  return days;
+}
+
 // from から to までの積算温度（日平均気温の合計）と積算降水量。欠測の日は足さず、日付を返す
 export function accumulate(rows, from, to, field) {
   const byDate = new Map(rows.map((row) => [row.date, row]));

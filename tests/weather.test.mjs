@@ -7,6 +7,9 @@ import {
   dailyFromRecords,
   distanceKm,
   nearestStations,
+  matchEtrnPoint,
+  parseEtrnDaily,
+  parseEtrnPoints,
   parseForecast,
   parseStations,
   parseWind,
@@ -114,4 +117,37 @@ test("予報を、今日から 1 日 1 件にまとめる", () => {
   // 2 週間気温予報は、週間天気予報にない日だけを、気温だけの日として足す
   const more = addTwoWeek(result, { days: [{ date: "2026-03-04", max: 99, min: 99 }, { date: "2026-03-09", max: 20, min: 11 }] }, "2026-03-01");
   assert.deepEqual(more.slice(-2).map((day) => [day.date, day.max, day.source]), [["2026-03-04", 17, "weekly"], ["2026-03-09", 20, "twoweek"]]);
+});
+
+test("気象庁の過去の気象データ: 地点の一覧と、アメダスの観測所との突き合わせ", () => {
+  const html =
+    `<area onmouseover="javascript:viewPoint('a','0901','甲','コウ','30','30.0','130','0.0','10','1','1','1','1','0','1','9999','99','99','','','','','');">` +
+    `<area onmouseover="javascript:viewPoint('a','0901','甲','コウ','30','30.0','130','0.0','10','1','1','1','1','0','1','9999','99','99','','','','','');">` +
+    `<area onmouseover="javascript:viewPoint('s','47999','乙','オツ','31','0.0','130','0.0','5','1','1','1','1','1','1','9999','99','99','','','','','');">` +
+    `<area onmouseover="javascript:viewPoint('as','bk_no','ch','ch_kn','lat_d','lat_m','lon_d','lon_m','height');">`;
+  const points = parseEtrnPoints(html);
+  assert.deepEqual(points.map((point) => [point.kind, point.block, point.name, point.lat]), [["a", "0901", "甲", 30.5], ["s", "47999", "乙", 31]]);
+  assert.equal(matchEtrnPoint(points, { name: "乙", lat: 31.005, lng: 130 }).block, "47999");
+  // 名前が同じでも、離れていれば別の地点
+  assert.equal(matchEtrnPoint(points, { name: "乙", lat: 32, lng: 130 }), null);
+  assert.equal(matchEtrnPoint(points, { name: "丙", lat: 31, lng: 130 }), null);
+});
+
+test("気象庁の過去の気象データ: 日別の表の値と印", () => {
+  const row = (cells) => `<tr class="mtx" style="text-align:right;">${cells.map((cell) => `<td class="data_0_0">${cell}</td>`).join("")}</tr>`;
+  // アメダス（a）: 日、降水量の合計、最大 1 時間、最大 10 分間、気温の平均、最高、最低
+  const a = [
+    row(["<a href='#'>1</a>", "0.0", "0.0", "0.0", "21.8", "25.1", "20.0"]),
+    row(["2", "--", "--", "--", "23.8)", "28.3", "19.9"]), // 「--」は現象なし（降水量 0）、「)」は準正常値
+    row(["3", "1.5", "1.0", "0.5", "24.0]", "26.6", "×"]), // 「]」は資料不足値、「×」は欠測
+    row(["4", "///", "///", "///", "///", "///", "///"]), // まだ値のない日
+  ].join("");
+  assert.deepEqual(parseEtrnDaily(a, "a", 2026, 10), [
+    { date: "2026-10-01", temp_mean: 21.8, temp_max: 25.1, temp_min: 20, precip: 0 },
+    { date: "2026-10-02", temp_mean: 23.8, temp_max: 28.3, temp_min: 19.9, precip: 0 },
+    { date: "2026-10-03", temp_mean: null, temp_max: 26.6, temp_min: null, precip: 1.5 },
+  ]);
+  // 気象台など（s）: 日、気圧（現地、海面）、降水量の合計、最大 1 時間、最大 10 分間、気温の平均、最高、最低
+  const s = row(["17", "1018.5", "1019.4", "0.0", "0.0", "0.0", "26.1", "29.3", "24.0"]);
+  assert.deepEqual(parseEtrnDaily(s, "s", 2026, 10), [{ date: "2026-10-17", temp_mean: 26.1, temp_max: 29.3, temp_min: 24, precip: 0 }]);
 });

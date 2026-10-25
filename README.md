@@ -67,8 +67,8 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `supabase/functions/field-mcp/` | 計画を Claude.ai から読むための MCP サーバー（Supabase Edge Function） |
 | `supabase/functions/field-weather/` | 2 週間気温予報を画面に渡す関数（ブラウザーから気象庁のこのデータを読めないため） |
 | `scripts/import_famic.py` | FAMIC の農薬登録情報（CSV）を DB に取り込む。`.github/workflows/famic.yml` が週に 1 回動かす |
-| `scripts/fetch-weather.mjs` | 気象の値（アメダスの日ごとの観測値）を気象庁から取って DB に入れる。`.github/workflows/weather.yml` が毎日動かす |
-| `scripts/import_jma_csv.py` | 気象庁の過去の気象データ（日別の CSV）を DB に入れる（取りこぼした日を埋める） |
+| `scripts/fetch-weather.mjs` | 気象の値（アメダスの観測所の日ごとの観測値）を、気象庁の過去の気象データの日別の表（正式な値）から取って DB に入れる。`.github/workflows/weather.yml` が毎日動かす |
+| `scripts/import_jma_csv.py` | 気象庁の過去の気象データ（日別の CSV）を DB に入れる。いまは `fetch-weather.mjs` に日付を渡せば日別の表から入れ直せるので、ふだんは使わない |
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
 | `tests/` | 図形、日程、苗数と施肥量の計算、作業の記録の計算、元に戻すと、MCP サーバーのテスト |
 | `data/` | 下絵の画像など、圃場ごとの資料。**Git の対象外** |

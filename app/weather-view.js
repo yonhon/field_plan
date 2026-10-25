@@ -1,7 +1,7 @@
 // 気象の設定（圃場図の右の欄）と、日ごとの観測値の取得。
-// 観測値は、GitHub Actions が毎日取って DB に入れる（scripts/fetch-weather.mjs）。アプリも、開いたときに、
-// まだ DB にない直近の日（FETCH_DAYS 日前から昨日まで）を取って入れる（Actions が止まったときの予備）。
-// それでも取りこぼした日は、気象庁の CSV から入れる（scripts/import_jma_csv.py）
+// 観測値は、GitHub Actions が毎日、気象庁の過去の気象データの日別の表（正式な値）から取って DB に入れる
+// （scripts/fetch-weather.mjs）。アプリも、開いたときに、まだ DB にない直近の日（FETCH_DAYS 日前から昨日まで）を
+// 表示用の JSON から取って入れる（Actions が止まったときの予備。正式な値があれば上書きしない）
 import { notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { addDays, localToday } from "./schedule.js";
@@ -178,8 +178,9 @@ export async function syncWeather() {
   const to = addDays(today, -1);
   try {
     const have = await state().store.loadWeather(stations, from, to);
-    // 昨日の分は、あとから直されることがあるので取り直す
-    const known = new Set(have.filter((row) => row.date < to).map((row) => `${row.station}|${row.date}`));
+    // 昨日の分は、あとから直されることがあるので取り直す。ただし、正式な値（GitHub Actions が気象庁の日別の表から
+    // 入れた値。source が jma）は上書きしない
+    const known = new Set(have.filter((row) => row.date < to || row.source !== "amedas").map((row) => `${row.station}|${row.date}`));
     const rows = [];
     for (const station of stations) {
       for (let day = from; day <= to; day = addDays(day, 1)) {
