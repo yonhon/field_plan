@@ -3,7 +3,7 @@
 import { WORK_COLORS, addDays, localToday } from "./schedule.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { SPEC_FIELDS, inputText, matchWork, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
+import { SPEC_FIELDS, formatAmount, inputText, matchWork, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
 
 const $ = (id) => document.getElementById(id);
@@ -498,16 +498,18 @@ function inputRow(input, i) {
     const methodList = input.method && !METHODS.includes(input.method) ? [input.method, ...METHODS] : METHODS;
     const methods = methodList.map((method) => `<option${input.method === method ? " selected" : ""}>${escapeHtml(method)}</option>`).join("");
     const withFamic = famic.famicEnabled();
+    // 面積あたりの使用量で使う農薬（粒剤など）は、希釈倍率を入れず、使った製品の量だけを入れる
+    const dosed = withFamic && famic.areaDosed(input, sprayGroups());
     return (
       `<div class="log-input">` +
       (withFamic ? field("name", "農薬の名前（名前の一部か登録番号で探す）", input.name, 'type="text" autocomplete="off"') + famic.pickerHtml(input, i, sprayGroups()) : "") +
       `<div class="form-grid">` +
       (withFamic ? "" : field("name", "農薬の名前", input.name, 'type="text"')) +
       `<label>使い方<select data-in="${i}" data-k="method">${methods}</select></label>` +
-      field("dilution", "希釈倍率（倍）", input.dilution, numberAttrs) +
-      field("amount", "製品の量", input.amount, numberAttrs) +
-      unitSelect(["mL", "g"]) +
-      `</div><p class="muted" data-hint="${i}"></p>${remove}</div>`
+      (dosed ? "" : field("dilution", "希釈倍率（倍）", input.dilution, numberAttrs)) +
+      field("amount", dosed ? "使った製品の量" : "製品の量", input.amount, numberAttrs) +
+      unitSelect(["mL", "g", "kg", "L"]) +
+      `</div>${dosed ? "" : `<p class="muted" data-hint="${i}"></p>`}${remove}</div>`
     );
   }
   if (input.kind === "fertilizer") {
@@ -565,7 +567,21 @@ function spraySection(items) {
       (boxes ? `<div class="log-section"><h3>${draft.mode === "blocks" ? "区画" : "品目"}ごとの使用基準</h3>${boxes}${notes}<p class="muted" id="logBaseline"></p>` +
         `<p class="muted"><a href="${famic.NOTICE_URL}" target="_blank" rel="noopener">総使用回数についての注意事項（FAMIC）</a></p></div>` : "");
   }
-  return `${standards}<div class="log-section"><h3>実際に散布した液の量</h3>${rows}<p class="muted" id="logSprayTotal"></p></div><ul class="famic-warnings" id="logWarnings" hidden></ul>`;
+  // 面積あたりの使用量の農薬（粒剤など）だけなら、散布した液の量は入れない
+  const liquid = allAreaDosed()
+    ? '<div class="log-section"><p class="muted">粒剤など、面積あたりの使用量で使う農薬なので、散布した液の量は入れません。</p></div>'
+    : `<div class="log-section"><h3>実際に散布した液の量</h3>${rows}<p class="muted" id="logSprayTotal"></p></div>`;
+  return `${standards}${liquid}<ul class="famic-warnings" id="logWarnings" hidden></ul>`;
+}
+
+// 登録番号のある農薬がすべて、面積あたりの使用量で使う農薬（粒剤など）か
+function allAreaDosed() {
+  if (!famic.famicEnabled() || draft.work_type !== "spray") {
+    return false;
+  }
+  const groups = sprayGroups();
+  const pesticides = draft.inputs.filter((input) => input.kind === "pesticide" && (input.name || "").trim());
+  return pesticides.length > 0 && pesticides.every((input) => famic.areaDosed(input, groups));
 }
 
 // 防除の対象の、品目のまとまり（区画で選ぶときは区画）。作物名と使い方を選び、使用基準を照らす単位
@@ -649,8 +665,12 @@ function updateTotals() {
   const groups = sprayGroups();
   // 基準散布量の合計と、そこから計算した製品の量（散布する前に、作る液の量を決めるため）
   const baseline = famic.baselineLiters(draft.inputs, groups);
+  const usage = famic.baselineUsage(draft.inputs, groups);
   const baselineBox = dialog.querySelector("#logBaseline");
-  if (baselineBox) {
+  if (baselineBox && usage) {
+    const span = usage.min === usage.max ? formatAmount(usage.max, usage.unit) : `${formatAmount(usage.min, usage.unit)}〜${formatAmount(usage.max, usage.unit)}`;
+    baselineBox.textContent = `選んだ畝の面積の基準使用量の合計 ${span}`;
+  } else if (baselineBox) {
     const first = draft.inputs.find((input) => input.kind === "pesticide" && num(input.dilution));
     const low = baseline && first ? productAmount(baseline.low, num(first.dilution)) : null;
     const high = baseline && first ? productAmount(baseline.high, num(first.dilution)) : null;
@@ -979,6 +999,13 @@ function buildLog() {
     }
   }
   const groups = kind === "pesticide" && famic.famicEnabled() ? sprayGroups(items) : [];
+  // 粒剤などは、希釈倍率と散布した液の量を持たない
+  const dosed = (input) => famic.famicEnabled() && famic.areaDosed(input, groups);
+  if (kind === "pesticide" && allAreaDosed()) {
+    targets.forEach((target) => {
+      target.spray_l = null;
+    });
+  }
   const inputs = draft.inputs
     .filter((input) => (input.name || "").trim() || input.fertilizer_id || input.amount !== null || input.dilution !== null)
     .map((input, seq) => {
@@ -992,7 +1019,7 @@ function buildLog() {
         fertilizer_id: fertilizer?.id || null,
         name: fertilizer ? fertilizer.name : (input.name || "").trim(),
         method: input.method || "",
-        dilution: num(input.dilution),
+        dilution: dosed(input) ? null : num(input.dilution),
         amount: num(input.amount),
         unit: input.unit || "",
       };

@@ -2,7 +2,7 @@
 // この部分は切り離せるように、1 つのファイルにまとめている。config.js の famic を false にするか、
 // DB を使わないモードでは使わない（防除の記録は、名前と量を文字と数で入れるだけになる）。
 // 農薬の情報の扱いには責任が伴うので、ほかの人に使ってもらうときは、ここを外すこと。
-import { defaultDilution, pesticideCounts, previousChoice, sprayWarnings, standardChoice } from "./logs.js";
+import { defaultDilution, formatAmount, parseUsage, pesticideCounts, previousChoice, sprayWarnings, standardChoice, usageRange, usageWarnings } from "./logs.js";
 
 const escapeHtml = (text) =>
   String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -260,6 +260,25 @@ export function snapshot(input, groups) {
   };
 }
 
+// 面積あたりの使用量で使う農薬（粒剤など）か。選んだ使用基準が面積あたりの使用量（「6kg/10a」など）で、
+// 希釈倍数がないもの。まだ選んでいなければ、剤型（粒剤、粉剤など）で決める。希釈倍率と散布液の量は入れない
+export function areaDosed(input, groups) {
+  if (input.kind !== "pesticide" || !input.reg_no) {
+    return false;
+  }
+  const rows = groups.map((group) => rowFor(input, group)).filter(Boolean);
+  if (rows.length) {
+    return rows.every((row) => !row.dilution_min && parseUsage(row.dilution_text));
+  }
+  return /粒|粉/.test(input._product?.formulation || "");
+}
+
+// 面積あたりの使用量の基準の合計（g か mL）。最初の、面積あたりの使用量の農薬で求める。求められなければ null
+export function baselineUsage(inputs, groups) {
+  const input = inputs.find((item) => areaDosed(item, groups));
+  return input ? usageRange(groups.map((group) => ({ area: group.area, row: rowFor(input, group) }))) : null;
+}
+
 // 初めの希釈倍率。選んだ品目の使用基準の下限のうち、いちばん大きいもの。どの品目に合わせたかも返す
 export function suggestedDilution(input, groups) {
   const rows = groups.map((group) => ({ group, row: rowFor(input, group) })).filter((item) => item.row);
@@ -347,10 +366,14 @@ export function standardsHtml(inputs, groups, logs, excludeLogId) {
             return `${name} ${count} 回目${max ? `（上限 ${max} 回）` : ""}`;
           })
           .filter(Boolean);
+        const usage = parseUsage(row.dilution_text);
+        const span = (low, high, unit) => (low === high ? formatAmount(high, unit) : `${formatAmount(low, unit)}〜${formatAmount(high, unit)}`);
         const liquid =
           row.liquid_min !== null && row.liquid_min !== undefined && group.area
             ? `この面積の基準散布量 <b>${((row.liquid_min * group.area) / 1000).toFixed(1)}〜${((row.liquid_max * group.area) / 1000).toFixed(1)} L</b>`
-            : "";
+            : usage && group.area
+              ? `この面積の基準使用量 ${escapeHtml(row.dilution_text)} × ${group.area.toFixed(1)} ㎡ → <b>${span(usage.min * group.area, usage.max * group.area, usage.unit)}</b>`
+              : "";
         return (
           `<span>${escapeHtml(input.name)}（${escapeHtml(row.crop)}）: ${escapeHtml([row.dilution_text, row.liquid_text, row.timing_text].filter((text) => text && text !== "-").join("・"))}</span>` +
           `<span class="muted">本剤 ${product} 回目（${escapeHtml(row.times_text)}）${ingredients.length ? `・${escapeHtml(ingredients.join("・"))}` : ""}</span>` +
@@ -405,6 +428,8 @@ export function warnings({ inputs, groups, date, sprayOf, logs, excludeLogId, ha
       })),
       countsOf: (id) => pesticideCounts(logs, id, excludeLogId),
     });
+    // 面積あたりの使用量の農薬（粒剤など）は、製品の量を、選んだ品目の面積の基準の合計と比べる
+    list.push(...usageWarnings({ amount: input.amount, unit: input.unit, groups: groups.map((group) => ({ area: group.area, row: rowFor(input, group) })) }));
     out.push(...list.map((text) => (inputs.filter((item) => item.kind === "pesticide").length > 1 ? `${input.name}・${text}` : text)));
   }
   return out;

@@ -462,6 +462,78 @@ export function sprayWarnings({ date, dilution, regNo, ingredients = [], groups,
   return [...new Set(warnings)];
 }
 
+// 製品の量を、g か mL にそろえる。そろえられない単位は null
+export function toBaseAmount(amount, unit) {
+  const value = Number(amount);
+  if (amount === null || amount === undefined || amount === "" || !Number.isFinite(value)) {
+    return null;
+  }
+  const scale = { kg: [1000, "g"], g: [1, "g"], L: [1000, "mL"], mL: [1, "mL"] }[unit];
+  return scale ? { value: value * scale[0], unit: scale[1] } : null;
+}
+
+// 使用基準の希釈倍数・使用量の欄にある、面積あたりの使用量（粒剤など）。例: 「6kg/10a」「4~6kg/10a」「500mL/10a」
+// 「1~2g/m2」「原液として3リットル/10a」。かっこの補足（「(少量散布)」「(1~2g/株)」）は読まない。
+// 返り値は 1 ㎡ あたりの下限・上限（g か mL）。面積あたりでない基準（倍、g/株、穴当りなど）は null
+export function parseUsage(text) {
+  const t = String(text || "")
+    .normalize("NFKC")
+    .replace(/\s/g, "")
+    .replace(/^原液として/, "")
+    .replace(/\(.*$/, "")
+    .replace(/リットル/g, "L");
+  const match = /^(\d+(?:\.\d+)?)(?:~(\d+(?:\.\d+)?))?(kg|g|mL|ml|L)\/(\d+(?:\.\d+)?)?(a|m2)$/.exec(t);
+  if (!match) {
+    return null;
+  }
+  const [, low, high, rawUnit, per, areaUnit] = match;
+  const m2 = Number(per || 1) * (areaUnit === "a" ? 100 : 1);
+  const min = toBaseAmount(low, rawUnit === "ml" ? "mL" : rawUnit);
+  const max = toBaseAmount(high ?? low, rawUnit === "ml" ? "mL" : rawUnit);
+  return { min: min.value / m2, max: max.value / m2, unit: min.unit };
+}
+
+// 品目のまとまりごとの面積と使用基準の行から、面積あたりの使用量の基準の合計（g か mL）。
+// どれかのまとまりが面積あたりの基準でないとき、単位がそろわないときは null
+export function usageRange(groups) {
+  let min = 0;
+  let max = 0;
+  let unit = null;
+  for (const group of groups) {
+    const usage = group.row ? parseUsage(group.row.dilution_text) : null;
+    if (!usage || !group.area || (unit && usage.unit !== unit)) {
+      return null;
+    }
+    unit = usage.unit;
+    min += usage.min * group.area;
+    max += usage.max * group.area;
+  }
+  return unit ? { min, max, unit } : null;
+}
+
+// 量を読みやすく。1000 g 以上は kg、1000 mL 以上は L
+export function formatAmount(value, unit) {
+  if (value >= 1000) {
+    return `${Math.round(value / 100) / 10} ${unit === "g" ? "kg" : "L"}`;
+  }
+  return `${Math.round(value * 10) / 10} ${unit}`;
+}
+
+// 製品の量と、面積あたりの使用量の基準の合計を比べた指摘（超えるとき）。基準がなければ空
+export function usageWarnings({ amount, unit, groups }) {
+  const range = usageRange(groups);
+  const used = toBaseAmount(amount, unit);
+  if (!range || !used || used.unit !== range.unit || used.value <= 0) {
+    return [];
+  }
+  const span = range.min === range.max ? formatAmount(range.max, range.unit) : `${formatAmount(range.min, range.unit)}〜${formatAmount(range.max, range.unit)}`;
+  // 少なく使う分には基準を外れないので、超えるときだけ言う
+  if (used.value > range.max * (1 + 1e-9)) {
+    return [`使用量 ${formatAmount(used.value, used.unit)} は、この面積の基準（${span}）を超えます`];
+  }
+  return [];
+}
+
 // 記録の使用基準の写しから、品目のまとまりで選んだ作物名と使い方（use_key は「適用病害虫|使用方法」）。
 // 品目で選んだ記録は品目の名前（crop_name）で、区画で選んだ記録はまとまりの名前（group）で探す。
 // 使い方を写しの一番上に持つ形（品目ごとに選ぶ前の記録）も読む

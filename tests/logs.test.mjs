@@ -7,6 +7,10 @@ import {
   dayGap,
   defaultDilution,
   firstHarvestDay,
+  formatAmount,
+  parseUsage,
+  usageRange,
+  usageWarnings,
   lateWorks,
   matchWork,
   pesticideCounts,
@@ -321,6 +325,35 @@ test("作物名と使い方の選択: 写しから読む、前回の選択を入
   // この農薬にない作物名や、ほかの品目の選択は使わない
   assert.equal(previousChoice([log("e", "2026-10-12", [input(300, "だいこん", "アブラムシ類")])], where, rows), null);
   assert.equal(previousChoice(logs, { regNo: 100, cropName: "キャベツ" }, rows), null);
+});
+
+test("面積あたりの使用量（粒剤など）を読み、基準と比べる", () => {
+  assert.deepEqual(parseUsage("6kg/10a"), { min: 6, max: 6, unit: "g" }); // 6 kg / 1000 ㎡ = 6 g/㎡
+  assert.deepEqual(parseUsage("4～6kg/10a"), { min: 4, max: 6, unit: "g" });
+  assert.deepEqual(parseUsage("500mL/10a"), { min: 0.5, max: 0.5, unit: "mL" });
+  assert.deepEqual(parseUsage("1~2g/m2"), { min: 1, max: 2, unit: "g" });
+  assert.deepEqual(parseUsage("原液として3リットル/10a"), { min: 3, max: 3, unit: "mL" });
+  assert.deepEqual(parseUsage("100mL/10a(少量散布)"), { min: 0.1, max: 0.1, unit: "mL" });
+  assert.deepEqual(parseUsage("3~6kg/10a(3~6g/株)"), { min: 3, max: 6, unit: "g" });
+  for (const text of ["1000倍", "2g/株", "<圃場>1穴当り1mL", "原液", "", null]) {
+    assert.equal(parseUsage(text), null, text);
+  }
+  // リーフレタス 2 畝（36.8 ㎡ ずつ）に 6kg/10a → 441.6 g。912 g は超える
+  const row = { dilution_text: "6kg/10a" };
+  const groups = [{ area: 36.8, row }, { area: 36.8, row }];
+  const range = usageRange(groups);
+  assert.deepEqual([range.min.toFixed(1), range.max.toFixed(1), range.unit], ["441.6", "441.6", "g"]);
+  assert.deepEqual(usageWarnings({ amount: 912, unit: "g", groups }), ["使用量 912 g は、この面積の基準（441.6 g）を超えます"]);
+  assert.deepEqual(usageWarnings({ amount: 0.44, unit: "kg", groups }), []);
+  assert.deepEqual(usageWarnings({ amount: 700, unit: "g", groups: [{ area: 100, row: { dilution_text: "4~6kg/10a" } }] }), [
+    "使用量 700 g は、この面積の基準（400 g〜600 g）を超えます",
+  ]);
+  // 少なく使う分には言わない
+  assert.deepEqual(usageWarnings({ amount: 100, unit: "g", groups: [{ area: 100, row: { dilution_text: "4~6kg/10a" } }] }), []);
+  // 面積あたりでない基準や、g と mL の違いは比べない
+  assert.deepEqual(usageWarnings({ amount: 912, unit: "mL", groups }), []);
+  assert.equal(usageRange([{ area: 36.8, row }, { area: 10, row: { dilution_text: "1000倍" } }]), null);
+  assert.equal(formatAmount(1234, "g"), "1.2 kg");
 });
 
 test("初めの希釈倍率は、下限のうちいちばん大きいもの", () => {
