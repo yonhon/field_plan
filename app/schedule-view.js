@@ -19,7 +19,7 @@ import { cropLabel, plantingNumbers, summarize } from "./crops.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, logForWork, moveLogs, openLogEditor } from "./log-view.js";
-import { lateWorks, layoutBars, withActualDates, workActuals, workStatus } from "./logs.js";
+import { lateWorks, layoutBars, logEnd, withActualDates, workActuals, workStatus } from "./logs.js";
 import { loadPref, savePref } from "./prefs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
@@ -249,7 +249,13 @@ async function onWeekClick(event) {
     button.disabled = true;
     await completeWorks(works);
   } else if (button.dataset.week === "edit") {
-    openLogEditor(null, { works: works.filter((work) => !currentActuals().get(work.id)?.end) });
+    // 作業中の記録（まだ終わっていない、何日かにわたる記録）があれば、それを開いて続きを入れる
+    const going = (state().logs || []).find((log) => !log.finishes && log.targets.some((target) => works.some((work) => work.id === target.work_id)));
+    if (going) {
+      openLogEditor(going);
+    } else {
+      openLogEditor(null, { works: works.filter((work) => !currentActuals().get(work.id)?.end) });
+    }
   } else {
     const log = logForWork(works[0].id);
     if (log) {
@@ -345,15 +351,15 @@ export function actualSpans(ownerWorks, matchesTarget, actuals) {
     const actual = actuals.get(work.id);
     if (actual) {
       const ids = logs.filter((log) => log.targets.some((target) => target.work_id === work.id && matchesTarget(target))).map((log) => log.id);
-      spans.push({ type: work.work_type, start: actual.start, end: actual.end || actual.start, open: !actual.end, logs: ids });
+      spans.push({ type: work.work_type, start: actual.start, end: actual.end || actual.last || actual.start, open: !actual.end, logs: ids });
     }
   }
   const byDay = new Map();
   for (const log of logs) {
     if (log.targets.some((target) => !target.work_id && matchesTarget(target))) {
-      const key = `${log.work_type}|${log.date}`;
+      const key = `${log.work_type}|${log.date}|${logEnd(log)}`;
       if (!byDay.has(key)) {
-        byDay.set(key, { type: log.work_type, start: log.date, end: log.date, open: false, logs: [] });
+        byDay.set(key, { type: log.work_type, start: log.date, end: logEnd(log), open: false, logs: [] });
         spans.push(byDay.get(key));
       }
       byDay.get(key).logs.push(log.id);
@@ -622,7 +628,7 @@ function worksBlock(owner) {
       return "-";
     }
     if (!actual.end) {
-      return `${formatDay(actual.start)}〜`;
+      return actual.last > actual.start ? `${formatDay(actual.start)}〜${formatDay(actual.last)}（作業中）` : `${formatDay(actual.start)}〜`;
     }
     return actual.start === actual.end ? formatDay(actual.start) : `${formatDay(actual.start)}〜${formatDay(actual.end)}`;
   };

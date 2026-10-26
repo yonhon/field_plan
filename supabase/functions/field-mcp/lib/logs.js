@@ -97,21 +97,29 @@ export function targetChoices({ blocks, beds, plantings, works, crops = [], logs
   };
 }
 
-// 計画の作業の実績。記録から、開始（いちばん早い日）と終了（finishes の付いた記録のいちばん遅い日）を求める。
-// 返り値は 作業の ID → { start, end }。end が null なら、まだ終わっていない
+// 記録の終えた日。何日かかかった作業は end_date、1 日の作業（end_date が空）は date
+export const logEnd = (log) => (log.end_date && log.end_date > log.date ? log.end_date : log.date);
+
+// 計画の作業の実績。記録から、開始（いちばん早い日）と終了（finishes の付いた記録の、いちばん遅い終えた日）を求める。
+// 返り値は 作業の ID → { start, end, last }。end が null なら、まだ終わっていない。last は記録のいちばん遅い終えた日
+// （作業中の記録が何日まで進んだか）
 export function workActuals(logs) {
   const actuals = new Map();
   for (const log of logs) {
+    const end = logEnd(log);
     for (const target of log.targets || []) {
       if (!target.work_id) {
         continue;
       }
-      const actual = actuals.get(target.work_id) || { start: log.date, end: null };
+      const actual = actuals.get(target.work_id) || { start: log.date, end: null, last: end };
       if (log.date < actual.start) {
         actual.start = log.date;
       }
-      if (log.finishes && (!actual.end || log.date > actual.end)) {
-        actual.end = log.date;
+      if (end > actual.last) {
+        actual.last = end;
+      }
+      if (log.finishes && (!actual.end || end > actual.end)) {
+        actual.end = end;
       }
       actuals.set(target.work_id, actual);
     }
@@ -174,7 +182,9 @@ export function withActualDates(works, actuals) {
     if (!actual || work.cancelled_on) {
       return work;
     }
-    const end = actual.end || (work.plan_end && work.plan_end > actual.start ? work.plan_end : actual.start);
+    // 終わっていない作業は、計画の終了日か、記録が進んだ日の遅いほうまで続くとみなす
+    const going = actual.last && actual.last > actual.start ? actual.last : actual.start;
+    const end = actual.end || (work.plan_end && work.plan_end > going ? work.plan_end : going);
     return { ...work, plan_start: actual.start, plan_end: end };
   });
 }
@@ -395,7 +405,7 @@ export function firstHarvestDay(logs, plantingId, cropName) {
     for (const input of log.inputs || []) {
       const row = input.kind === "pesticide" && input.standard?.rows?.find((item) => item.crop_name === cropName);
       if (row?.preharvest_days) {
-        const day = addDays(log.date, row.preharvest_days);
+        const day = addDays(logEnd(log), row.preharvest_days);
         if (!first || day > first) {
           first = day;
         }

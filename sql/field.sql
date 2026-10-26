@@ -215,7 +215,7 @@ alter table field.fields add column if not exists active_plan_id uuid references
 create table if not exists field.work_logs (
   id uuid primary key default gen_random_uuid(),
   field_id uuid not null references field.fields (id) on delete cascade,
-  date date not null,                  -- 作業をした日。2 日がかりの作業は日ごとに 1 行
+  date date not null,                  -- 作業をした日（何日かかかった作業は、始めた日）
   work_type text not null references field.work_types (code),
   finishes boolean not null default false,  -- この記録で、つながる計画の作業を終えたか
   spec jsonb not null default '{}',    -- 実際の仕様（株間、条間など）。作業の種類ごとに項目が違う
@@ -224,6 +224,11 @@ create table if not exists field.work_logs (
 );
 
 create index if not exists work_logs_field_date_idx on field.work_logs (field_id, date);
+
+-- 何日かかかった作業の、終えた日（作業中なら、進んだ日）。1 日の作業は空。作業 1 回を記録 1 件にするため
+alter table field.work_logs add column if not exists end_date date;
+alter table field.work_logs drop constraint if exists work_logs_end_after_start;
+alter table field.work_logs add constraint work_logs_end_after_start check (end_date is null or end_date > date);
 
 -- 記録の対象。1 件の記録に畝（作付）を何本でも付ける。区画の作業では区画を付ける。
 -- つながる計画の作業は、作付ごとに違うので、ここに持つ。先が消えても記録は残り、label の名前で読める
@@ -269,13 +274,13 @@ as $$
 declare
   new_id uuid := coalesce((log ->> 'id')::uuid, gen_random_uuid());
 begin
-  insert into field.work_logs (id, field_id, date, work_type, finishes, spec, note)
+  insert into field.work_logs (id, field_id, date, end_date, work_type, finishes, spec, note)
   values (
-    new_id, (log ->> 'field_id')::uuid, (log ->> 'date')::date, log ->> 'work_type',
+    new_id, (log ->> 'field_id')::uuid, (log ->> 'date')::date, nullif(log ->> 'end_date', '')::date, log ->> 'work_type',
     coalesce((log ->> 'finishes')::boolean, false), coalesce(log -> 'spec', '{}'::jsonb), coalesce(log ->> 'note', '')
   )
   on conflict (id) do update set
-    date = excluded.date, work_type = excluded.work_type, finishes = excluded.finishes,
+    date = excluded.date, end_date = excluded.end_date, work_type = excluded.work_type, finishes = excluded.finishes,
     spec = excluded.spec, note = excluded.note;
 
   delete from field.work_log_targets where log_id = new_id;

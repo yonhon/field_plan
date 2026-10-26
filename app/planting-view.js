@@ -3,7 +3,7 @@
 import { confirmAction, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { openLogEditor, uncancelWork } from "./log-view.js";
-import { bedAreas, compressedAxis, dayGap, firstHarvestDay, inputText, plantingStart, shiftAfterActual, specDiff, specText, usageTable } from "./logs.js";
+import { bedAreas, compressedAxis, dayGap, firstHarvestDay, inputText, logEnd, plantingStart, shiftAfterActual, specDiff, specText, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, localToday } from "./schedule.js";
 import { ICON_LABELS, accumulate, addTwoWeek, fetchStations, parseForecast, weatherIcon } from "./weather.js";
@@ -517,7 +517,7 @@ function tableHtml(c, mode, actuals, logs) {
   if (showActual) {
     for (const log of logs) {
       if (log.targets.some((item) => !item.work_id && c.matches(item))) {
-        entries.push({ log, key: log.date, end: log.date });
+        entries.push({ log, key: log.date, end: logEnd(log) });
       }
     }
   }
@@ -544,8 +544,9 @@ function tableHtml(c, mode, actuals, logs) {
     if (entry.end && entry.end !== "9999-12-31" && (!previousEnd || entry.end > previousEnd)) {
       previousEnd = entry.end;
     }
-    // 気温・降水量は、記録の日（つながる記録が複数あれば最後の日）の値
-    const date = entry.log ? entry.log.date : entry.linked?.at(-1)?.date || null;
+    // 気温・降水量は、作業を終えた日（つながる記録が複数あれば最後の記録の終えた日）の値
+    const last = entry.log || entry.linked?.at(-1);
+    const date = last ? logEnd(last) : null;
     rows.push((entry.work ? workRow(c, entry, mode, today) : logRow(entry.log, mode)).replace("</tr>", `${showWeather ? wxCell(date) : ""}</tr>`));
   }
   return `<div class="table-scroll"><table class="work-table detail-table"><thead>${head}</thead><tbody>${rows.join("")}</tbody></table></div>`;
@@ -559,7 +560,8 @@ function logLines(log) {
 }
 
 function logLink(log) {
-  return `<a href="#" data-log="${log.id}">${formatDay(log.date)}</a>${log.finishes ? '<span class="log-done">完了</span>' : ""}`;
+  const days = logEnd(log) > log.date ? `${formatDay(log.date)}〜${formatDay(logEnd(log))}` : formatDay(log.date);
+  return `<a href="#" data-log="${log.id}">${days}</a>${log.finishes ? '<span class="log-done">完了</span>' : ""}`;
 }
 
 function workRow(c, { work, linked, actual }, mode, today) {
@@ -584,6 +586,7 @@ function workRow(c, { work, linked, actual }, mode, today) {
         linked
           .map((log) => `${logLink(log)}${logLines(log).map((line) => `<br><span class="detail-line">${escapeHtml(line)}</span>`).join("")}`)
           .join("<br>") +
+        (actual && !actual.end ? '<br><span class="log-going">作業中</span>' : "") +
         "</td>";
     } else if (work.plan_end && work.plan_end < today) {
       actualCell = '<td><span class="detail-badge is-missing">未実施</span></td>';

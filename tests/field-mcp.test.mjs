@@ -305,6 +305,19 @@ test("get_records: 記録を新しい順に、絞り込みと、取りやめた�
   assert.deepEqual((await call("get_records", { field: "別の圃場" })).data.records, []);
 });
 
+test("get_records: 何日かにわたる記録は、始めた日と終えた日。期間にかかれば返す", async () => {
+  // 灌水を 4/25〜4/27 の 1 件にする
+  const data = { ...DATA, workLogs: DATA.workLogs.map((log) => (log.id === "l3" ? { ...log, end_date: "2027-04-27" } : log)) };
+  const { inField, call } = setup({ data });
+  const water = (await inField("get_records", { work: "灌水" })).data.records[0];
+  assert.deepEqual([water.date, water.end_date, water.days], ["2027-04-25", "2027-04-27", 3]);
+  // 4/26〜4/30 の期間には、4/25 に始めた記録もかかる
+  assert.deepEqual((await inField("get_records", { from: "2027-04-26", to: "2027-04-30" })).data.records.map((item) => item.work), ["灌水"]);
+  assert.equal((await call("list_fields")).data.fields[0].last_record, "2027-04-27");
+  // 1 日の記録には end_date を付けない
+  assert.equal((await inField("get_records", { work: "防除" })).data.records[0].end_date, undefined);
+});
+
 test("get_pesticide_usage: 作付ごとの使用回数と上限", async () => {
   const { inField, call } = setup();
   const usage = (await inField("get_pesticide_usage")).data;

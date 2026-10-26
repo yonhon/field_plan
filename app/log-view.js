@@ -1,9 +1,9 @@
 // 作業の記録の画面。日程の画面の「最近の記録」の欄と「記録する」のボタン、記録を入れる窓。
 // 記録は、実際に使うプランの区画・畝・作付・作業につなぐ。計画はスマホでは直せないが、記録はスマホでも入れられる。
-import { WORK_COLORS, addDays, localToday } from "./schedule.js";
+import { WORK_COLORS, addDays, diffDays, localToday } from "./schedule.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { SPEC_FIELDS, formatAmount, inputText, matchWork, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
+import { SPEC_FIELDS, formatAmount, inputText, logEnd, matchWork, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
 
 const $ = (id) => document.getElementById(id);
@@ -36,6 +36,9 @@ function formatDay(iso) {
   return `${month}/${day}（${WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()]}）`;
 }
 
+// 記録の日。何日かかかった作業は「10/15（木）〜10/17（土）」
+export const logDays = (log) => (logEnd(log) > log.date ? `${formatDay(log.date)}〜${formatDay(logEnd(log))}` : formatDay(log.date));
+
 const activePlan = () => state().plans.find((plan) => plan.id === state().field.active_plan_id) || null;
 
 // ---- 最近の記録 ----
@@ -62,7 +65,7 @@ export function renderLogs() {
         .map((log) => {
           const details = [targetSummary(log.targets || []), ...(log.inputs || []).map(inputText), log.note].filter(Boolean).join(" / ");
           return (
-            `<li data-log="${log.id}"><span class="week-date">${formatDay(log.date)}</span>` +
+            `<li data-log="${log.id}"><span class="week-date">${logDays(log)}</span>` +
             `<span class="week-work"><span class="swatch" style="background:${WORK_COLORS[log.work_type] || "#888"}"></span>` +
             `${escapeHtml(typeLabel(log.work_type))}${log.finishes ? '<span class="log-done">完了</span>' : ""}</span>` +
             `<span class="muted">${escapeHtml(details)}</span></li>`
@@ -137,10 +140,8 @@ export async function completeWorks(works) {
   const base = { field_id: state().field.id, work_type: works[0].work_type, spec: {}, note: "", inputs: [] };
   ctx.setStatus("記録を保存中…");
   try {
-    if (start < end) {
-      await state().store.saveLog({ ...base, date: start, finishes: false, targets });
-    }
-    await state().store.saveLog({ ...base, date: end, finishes: true, targets });
+    // 何日かかかった作業も、記録は 1 件（開始日と終えた日）
+    await state().store.saveLog({ ...base, date: start, end_date: start < end ? end : null, finishes: true, targets });
     await reload();
     ctx.setStatus(`${typeLabel(works[0].work_type)}を、計画どおり（${start === end ? formatDay(end) : `${formatDay(start)}〜${formatDay(end)}`}）に完了にしました`);
   } catch (error) {
@@ -189,21 +190,22 @@ export async function moveLogs(logIds, days, matches, rowName) {
   if (!scope) {
     return false;
   }
-  const fields = (log) => ({ id: log.id, field_id: log.field_id, date: log.date, work_type: log.work_type, finishes: log.finishes, spec: log.spec, note: log.note });
+  const fields = (log) => ({ id: log.id, field_id: log.field_id, date: log.date, end_date: log.end_date || null, work_type: log.work_type, finishes: log.finishes, spec: log.spec, note: log.note });
   const strip = ({ id, log_id, ...rest }) => rest;
   ctx.setStatus("記録の日付を動かしています…");
   try {
     for (const log of logs) {
       const date = addDays(log.date, days);
+      const end_date = log.end_date ? addDays(log.end_date, days) : null;
       const mine = log.targets.filter(matches);
       const rest = log.targets.filter((target) => !matches(target));
       if (scope === "all" || !rest.length) {
-        await state().store.saveLog({ ...fields(log), date, targets: log.targets, inputs: log.inputs || [] });
+        await state().store.saveLog({ ...fields(log), date, end_date, targets: log.targets, inputs: log.inputs || [] });
       } else {
         // 残す畝の記録と、動かす畝の記録に分ける
         await state().store.saveLog({ ...fields(log), targets: rest, inputs: log.inputs || [] });
         const { id, ...copy } = fields(log);
-        await state().store.saveLog({ ...copy, date, targets: mine.map(strip), inputs: (log.inputs || []).map(strip) });
+        await state().store.saveLog({ ...copy, date, end_date, targets: mine.map(strip), inputs: (log.inputs || []).map(strip) });
       }
     }
     await reload();
@@ -233,8 +235,10 @@ export async function openLogEditor(log = null, preset = {}) {
   const type = log?.work_type || presetWorks[0]?.work_type || "";
   draft = {
     id: log?.id || null,
-    // 計画の作業から開いたときは、計画の日（「この日で終わり」に印が付くので、終了日）。それ以外は今日
-    date: log?.date || presetWorks[0]?.plan_end || presetWorks[0]?.plan_start || localToday(),
+    // 計画の作業から開いたときは、計画の開始日と終了日（「この日で終わり」に印が付く）。それ以外は今日
+    date: log?.date || presetWorks[0]?.plan_start || presetWorks[0]?.plan_end || localToday(),
+    // 何日かかかった作業の、終えた日（作業中なら、進んだ日）。1 日の作業は空
+    end_date: log ? log.end_date || "" : presetWorks[0]?.plan_end && presetWorks[0].plan_end > (presetWorks[0].plan_start || "") ? presetWorks[0].plan_end : "",
     work_type: type,
     finishes: log ? log.finishes : true,
     spec: { ...(log?.spec || {}) },
@@ -365,6 +369,14 @@ function renderDialog() {
     `<p class="muted">プラン「${escapeHtml(plan?.name || "")}」の畝につなぎます。</p>` +
     `<label>作業をした日<span class="log-date"><input type="date" data-f="date" value="${draft.date}" required />` +
     `<button type="button" class="chip-btn" data-act="today">本日</button></span></label>` +
+    `<label>終えた日（何日かかったときだけ）<span class="log-date"><input type="date" data-f="end_date" value="${draft.end_date}" min="${draft.date}" />` +
+    (draft.end_date
+      ? '<button type="button" class="chip-btn" data-act="oneDay">1 日の作業</button>'
+      : localToday() > draft.date
+        ? '<button type="button" class="chip-btn" data-act="todayEnd">本日</button>'
+        : "") +
+    `</span></label>` +
+    `<p class="muted log-date-note">${draft.end_date ? `${formatDay(draft.date)}〜${formatDay(draft.end_date)}（${diffDays(draft.date, draft.end_date) + 1} 日）の作業として、1 件の記録にします。作業の途中なら、ここまで進んだ日を入れておき、終わったら直します。` : "1 日の作業です。何日かかかったときは、終えた日を入れます。"}</p>` +
     typeSection() +
     targetSection(choices, area) +
     specSection() +
@@ -730,6 +742,12 @@ function onClick(event) {
     dialog.close();
   } else if (act === "today") {
     setDate(localToday());
+  } else if (act === "todayEnd") {
+    draft.end_date = localToday() > draft.date ? localToday() : "";
+    renderDialog();
+  } else if (act === "oneDay") {
+    draft.end_date = "";
+    renderDialog();
   } else if (act === "type") {
     setType(button.dataset.code);
   } else if (act === "mode") {
@@ -850,6 +868,9 @@ export async function uncancelWork(work) {
 // 一覧にない対象になっていた畝や区画も、その日の一覧にあれば、選んだ畝（区画）に戻す
 function setDate(date) {
   draft.date = date;
+  if (draft.end_date && draft.end_date <= date) {
+    draft.end_date = "";
+  }
   const choices = currentChoices();
   const beds = new Set(choices.crops.flatMap((group) => group.items.map((item) => item.bed_id)));
   const blocks = new Set(choices.blocks.map((item) => item.block_id));
@@ -876,6 +897,9 @@ function onChange(event) {
     if (el.value) {
       setDate(el.value);
     }
+  } else if (el.dataset.f === "end_date") {
+    draft.end_date = el.value && el.value > draft.date ? el.value : "";
+    renderDialog();
   } else if (el.dataset.f === "typeOther") {
     if (el.value) {
       setType(el.value);
@@ -1030,6 +1054,7 @@ function buildLog() {
       ...(draft.id ? { id: draft.id } : {}),
       field_id: state().field.id,
       date: draft.date,
+      end_date: draft.end_date && draft.end_date > draft.date ? draft.end_date : null,
       work_type: draft.work_type,
       finishes: linked && draft.finishes,
       spec,
@@ -1087,7 +1112,7 @@ async function remove() {
   if (!log) {
     return;
   }
-  const ok = await confirmDelete("この記録を削除します。", `${formatDay(log.date)} ${typeLabel(log.work_type)}（${targetSummary(log.targets)}）`);
+  const ok = await confirmDelete("この記録を削除します。", `${logDays(log)} ${typeLabel(log.work_type)}（${targetSummary(log.targets)}）`);
   if (!ok) {
     return;
   }

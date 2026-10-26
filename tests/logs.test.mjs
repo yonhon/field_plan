@@ -12,6 +12,7 @@ import {
   usageRange,
   usageWarnings,
   lateWorks,
+  logEnd,
   matchWork,
   pesticideCounts,
   previousChoice,
@@ -120,9 +121,25 @@ const log = (id, date, workId, finishes = false) => ({ id, date, finishes, targe
 
 test("計画の作業の実績は、最初の記録の日と、終わりの印の付いた記録の日", () => {
   const actuals = workActuals([log("l1", "2026-03-11", "w2", true), log("l2", "2026-03-10", "w2"), log("l3", "2026-03-13", "w5")]);
-  assert.deepEqual(actuals.get("w2"), { start: "2026-03-10", end: "2026-03-11" });
-  assert.deepEqual(actuals.get("w5"), { start: "2026-03-13", end: null });
+  assert.deepEqual(actuals.get("w2"), { start: "2026-03-10", end: "2026-03-11", last: "2026-03-11" });
+  assert.deepEqual(actuals.get("w5"), { start: "2026-03-13", end: null, last: "2026-03-13" });
   assert.equal(actuals.has("w1"), false);
+});
+
+test("何日かにわたる記録は、1 件で始めた日と終えた日を持つ", () => {
+  // 3/10〜3/12 の 1 件で終えた作業
+  const done = workActuals([{ ...log("l1", "2026-03-10", "w2", true), end_date: "2026-03-12" }]);
+  assert.deepEqual(done.get("w2"), { start: "2026-03-10", end: "2026-03-12", last: "2026-03-12" });
+  // 作業中（3/13 に始めて 3/15 まで進んだ。まだ終わっていない）
+  const going = workActuals([{ ...log("l2", "2026-03-13", "w5"), end_date: "2026-03-15" }]);
+  assert.deepEqual(going.get("w5"), { start: "2026-03-13", end: null, last: "2026-03-15" });
+  // 工程の無理を見るときは、計画の終了日か、進んだ日の遅いほうまで続くとみなす
+  const [moved] = withActualDates([{ id: "w5", plan_start: "2026-03-12", plan_end: "2026-03-14" }], going);
+  assert.deepEqual([moved.plan_start, moved.plan_end], ["2026-03-13", "2026-03-15"]);
+  // 終えた日が空、または始めた日と同じなら 1 日の作業
+  assert.equal(logEnd({ date: "2026-03-10", end_date: null }), "2026-03-10");
+  assert.equal(logEnd({ date: "2026-03-10", end_date: "2026-03-10" }), "2026-03-10");
+  assert.equal(logEnd({ date: "2026-03-10", end_date: "2026-03-12" }), "2026-03-12");
 });
 
 test("記録につなぐのは、同じ種類で、取りやめておらず、まだ終わっていない最初の作業", () => {

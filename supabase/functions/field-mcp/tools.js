@@ -3,7 +3,7 @@
 // 面積、苗数、肥料の量、日程の無理、農薬の使用回数は、画面と同じ部品（lib/）で計算する。
 import { plantingNumbers, summarize, cropLabel } from "./lib/crops.js";
 import { polygonArea, rectSize } from "./lib/geometry.js";
-import { firstHarvestDay, inputText, specText, usageTable } from "./lib/logs.js";
+import { firstHarvestDay, inputText, logEnd, specText, usageTable } from "./lib/logs.js";
 import { harvestEnd, planProblems, worksRange } from "./lib/schedule.js";
 
 class ToolInputError extends Error {}
@@ -140,7 +140,7 @@ export const TOOLS = [
             active_plan: data.plans.find((plan) => plan.id === field.active_plan_id)?.name || null,
             last_change: last ? { date: last.day, no: `#${last.no}` } : null,
             records: logs.length,
-            last_record: logs.map((log) => log.date).sort().at(-1) || null,
+            last_record: logs.map(logEnd).sort().at(-1) || null,
           };
         }),
         note: "active_plan は「実際に使うプラン」。作業の記録は、このプランの区画と畝につないでいます。",
@@ -413,7 +413,8 @@ export const TOOLS = [
       const part = active ? scope(data, active) : null;
       const typeLabel = (code) => data.workTypes.find((type) => type.code === code)?.label || code;
       const records = data.workLogs
-        .filter((log) => (!from || log.date >= from) && (!to || log.date <= to) && matchText(typeLabel(log.work_type), args.work))
+        // 期間にかかる記録（何日かにわたる記録は、終えた日が from 以降で、始めた日が to 以前）
+        .filter((log) => (!from || logEnd(log) >= from) && (!to || log.date <= to) && matchText(typeLabel(log.work_type), args.work))
         .map((log) => ({ log, targets: (log.targets || []).filter((target) => matchText(target.crop_name, args.crop) && matchText(target.label, args.place)) }))
         .filter((item) => item.targets.length)
         .sort((a, b) => b.log.date.localeCompare(a.log.date) || String(b.log.created_at).localeCompare(String(a.log.created_at)));
@@ -445,6 +446,7 @@ export const TOOLS = [
           const linked = targets.some((target) => plannedOf(target));
           return {
             date: log.date,
+            ...(logEnd(log) > log.date ? { end_date: logEnd(log), days: Math.round((Date.parse(logEnd(log)) - Date.parse(log.date)) / 86400000) + 1 } : {}),
             work: typeLabel(log.work_type),
             places: [...targets]
               .sort((a, b) => a.label.localeCompare(b.label, "ja", { numeric: true }))
@@ -476,7 +478,7 @@ export const TOOLS = [
         ...(records.length > shown.length ? { more_records: records.length - shown.length, hint: "from と to で期間を絞ると、残りの記録を読めます。" } : {}),
         cancelled_works: cancelled,
         note:
-          "places の place は、記録した時点の名前です。planned は、その畝で、この記録がつながる計画の作業の予定日です（計画にない作業にはありません）。completes_planned_work が true なら、つながる計画の作業をこの記録で終えています。other_places は、同じ記録のうち、絞り込みに合わなかった畝の数です。2 日以上かかった作業は、日ごとに 1 件ずつ記録しています。cancelled_works は、取りやめた計画の作業です。",
+          "places の place は、記録した時点の名前です。planned は、その畝で、この記録がつながる計画の作業の予定日です（計画にない作業にはありません）。completes_planned_work が true なら、つながる計画の作業をこの記録で終えています。other_places は、同じ記録のうち、絞り込みに合わなかった畝の数です。何日かかかった作業は 1 件の記録で、date が始めた日、end_date が終えた日（days は日数）です。completes_planned_work が false で end_date がある記録は、作業の途中で、end_date まで進んだことを表します。以前は日ごとに 1 件ずつ記録していたので、古い記録には同じ作業が日ごとに並ぶことがあります。cancelled_works は、取りやめた計画の作業です。",
       };
     },
   },
@@ -520,7 +522,7 @@ export const TOOLS = [
             crop: planting.crop_name || "品目なし",
             sprays: [...sprays]
               .sort((a, b) => a.date.localeCompare(b.date))
-              .map((log) => ({ date: log.date, products: (log.inputs || []).filter((input) => input.kind === "pesticide").map(inputText) })),
+              .map((log) => ({ date: log.date, ...(logEnd(log) > log.date ? { end_date: logEnd(log) } : {}), products: (log.inputs || []).filter((input) => input.kind === "pesticide").map(inputText) })),
             ingredients: table.ingredients.map((item) => ({
               name: item.name,
               count: item.count,
