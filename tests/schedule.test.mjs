@@ -3,6 +3,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_WORK_TYPES as types,
+  MANAGEMENT_TYPES,
+  isManagement,
+  workName,
   TEMPLATES,
   addDays,
   diffDays,
@@ -99,6 +102,28 @@ function plan({ ridge = "2027-07-06", removed_on = null } = {}) {
 
 test("無理のないプランには、指摘がない", () => {
   assert.deepEqual(planProblems(plan()), []);
+});
+
+test("管理作業の計画は、ほかの作業と重なっても指摘しない", () => {
+  const base = plan();
+  const plant = base.works.find((work) => work.work_type === "plant");
+  // 定植と同じ日の灌水、定植より前の防除、区画の作業と重なる除草
+  const extra = [
+    { id: "m1", planting_id: "p1", block_id: null, work_type: "water", seq: 90, plan_start: plant.plan_start, plan_end: plant.plan_end },
+    { id: "m2", planting_id: "p1", block_id: null, work_type: "spray", seq: 91, plan_start: "2027-06-01", plan_end: "2027-06-01" },
+    { id: "m3", planting_id: null, block_id: "b1", work_type: "weed", seq: 92, plan_start: "2027-05-01", plan_end: "2027-05-03" },
+  ];
+  assert.deepEqual(planProblems({ ...base, works: [...base.works, ...extra] }), []);
+});
+
+test("作業の名前に、株の手入れとその他の中身を添える", () => {
+  assert.equal(workName("株の手入れ", { items: ["摘葉", "誘引"] }), "株の手入れ（摘葉・誘引）");
+  assert.equal(workName("その他", { items: ["発芽確認"] }), "その他（発芽確認）");
+  assert.equal(workName("その他", { items: ["その他"], other: "支柱の撤去" }), "その他（支柱の撤去）");
+  assert.equal(workName("防除", {}), "防除");
+  assert.equal(workName("防除", undefined), "防除");
+  assert.deepEqual(MANAGEMENT_TYPES.map(isManagement), MANAGEMENT_TYPES.map(() => true));
+  assert.equal(isManagement("plant"), false);
 });
 
 test("区画の作業と、畝の最初の作業のつながり", () => {

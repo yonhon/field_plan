@@ -18,18 +18,34 @@ export const DEFAULT_WORK_TYPES = [
   { code: "harvest", label: "収穫", sort: 120, default_days: 30, min_gap_days: 0, scope: "bed" },
   { code: "residue", label: "残渣処理", sort: 130, default_days: 1, min_gap_days: 0, scope: "bed" },
   { code: "nursery_sow", label: "育苗の播種", sort: 85, default_days: 1, min_gap_days: 0, scope: "bed" },
-  // ここから下は記録だけに使う（計画には置かない）
-  { code: "water", label: "灌水", sort: 200, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
-  { code: "check", label: "発芽確認", sort: 210, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  // ここから下は管理作業（plannable が false）。計画も実績も、入力の窓で入れる（「作業の計画」の表には出さない）
+  { code: "spray", label: "防除", sort: 200, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "topdress", label: "追肥", sort: 210, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
   { code: "weed", label: "除草", sort: 220, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
-  { code: "spray", label: "防除", sort: 230, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
-  { code: "topdress", label: "追肥", sort: 240, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
-  { code: "install", label: "資材の設置", sort: 250, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
-  { code: "other", label: "その他", sort: 260, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "water", label: "灌水", sort: 230, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "care", label: "株の手入れ", sort: 240, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
+  { code: "other", label: "その他", sort: 250, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false },
 ].sort((a, b) => a.sort - b.sort);
 
-// 計画に置ける作業の種類か。DB の plannable が false のものは記録だけに使う
+// 工程の作業か（「作業の計画」の表で計画を入れ、順番の確認と並べ直しの対象）。
+// DB の plannable が false のものは管理作業（防除、追肥など。繰り返し、ほかの作業と重なってよい）
 export const isPlannable = (type) => type.plannable !== false;
+
+// 管理作業の種類。DB の作業の種類を読めないところ（計画の作業の行だけを見るところ）でも決められるよう、名前で持つ
+export const MANAGEMENT_TYPES = ["spray", "topdress", "weed", "water", "care", "other"];
+export const isManagement = (code) => MANAGEMENT_TYPES.includes(code);
+
+// 株の手入れとその他の中身（複数選べる）。その他の「その他」は、何をしたかを文字で入れる
+export const WORK_ITEMS = {
+  care: ["間引き", "摘葉", "摘心", "芽かき", "誘引", "摘果", "摘花", "土寄せ"],
+  other: ["発芽確認", "資材の設置", "資材の撤去", "その他"],
+};
+
+// 作業の名前に中身を添える。例: 株の手入れ（摘葉・誘引）、その他（支柱の撤去）
+export function workName(label, spec = {}) {
+  const items = (spec?.items || []).map((item) => (item === "その他" && spec.other ? spec.other : item)).filter(Boolean);
+  return items.length ? `${label}（${items.join("・")}）` : label;
+}
 
 // 工程のひな形。区画は畝立ての前まで（「両方」は学校で習った順序）、畝は畝立てから収穫と残渣処理まで
 export const TEMPLATES = {
@@ -64,11 +80,10 @@ export const WORK_COLORS = {
   residue: "#6d4c41",
   nursery_sow: "#7cb342",
   water: "#3b82c4",
-  check: "#8d8a1e",
   weed: "#558b2f",
   spray: "#b3261e",
   topdress: "#8e24aa",
-  install: "#78909c",
+  care: "#c0862a",
   other: "#90a4ae",
 };
 
@@ -238,7 +253,9 @@ export function sequenceProblems(works, workTypes) {
 // プラン全体から、日程の無理を探す。
 // 並びの無理に加えて、区画の作業と畝の作業のつながり、作付どうしの重なり、区画や畝がある期間とのずれを見る。
 // 戻り値は { block_id または planting_id, work_id（特定の作業でなければ null）, message }
-export function planProblems({ blocks, beds, plantings, works, workTypes, crops = [] }) {
+export function planProblems({ blocks, beds, plantings, works: allWorks, workTypes, crops = [] }) {
+  // 管理作業は、順番の確認の対象にしない（繰り返し、ほかの作業と重なってよい）
+  const works = allWorks.filter((work) => !isManagement(work.work_type));
   const types = typeMap(workTypes);
   const label = (work) => types.get(work.work_type)?.label || work.work_type;
   const bySeq = (a, b) => a.seq - b.seq;

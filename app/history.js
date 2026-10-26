@@ -163,7 +163,7 @@ async function step(from, to, label) {
     // 別のプランの写しには戻さない（そのプランの中身を消してしまう）
     if (planOf(target) !== planOf(current)) {
       from.length = 0;
-      throw new Error("別のプランの記録なので、戻しません");
+      throw new Error("別のプランの変更なので、戻しません");
     }
     const removed = removedRows(current, target);
     if (needsConfirm(removed)) {

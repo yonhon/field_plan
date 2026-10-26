@@ -1,9 +1,9 @@
 // 作業の記録の画面。日程の画面の「最近の記録」の欄と「記録する」のボタン、記録を入れる窓。
 // 記録は、実際に使うプランの区画・畝・作付・作業につなぐ。計画はスマホでは直せないが、記録はスマホでも入れられる。
-import { WORK_COLORS, addDays, diffDays, localToday } from "./schedule.js";
+import { WORK_COLORS, WORK_ITEMS, addDays, diffDays, isManagement, localToday, workName } from "./schedule.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { SPEC_FIELDS, formatAmount, inputText, logEnd, matchWork, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
+import { SPEC_FIELDS, formatAmount, inputText, logEnd, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
 
 const $ = (id) => document.getElementById(id);
@@ -12,7 +12,8 @@ const escapeHtml = (text) =>
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 const RECENT = 5; // 「最近の記録」に出す件数
-const QUICK_TYPES = ["water", "spray", "weed", "plant", "topdress"]; // 大きめのボタンで並べる種類
+const QUICK_TYPES = ["spray", "topdress", "weed", "water", "care", "plant"]; // 大きめのボタンで並べる種類
+const COPY_DAYS = 7; // 計画の「コピーして足す」の初めの日数
 const METHODS = ["散布", "土壌混和", "種子・種球の浸漬", "株元散布", "灌注", "その他"];
 const FERTILIZER_TYPES = new Set(["amend", "topdress"]);
 
@@ -49,14 +50,14 @@ export function renderLogs() {
   }
   const logs = state().logs || [];
   const shown = showAll ? logs : logs.slice(0, RECENT);
-  $("logTitle").textContent = showAll ? `記録（${logs.length} 件）` : "最近の記録";
+  $("logTitle").textContent = showAll ? `実績（${logs.length} 件）` : "最近の実績";
   $("logToggle").hidden = logs.length <= RECENT;
   $("logToggle").textContent = showAll ? "最近だけ" : "すべて";
   const active = activePlan();
   const note = !active
-    ? "記録を入れるには、圃場図の「プラン」の欄で、実際に使うプランを決めてください。"
+    ? "実績や管理作業の計画を入力するには、圃場図の「プラン」の欄で、実際に使うプランを決めてください。"
     : active.id !== state().plan.id
-      ? `記録は、実際に使うプラン「${active.name}」の畝につなぎます（いま開いているのはプラン「${state().plan.name}」です）。`
+      ? `実績と管理作業の計画は、実際に使うプラン「${active.name}」の畝に入力します（いま開いているのはプラン「${state().plan.name}」です）。`
       : "";
   $("logNote").textContent = note;
   $("logNote").hidden = !note;
@@ -67,19 +68,19 @@ export function renderLogs() {
           return (
             `<li data-log="${log.id}"><span class="week-date">${logDays(log)}</span>` +
             `<span class="week-work"><span class="swatch" style="background:${WORK_COLORS[log.work_type] || "#888"}"></span>` +
-            `${escapeHtml(typeLabel(log.work_type))}${log.finishes ? '<span class="log-done">完了</span>' : ""}</span>` +
+            `${escapeHtml(workName(typeLabel(log.work_type), log.spec))}${log.finishes ? '<span class="log-done">完了</span>' : ""}</span>` +
             `<span class="muted">${escapeHtml(details)}</span></li>`
           );
         })
         .join("")
-    : '<li class="muted">まだ記録はありません</li>';
+    : '<li class="muted">まだ実績はありません</li>';
 }
 
 // ---- 記録を入れる窓 ----
 
 async function loadData() {
   if (!state().field.active_plan_id) {
-    notify("記録を入れるには、先に圃場図の「プラン」の欄で、実際に使うプランを決めてください。");
+    notify("実績や管理作業の計画を入力するには、先に圃場図の「プラン」の欄で、実際に使うプランを決めてください。");
     return false;
   }
   try {
@@ -137,8 +138,9 @@ export async function completeWorks(works) {
       spray_l: null,
     };
   });
-  const base = { field_id: state().field.id, work_type: works[0].work_type, spec: {}, note: "", inputs: [] };
-  ctx.setStatus("記録を保存中…");
+  // 管理作業の計画なら、予定の中身（株の手入れ・その他の中身など）を実績にも入れる
+  const base = { field_id: state().field.id, work_type: works[0].work_type, spec: { ...(works[0].detail?.spec || {}) }, note: "", inputs: [] };
+  ctx.setStatus("実績を入力しています…");
   try {
     // 何日かかかった作業も、記録は 1 件（開始日と終えた日）
     await state().store.saveLog({ ...base, date: start, end_date: start < end ? end : null, finishes: true, targets });
@@ -146,7 +148,7 @@ export async function completeWorks(works) {
     ctx.setStatus(`${typeLabel(works[0].work_type)}を、計画どおり（${start === end ? formatDay(end) : `${formatDay(start)}〜${formatDay(end)}`}）に完了にしました`);
   } catch (error) {
     ctx.setStatus("");
-    notify(`記録を保存できませんでした: ${error.message}`);
+    notify(`実績を入力できませんでした: ${error.message}`);
   }
 }
 
@@ -158,9 +160,9 @@ function chooseScope(rowName, others) {
     '<p class="notice-text"></p><div class="row">' +
     '<button class="primary-btn" data-scope="one"></button><button class="chip-btn" data-scope="all"></button>' +
     '<button class="text-btn" data-scope="">キャンセル</button></div>';
-  box.querySelector(".notice-text").textContent = `この記録は、ほかの ${others} か所の畝（区画）にも付いています。どこまで日付を動かしますか。`;
+  box.querySelector(".notice-text").textContent = `この実績は、ほかの ${others} か所の畝（区画）にも付いています。どこまで日付を動かしますか。`;
   box.querySelector('[data-scope="one"]').textContent = `${rowName}だけ動かす`;
-  box.querySelector('[data-scope="all"]').textContent = `記録ごと動かす（${others + 1} か所）`;
+  box.querySelector('[data-scope="all"]').textContent = `実績ごと動かす（${others + 1} か所）`;
   document.body.append(box);
   return new Promise((resolve) => {
     box.addEventListener("click", (event) => {
@@ -192,7 +194,7 @@ export async function moveLogs(logIds, days, matches, rowName) {
   }
   const fields = (log) => ({ id: log.id, field_id: log.field_id, date: log.date, end_date: log.end_date || null, work_type: log.work_type, finishes: log.finishes, spec: log.spec, note: log.note });
   const strip = ({ id, log_id, ...rest }) => rest;
-  ctx.setStatus("記録の日付を動かしています…");
+  ctx.setStatus("実績の日付を動かしています…");
   try {
     for (const log of logs) {
       const date = addDays(log.date, days);
@@ -209,11 +211,11 @@ export async function moveLogs(logIds, days, matches, rowName) {
       }
     }
     await reload();
-    ctx.setStatus(`記録の日付を ${Math.abs(days)} 日${days > 0 ? "後ろ" : "前"}へ動かしました`);
+    ctx.setStatus(`実績の日付を ${Math.abs(days)} 日${days > 0 ? "後ろ" : "前"}へ動かしました`);
     return true;
   } catch (error) {
     ctx.setStatus("");
-    notify(`記録の日付を動かせませんでした: ${error.message}`);
+    notify(`実績の日付を動かせませんでした: ${error.message}`);
     await reload().catch(() => {});
     return false;
   }
@@ -232,17 +234,35 @@ export async function openLogEditor(log = null, preset = {}) {
     return;
   }
   const presetWorks = !log && preset.works?.length ? preset.works : [];
-  const type = log?.work_type || presetWorks[0]?.work_type || "";
+  // 管理作業の計画を直すときは、一緒に入力した計画（まとまり）ごと開く
+  // 計画の行は、読み込んだ実際に使うプランのものに置き換える（開いているプランが違うときに、古い行を直さないように）
+  const planWork = !log && preset.planWork ? data.works.find((work) => work.id === preset.planWork.id) || null : null;
+  if (preset.planWork && !planWork) {
+    notify("管理作業の計画は、実際に使うプランのものだけを直せます。");
+    return;
+  }
+  const planWorks = planWork ? (planWork.batch_id ? data.works.filter((work) => work.batch_id === planWork.batch_id) : [planWork]) : [];
+  const source = planWork || presetWorks[0] || null; // 予定の中身（detail）を入れる元の計画
+  const type = log?.work_type || source?.work_type || "";
   draft = {
     id: log?.id || null,
+    // plan は管理作業の計画、actual は実績。「入力する」のボタンから開いたときだけ、窓の上で切り替えられる
+    kind: planWork || preset.plan ? "plan" : "actual",
+    switchable: !log && !planWork && !presetWorks.length,
+    planWork,
+    planWorks,
+    onlyThis: false, // 計画を直すとき、この畝だけ直すか（一緒に入力した全部か）
+    copyDays: COPY_DAYS,
+    // 実績がつながる計画の作業（5.5）。計画の「完了」「修正」から開いたときと、実績の窓で印を付けたときだけ
+    linked: new Set(log ? log.targets.map((target) => target.work_id).filter(Boolean) : presetWorks.map((work) => work.id)),
     // 計画の作業から開いたときは、計画の開始日と終了日（「この日で終わり」に印が付く）。それ以外は今日
-    date: log?.date || presetWorks[0]?.plan_start || presetWorks[0]?.plan_end || localToday(),
+    date: log?.date || source?.plan_start || source?.plan_end || localToday(),
     // 何日かかかった作業の、終えた日（作業中なら、進んだ日）。1 日の作業は空
-    end_date: log ? log.end_date || "" : presetWorks[0]?.plan_end && presetWorks[0].plan_end > (presetWorks[0].plan_start || "") ? presetWorks[0].plan_end : "",
+    end_date: log ? log.end_date || "" : source?.plan_end && source.plan_end > (source.plan_start || "") ? source.plan_end : "",
     work_type: type,
     finishes: log ? log.finishes : true,
-    spec: { ...(log?.spec || {}) },
-    note: log?.note || "",
+    spec: { ...(log?.spec || source?.detail?.spec || {}) },
+    note: log?.note ?? (planWork ? planWork.note || "" : ""),
     mode: log
       ? log.targets.some((target) => target.bed_id || target.planting_id) || !log.targets.length
         ? "crops"
@@ -254,10 +274,11 @@ export async function openLogEditor(log = null, preset = {}) {
     blocks: new Set(),
     orphans: [], // 対象の一覧にない対象（畝や区画を消した記録など）。そのまま残す
     spray: {}, // 品目のまとまり（または区画）ごとの散布液の量（L）
-    inputs: (log?.inputs || []).map((input) => ({ ...input })),
+    inputs: (log?.inputs || source?.detail?.inputs || []).map((input) => ({ ...input })),
     cancellable: presetWorks.map((work) => work.id), // 取りやめにできる計画の作業
   };
-  const existing = log ? log.targets : presetWorks.map((work) => ({ ...targetForWork(work, draft.date), work_id: work.id }));
+  const ownerWorks = planWorks.length ? planWorks : presetWorks;
+  const existing = log ? log.targets : ownerWorks.map((work) => ({ ...targetForWork(work, draft.date), work_id: work.id }));
   if (!log && preset.plantingId) {
     existing.push(targetForWork({ planting_id: preset.plantingId }, draft.date));
   }
@@ -276,7 +297,7 @@ export async function openLogEditor(log = null, preset = {}) {
     }
   }
   // 定植・播種の計画の作業から開いたときは、仕様の欄に計画の値を入れておく（違うところだけ直せるように）
-  if (type === "plant" && presetWorks.length) {
+  if (type === "plant" && presetWorks.length && !Object.keys(draft.spec).length) {
     const planting = data.plantings.find((item) => item.id === presetWorks[0].planting_id);
     const crop = planting && data.crops.find((item) => item.id === planting.crop_id);
     for (const key of ["plant_gap_cm", "row_gap_cm", "row_count", "staggered"]) {
@@ -333,13 +354,32 @@ function pickedItems(choices = currentChoices()) {
 // 計画の作業の実績。直している記録そのものは除いて求める（自分の「終わり」で自分を外さないように）
 const otherActuals = () => workActuals((state().logs || []).filter((log) => log.id !== draft.id));
 
+// 選んだ対象（畝の作付、または区画）の計画の作業か
+const ownsWork = (item, work) => (item.bed_id ? work.planting_id === item.planting_id : work.block_id === item.block_id && !work.planting_id);
+
+// 実績がつながる計画の作業。印の付いた計画のうち、選んでいる対象の、同じ種類のもの
 function linkedWorks(items) {
-  if (!draft.work_type) {
+  if (!draft.work_type || draft.kind !== "actual") {
+    return [];
+  }
+  return data.works.filter((work) => draft.linked.has(work.id) && work.work_type === draft.work_type && items.some((item) => ownsWork(item, work)));
+}
+
+// つなげる候補（5.5）。選んでいる対象に、同じ種類の、取りやめておらず、まだ終わっていない計画があれば、
+// いちばん早いものを挙げる。自動ではつながず、印を付けたときだけつなぐ
+function candidateWorks(items) {
+  if (!draft.work_type || draft.kind !== "actual") {
     return [];
   }
   const actuals = otherActuals();
+  const linkedOwners = linkedWorks(items);
   return items
-    .map((item) => matchWork(data.works, item.bed_id ? { planting_id: item.planting_id } : { block_id: item.block_id }, draft.work_type, actuals))
+    .filter((item) => !linkedOwners.some((work) => ownsWork(item, work)))
+    .map((item) =>
+      data.works
+        .filter((work) => ownsWork(item, work) && work.work_type === draft.work_type && !work.cancelled_on && !actuals.get(work.id)?.end)
+        .sort((a, b) => (a.plan_start || "9999").localeCompare(b.plan_start || "9999"))[0]
+    )
     .filter(Boolean);
 }
 
@@ -363,20 +403,26 @@ function renderDialog() {
   const area = items.reduce((sum, item) => sum + (item.area_m2 || 0), 0);
   const plan = activePlan();
   dialog.innerHTML =
-    `<div class="log-head"><h2 id="logDialogTitle">${draft.id ? "記録を直す" : "記録を入れる"}</h2>` +
+    `<div class="log-head"><h2 id="logDialogTitle">${dialogTitle()}</h2>` +
     `<button type="button" class="text-btn" data-act="close" aria-label="閉じる">閉じる</button></div>` +
     `<div class="log-body">` +
-    `<p class="muted">プラン「${escapeHtml(plan?.name || "")}」の畝につなぎます。</p>` +
-    `<label>作業をした日<span class="log-date"><input type="date" data-f="date" value="${draft.date}" required />` +
+    (draft.switchable
+      ? `<div class="log-kinds" role="group" aria-label="入力するもの">` +
+        `<button type="button" class="chip-btn${draft.kind === "actual" ? " is-on" : ""}" data-act="kind" data-kind="actual" aria-pressed="${draft.kind === "actual"}">実績</button>` +
+        `<button type="button" class="chip-btn${draft.kind === "plan" ? " is-on" : ""}" data-act="kind" data-kind="plan" aria-pressed="${draft.kind === "plan"}">計画</button></div>`
+      : "") +
+    `<p class="muted">${draft.kind === "plan" ? "管理作業（防除、追肥、除草、灌水、株の手入れ、その他）の計画を、" : ""}プラン「${escapeHtml(plan?.name || "")}」の畝${draft.kind === "plan" ? "に入れます。工程の作業の計画は、日程の画面の「作業の計画」で入れます。" : "につなぎます。"}</p>` +
+    planScopeSection() +
+    `<label>${draft.kind === "plan" ? "予定の日" : "作業をした日"}<span class="log-date"><input type="date" data-f="date" value="${draft.date}" required />` +
     `<button type="button" class="chip-btn" data-act="today">本日</button></span></label>` +
-    `<label>終えた日（何日かかったときだけ）<span class="log-date"><input type="date" data-f="end_date" value="${draft.end_date}" min="${draft.date}" />` +
+    `<label>${draft.kind === "plan" ? "終える予定の日（何日かかるときだけ）" : "終えた日（何日かかったときだけ）"}<span class="log-date"><input type="date" data-f="end_date" value="${draft.end_date}" min="${draft.date}" />` +
     (draft.end_date
       ? '<button type="button" class="chip-btn" data-act="oneDay">1 日の作業</button>'
       : localToday() > draft.date
         ? '<button type="button" class="chip-btn" data-act="todayEnd">本日</button>'
         : "") +
     `</span></label>` +
-    `<p class="muted log-date-note">${draft.end_date ? `${formatDay(draft.date)}〜${formatDay(draft.end_date)}（${diffDays(draft.date, draft.end_date) + 1} 日）の作業として、1 件の記録にします。作業の途中なら、ここまで進んだ日を入れておき、終わったら直します。` : "1 日の作業です。何日かかかったときは、終えた日を入れます。"}</p>` +
+    `<p class="muted log-date-note">${dateNote()}</p>` +
     typeSection() +
     targetSection(choices, area) +
     specSection() +
@@ -385,10 +431,12 @@ function renderDialog() {
     `<label>メモ<textarea data-f="note" rows="2">${escapeHtml(draft.note)}</textarea></label>` +
     `<p class="error" id="logError" role="alert"></p>` +
     `</div>` +
-    `<div class="log-foot">${draft.id ? '<button type="button" class="text-btn danger" data-act="delete">この記録を削除</button>' : ""}` +
+    planCopySection() +
+    `<div class="log-foot">${draft.id ? '<button type="button" class="text-btn danger" data-act="delete">この実績を削除</button>' : ""}` +
+    `${draft.planWorks.length ? '<button type="button" class="text-btn danger" data-act="deletePlan">この計画を消す</button>' : ""}` +
     `${!draft.id && draft.cancellable.length ? '<button type="button" class="text-btn danger" data-act="cancelWork">この作業を取りやめる</button>' : ""}` +
     `<span class="log-spacer"></span><button type="button" class="text-btn" data-act="close">キャンセル</button>` +
-    `<button type="button" class="primary-btn" data-act="save">記録する</button></div>`;
+    `<button type="button" class="primary-btn" data-act="save">入力する</button></div>`;
   // 品目の一部の畝だけを選んでいるときは、品目のチェックを「一部」の表示にする
   dialog.querySelectorAll('[data-act="group"]').forEach((box) => {
     const group = choices.crops.find((item) => item.key === box.dataset.key);
@@ -398,9 +446,50 @@ function renderDialog() {
   });
 }
 
+function dialogTitle() {
+  if (draft.kind === "plan") {
+    return draft.planWorks.length ? "計画を直す" : "計画を入力する";
+  }
+  return draft.id ? "実績を直す" : "実績を入力する";
+}
+
+function dateNote() {
+  const span = draft.end_date ? `${formatDay(draft.date)}〜${formatDay(draft.end_date)}（${diffDays(draft.date, draft.end_date) + 1} 日）` : "";
+  if (draft.kind === "plan") {
+    return span ? `${span}の計画です。` : "1 日の計画です。何日かかるときは、終える予定の日を入れます。";
+  }
+  return span
+    ? `${span}の作業として、1 件の実績にします。作業の途中なら、ここまで進んだ日を入れておき、終わったら直します。`
+    : "1 日の作業です。何日かかかったときは、終えた日を入れます。";
+}
+
+// 計画を直すとき: 一緒に入力した計画が複数あれば、この畝だけ直すか、全部を直すかを選ぶ
+function planScopeSection() {
+  if (draft.planWorks.length < 2) {
+    return "";
+  }
+  return (
+    `<div class="log-section"><p class="muted">一緒に入力した計画が ${draft.planWorks.length} か所あります。</p>` +
+    `<label class="check"><input type="checkbox" data-f="onlyThis"${draft.onlyThis ? " checked" : ""} />${escapeHtml(targetForWork(draft.planWork, draft.date).label)}の計画だけを直す（消す）</label></div>`
+  );
+}
+
+// 計画を直すとき: 同じ内容の計画を、何日か後ろに足す（繰り返しの計画）
+function planCopySection() {
+  if (!draft.planWorks.length) {
+    return "";
+  }
+  return (
+    `<div class="log-section log-copy"><label class="inline-field">この内容の計画を<input type="number" min="1" step="1" data-f="copyDays" value="${draft.copyDays}" aria-label="何日後" /> 日後に</label>` +
+    `<button type="button" class="chip-btn" data-act="copyPlan">コピーして足す</button></div>`
+  );
+}
+
 function typeSection() {
-  const quick = QUICK_TYPES.filter((code) => allTypes().some((type) => type.code === code));
-  const others = allTypes().filter((type) => !quick.includes(type.code));
+  // 計画で入れられるのは管理作業だけ（工程の作業の計画は「作業の計画」の表で入れる）
+  const usable = draft.kind === "plan" ? allTypes().filter((type) => isManagement(type.code)) : allTypes();
+  const quick = QUICK_TYPES.filter((code) => usable.some((type) => type.code === code));
+  const others = usable.filter((type) => !quick.includes(type.code));
   const buttons = quick
     .map(
       (code) =>
@@ -412,7 +501,7 @@ function typeSection() {
     `<select data-f="typeOther" aria-label="ほかの作業の種類"><option value="">ほか…</option>` +
     others.map((type) => `<option value="${type.code}"${draft.work_type === type.code ? " selected" : ""}>${escapeHtml(type.label)}</option>`).join("") +
     `</select>`;
-  return `<div class="log-section"><h3>作業の種類</h3><div class="log-types">${buttons}${select}</div></div>`;
+  return `<div class="log-section"><h3>作業の種類</h3><div class="log-types">${buttons}${others.length ? select : ""}</div></div>`;
 }
 
 function targetSection(choices, area) {
@@ -464,8 +553,19 @@ function targetSection(choices, area) {
 }
 
 function specSection() {
-  const fields = SPEC_FIELDS[draft.work_type];
-  if (!fields) {
+  const fields = SPEC_FIELDS[draft.work_type] || [];
+  const choices = WORK_ITEMS[draft.work_type];
+  // 株の手入れとその他の中身（複数選べる）。その他の「その他」は、何をしたかを文字で入れる
+  const chosen = draft.spec.items || [];
+  const items = choices
+    ? `<div class="log-items">${choices
+        .map((item) => `<button type="button" class="chip-btn${chosen.includes(item) ? " is-on" : ""}" data-act="item" data-item="${escapeHtml(item)}" aria-pressed="${chosen.includes(item)}">${escapeHtml(item)}</button>`)
+        .join("")}</div>` +
+      (draft.work_type === "other" && chosen.includes("その他")
+        ? `<label>何をしたか（例: 支柱の撤去）<input type="text" data-spec="other" value="${escapeHtml(draft.spec.other || "")}" /></label>`
+        : "")
+    : "";
+  if (!fields.length && !items) {
     return "";
   }
   const inputs = fields
@@ -478,7 +578,7 @@ function specSection() {
       return `<label>${label}<input type="${type}" data-spec="${key}" value="${escapeHtml(value ?? "")}"${type === "number" ? ' step="any" min="0" inputmode="decimal"' : ""} /></label>`;
     })
     .join("");
-  return `<div class="log-section"><h3>実際の仕様</h3><div class="form-grid">${inputs}</div></div>`;
+  return `<div class="log-section"><h3>${choices ? "中身" : draft.kind === "plan" ? "予定の仕様" : "実際の仕様"}</h3>${items}${inputs ? `<div class="form-grid">${inputs}</div>` : ""}</div>`;
 }
 
 function inputSection(items) {
@@ -579,8 +679,10 @@ function spraySection(items) {
       (boxes ? `<div class="log-section"><h3>${draft.mode === "blocks" ? "区画" : "品目"}ごとの使用基準</h3>${boxes}${notes}<p class="muted" id="logBaseline"></p>` +
         `<p class="muted"><a href="${famic.NOTICE_URL}" target="_blank" rel="noopener">総使用回数についての注意事項（FAMIC）</a></p></div>` : "");
   }
-  // 面積あたりの使用量の農薬（粒剤など）だけなら、散布した液の量は入れない
-  const liquid = allAreaDosed()
+  // 面積あたりの使用量の農薬（粒剤など）だけなら、散布した液の量は入れない。計画では入れない
+  const liquid = draft.kind === "plan"
+    ? ""
+    : allAreaDosed()
     ? '<div class="log-section"><p class="muted">粒剤など、面積あたりの使用量で使う農薬なので、散布した液の量は入れません。</p></div>'
     : `<div class="log-section"><h3>実際に散布した液の量</h3>${rows}<p class="muted" id="logSprayTotal"></p></div>`;
   return `${standards}${liquid}<ul class="famic-warnings" id="logWarnings" hidden></ul>`;
@@ -642,14 +744,35 @@ function sprayGroupName(key) {
   return group ? `${group.name}${group.mulch ? "（マルチ）" : ""}` : key;
 }
 
+// 計画とのつながり（実績のときだけ）。つながっている計画と、つなげる候補を、計画の日ごとにまとめて、印で付け外しする
 function linkSection(items) {
-  const works = linkedWorks(items);
-  if (!works.length) {
+  const linked = linkedWorks(items);
+  const candidates = candidateWorks(items);
+  if (!linked.length && !candidates.length) {
     return "";
   }
+  const groups = new Map();
+  for (const work of [...linked, ...candidates]) {
+    const key = `${draft.linked.has(work.id)}|${work.plan_start}|${work.plan_end}`;
+    if (!groups.has(key)) {
+      groups.set(key, { on: draft.linked.has(work.id), start: work.plan_start, end: work.plan_end, works: [] });
+    }
+    groups.get(key).works.push(work);
+  }
+  const rows = [...groups.values()]
+    .map((group) => {
+      const days = !group.start ? "日付のない" : group.start === group.end ? `${formatDay(group.start)}の` : `${formatDay(group.start)}〜${formatDay(group.end)}の`;
+      return (
+        `<label class="check"><input type="checkbox" data-act="link" data-ids="${group.works.map((work) => work.id).join(",")}"${group.on ? " checked" : ""} />` +
+        `${days}${escapeHtml(typeLabel(draft.work_type))}の計画（${group.works.length} か所）の実績にする</label>`
+      );
+    })
+    .join("");
+  const note = candidates.length && !linked.length ? `<p class="muted">この対象には、${escapeHtml(typeLabel(draft.work_type))}の計画があります。計画の実績にするときだけ、印を付けてください。</p>` : "";
   return (
-    `<div class="log-section log-link"><p>計画の作業 ${works.length} 件（${escapeHtml(typeLabel(draft.work_type))}）につなぎます。</p>` +
-    `<label class="check"><input type="checkbox" data-f="finishes"${draft.finishes ? " checked" : ""} />この日で終わり（計画の作業を完了にする）</label></div>`
+    `<div class="log-section log-link"><h3>計画とのつながり</h3>${note}${rows}` +
+    (linked.length ? `<label class="check"><input type="checkbox" data-f="finishes"${draft.finishes ? " checked" : ""} />この日で終わり（計画の作業を完了にする）</label>` : "") +
+    "</div>"
   );
 }
 
@@ -750,6 +873,24 @@ function onClick(event) {
     renderDialog();
   } else if (act === "type") {
     setType(button.dataset.code);
+  } else if (act === "kind") {
+    draft.kind = button.dataset.kind;
+    if (draft.kind === "plan" && draft.work_type && !isManagement(draft.work_type)) {
+      draft.work_type = "";
+      draft.spec = {};
+      draft.inputs = [];
+    }
+    renderDialog();
+    updateTotals();
+  } else if (act === "item") {
+    const items = new Set(draft.spec.items || []);
+    items.has(button.dataset.item) ? items.delete(button.dataset.item) : items.add(button.dataset.item);
+    draft.spec.items = (WORK_ITEMS[draft.work_type] || []).filter((item) => items.has(item));
+    renderDialog();
+  } else if (act === "deletePlan") {
+    deletePlan();
+  } else if (act === "copyPlan") {
+    copyPlan();
   } else if (act === "mode") {
     draft.mode = button.dataset.mode;
     renderDialog();
@@ -803,7 +944,7 @@ async function cancelFromDialog() {
   const ids = draft.cancellable;
   const works = data.works.filter((work) => ids.includes(work.id));
   const ok = await confirmAction({
-    message: "この作業を取りやめます。記録は作らず、計画の作業に取りやめの印を付けます。メモ欄の文は、取りやめの理由として残ります。作付の詳細から元に戻せます。",
+    message: "この作業を取りやめます。実績は作らず、計画の作業に取りやめの印を付けます。メモ欄の文は、取りやめの理由として残ります。作付の詳細から元に戻せます。",
     name: `${typeLabel(works[0]?.work_type)}（${works.length} 件）`,
     action: "取りやめる",
   });
@@ -897,6 +1038,23 @@ function onChange(event) {
     if (el.value) {
       setDate(el.value);
     }
+  } else if (el.dataset.act === "link") {
+    el.dataset.ids.split(",").forEach((id) => (el.checked ? draft.linked.add(id) : draft.linked.delete(id)));
+    if (el.checked) {
+      draft.finishes = true;
+    }
+    renderDialog();
+  } else if (el.dataset.f === "onlyThis") {
+    draft.onlyThis = el.checked;
+    // この畝だけを直すときは、対象をその畝に戻す
+    if (el.checked) {
+      const target = targetForWork(draft.planWork, draft.date);
+      draft.beds = new Set(target.bed_id ? [target.bed_id] : []);
+      draft.blocks = new Set(!target.bed_id && target.block_id ? [target.block_id] : []);
+    }
+    renderDialog();
+  } else if (el.dataset.f === "copyDays") {
+    draft.copyDays = Math.max(1, Math.round(num(el.value) || COPY_DAYS));
   } else if (el.dataset.f === "end_date") {
     draft.end_date = el.value && el.value > draft.date ? el.value : "";
     renderDialog();
@@ -981,7 +1139,6 @@ function showError(text) {
 // 窓の内容から、保存する記録・対象・資材を作る
 function buildLog() {
   const items = pickedItems();
-  const actuals = otherActuals();
   const kind = inputKind(draft.work_type);
   const groupItems = new Map();
   items.forEach((item) => groupItems.set(item.group, [...(groupItems.get(item.group) || []), item]));
@@ -993,7 +1150,7 @@ function buildLog() {
   }
   const targets = [
     ...items.map((item) => {
-      const work = matchWork(data.works, item.bed_id ? { planting_id: item.planting_id } : { block_id: item.block_id }, draft.work_type, actuals);
+      const work = draft.kind === "actual" ? data.works.find((row) => draft.linked.has(row.id) && row.work_type === draft.work_type && ownsWork(item, row)) : null;
       return {
         planting_id: item.planting_id || null,
         bed_id: item.bed_id || null,
@@ -1020,6 +1177,13 @@ function buildLog() {
       }
     } else if (num(value) !== null) {
       spec[key] = num(value);
+    }
+  }
+  // 株の手入れとその他の中身。その他の「その他」は、何をしたかの文字も
+  if (WORK_ITEMS[draft.work_type] && draft.spec.items?.length) {
+    spec.items = draft.spec.items.filter((item) => WORK_ITEMS[draft.work_type].includes(item));
+    if (spec.items.includes("その他") && String(draft.spec.other || "").trim()) {
+      spec.other = String(draft.spec.other).trim();
     }
   }
   const groups = kind === "pesticide" && famic.famicEnabled() ? sprayGroups(items) : [];
@@ -1067,11 +1231,15 @@ function buildLog() {
 
 async function save() {
   if (!draft.date) {
-    showError("作業をした日を入れてください。");
+    showError(draft.kind === "plan" ? "予定の日を入れてください。" : "作業をした日を入れてください。");
     return;
   }
   if (!draft.work_type) {
     showError("作業の種類を選んでください。");
+    return;
+  }
+  if (draft.kind === "plan") {
+    savePlan();
     return;
   }
   const { log, targets, inputs } = buildLog();
@@ -1094,16 +1262,205 @@ async function save() {
   }
   const button = dialog.querySelector('[data-act="save"]');
   button.disabled = true;
-  ctx.setStatus("記録を保存中…");
+  ctx.setStatus("実績を入力しています…");
   try {
     await state().store.saveLog({ ...log, targets, inputs });
     await reload();
     dialog.close();
-    ctx.setStatus("記録を保存しました");
+    ctx.setStatus("実績を入力しました");
   } catch (error) {
     button.disabled = false;
-    showError(`保存できませんでした: ${error.message}`);
+    showError(`入力できませんでした: ${error.message}`);
     ctx.setStatus("");
+  }
+}
+
+// ---- 管理作業の計画（5.2） ----
+
+// 計画の作業を付ける先（作付か区画）
+const workOwner = (item) => (item.bed_id ? { planting_id: item.planting_id, block_id: null } : { block_id: item.block_id, planting_id: null });
+
+// 窓の内容から、計画の作業の値（日付、メモ、予定の中身）を作る。shift 日だけ後ろにずらせる（コピー）
+function planFields(shift = 0) {
+  const { log, inputs } = buildLog();
+  const end = log.end_date || draft.date;
+  return {
+    work_type: draft.work_type,
+    plan_start: addDays(draft.date, shift),
+    plan_end: addDays(end, shift),
+    note: log.note,
+    detail: { spec: log.spec, inputs },
+  };
+}
+
+// 選んだ対象ごとに、計画の作業を 1 件ずつ足す。同じ時に足した作業には、同じまとまりの印を付ける
+async function addPlanWorks(items, fields, batchId) {
+  const plan = activePlan();
+  const rows = items.map((item) => {
+    const owner = workOwner(item);
+    const own = data.works.filter((work) => (owner.planting_id ? work.planting_id === owner.planting_id : work.block_id === owner.block_id));
+    return {
+      id: crypto.randomUUID(),
+      plan_id: plan.id,
+      ...owner,
+      seq: Math.max(0, ...own.map((work) => work.seq || 0)) + 1,
+      ...fields,
+      batch_id: batchId,
+      cancelled_on: null,
+      cancel_note: "",
+    };
+  });
+  await state().store.upsert("works", rows);
+  data.works.push(...rows);
+  return rows;
+}
+
+// 入力した計画を保存する。新しく入れるときは、選んだ対象ごとに 1 件ずつ作る。直すときは、一緒に入力した全部か、この畝だけを直す
+async function savePlan() {
+  if (!isManagement(draft.work_type)) {
+    showError("計画で入力できるのは、管理作業（防除、追肥、除草、灌水、株の手入れ、その他）です。");
+    return;
+  }
+  const items = pickedItems();
+  if (!items.length) {
+    showError("対象の畝か区画を選んでください。");
+    return;
+  }
+  const fields = planFields();
+  const name = workName(typeLabel(draft.work_type), fields.detail.spec);
+  const days = fields.plan_start === fields.plan_end ? formatDay(fields.plan_start) : `${formatDay(fields.plan_start)}〜${formatDay(fields.plan_end)}`;
+  const button = dialog.querySelector('[data-act="save"]');
+  button.disabled = true;
+  try {
+    if (!draft.planWorks.length) {
+      await addPlanWorks(items, fields, crypto.randomUUID());
+      record({ kind: "work.plan", target: ["work", null], plan: activePlan(), text: `${name}の計画を ${items.length} か所に入力（${days}）` });
+    } else if (draft.onlyThis) {
+      // この畝だけ: 一緒に入力したまとまりから外して、別の計画にする
+      const row = { ...draft.planWork, ...fields, batch_id: draft.planWorks.length > 1 ? crypto.randomUUID() : draft.planWork.batch_id };
+      await state().store.upsert("works", [row]);
+      Object.assign(data.works.find((work) => work.id === row.id), row);
+      record({ kind: "work.plan", target: ["work", row.id], plan: activePlan(), text: `${name}の計画を直した（${targetForWork(row, draft.date).label}、${days}）` });
+    } else {
+      // 一緒に入力した全部: 残す対象は直し、外した対象の計画は消し、足した対象には計画を足す
+      const batchId = draft.planWork.batch_id || crypto.randomUUID();
+      const keep = draft.planWorks.filter((work) => items.some((item) => ownsWork(item, work)));
+      const drop = draft.planWorks.filter((work) => !keep.includes(work));
+      const add = items.filter((item) => !keep.some((work) => ownsWork(item, work)));
+      const rows = keep.map((work) => ({ ...work, ...fields, batch_id: batchId }));
+      await state().store.upsert("works", rows);
+      rows.forEach((row) => Object.assign(data.works.find((work) => work.id === row.id), row));
+      await removePlanWorks(drop);
+      if (add.length) {
+        await addPlanWorks(add, fields, batchId);
+      }
+      record({ kind: "work.plan", target: ["work", draft.planWork.id], plan: activePlan(), text: `${name}の計画を直した（${keep.length + add.length} か所、${days}）` });
+    }
+    dialog.close();
+    ctx.setStatus("計画を入力しました");
+    ctx.onLogsChanged?.();
+  } catch (error) {
+    button.disabled = false;
+    showError(`計画を入力できませんでした: ${error.message}`);
+  }
+}
+
+async function removePlanWorks(works) {
+  if (!works.length) {
+    return;
+  }
+  await state().store.remove("works", works.map((work) => work.id));
+  for (const work of works) {
+    const i = data.works.findIndex((row) => row.id === work.id);
+    if (i >= 0) {
+      data.works.splice(i, 1);
+    }
+  }
+}
+
+// 計画を消す（この畝だけ、または一緒に入力した全部）。実績がつながっていれば、実績は残り、計画にない実績になる
+async function deletePlan() {
+  const scope = draft.onlyThis ? [draft.planWork] : draft.planWorks;
+  const linked = (state().logs || []).filter((log) => log.targets.some((target) => scope.some((work) => work.id === target.work_id)));
+  const ok = await confirmDelete(
+    `この計画を消します。${linked.length ? `つながっている実績 ${linked.length} 件は残り、計画にない実績になります。` : ""}`,
+    `${workName(typeLabel(draft.planWork.work_type), draft.planWork.detail?.spec)}の計画（${scope.length} か所）`
+  );
+  if (!ok || !draft) {
+    return;
+  }
+  try {
+    await removePlanWorks(scope);
+    record({ kind: "work.plan", target: ["work", draft.planWork.id], plan: activePlan(), text: `${typeLabel(draft.planWork.work_type)}の計画を ${scope.length} か所消した` });
+    dialog.close();
+    ctx.setStatus("計画を消しました");
+    ctx.onLogsChanged?.();
+  } catch (error) {
+    showError(`計画を消せませんでした: ${error.message}`);
+  }
+}
+
+// 窓の内容の計画を、何日か後ろに足す（繰り返しの計画）。足した計画は、新しいまとまりになる
+async function copyPlan() {
+  const items = draft.onlyThis ? pickedItems().filter((item) => ownsWork(item, draft.planWork)) : pickedItems();
+  if (!items.length || !draft.work_type) {
+    showError("対象の畝か区画を選んでください。");
+    return;
+  }
+  const fields = planFields(draft.copyDays);
+  try {
+    await addPlanWorks(items, fields, crypto.randomUUID());
+    record({
+      kind: "work.plan",
+      target: ["work", null],
+      plan: activePlan(),
+      text: `${workName(typeLabel(draft.work_type), fields.detail.spec)}の計画を ${draft.copyDays} 日後（${formatDay(fields.plan_start)}）に ${items.length} か所コピー`,
+    });
+    dialog.close();
+    ctx.setStatus(`${draft.copyDays} 日後に計画を足しました`);
+    ctx.onLogsChanged?.();
+  } catch (error) {
+    showError(`計画を足せませんでした: ${error.message}`);
+  }
+}
+
+// 管理作業の計画を、窓で開いて直す（工程表の帯、今週やることから）
+export function openPlanEditor(work) {
+  return openLogEditor(null, { planWork: work });
+}
+
+// 管理作業の計画を、何日か後ろ（前）にコピーする（工程表で Ctrl を押しながら帯を動かしたとき）。コピーした計画は、新しいまとまりになる
+export async function copyPlanWorks(works, days) {
+  if (!(await loadData()) || !days) {
+    return false;
+  }
+  const source = works.map((work) => data.works.find((row) => row.id === work.id)).filter(Boolean);
+  if (!source.length) {
+    notify("管理作業の計画は、実際に使うプランのものだけをコピーできます。");
+    return false;
+  }
+  const batchId = crypto.randomUUID();
+  const rows = source.map((row) => ({
+    ...row,
+    id: crypto.randomUUID(),
+    plan_start: row.plan_start && addDays(row.plan_start, days),
+    plan_end: row.plan_end && addDays(row.plan_end, days),
+    batch_id: batchId,
+    cancelled_on: null,
+    cancel_note: "",
+  }));
+  try {
+    await state().store.upsert("works", rows);
+    data.works.push(...rows);
+    const label = typeLabel(source[0].work_type);
+    const way = days > 0 ? `${days} 日後` : `${-days} 日前`;
+    record({ kind: "work.plan", target: ["work", null], plan: activePlan(), text: `${label}の計画を ${way}に ${rows.length} か所コピー` });
+    ctx.setStatus(`${label}の計画を ${way}にコピーしました`);
+    ctx.onLogsChanged?.();
+    return true;
+  } catch (error) {
+    notify(`計画をコピーできませんでした: ${error.message}`);
+    return false;
   }
 }
 
@@ -1112,7 +1469,7 @@ async function remove() {
   if (!log) {
     return;
   }
-  const ok = await confirmDelete("この記録を削除します。", `${logDays(log)} ${typeLabel(log.work_type)}（${targetSummary(log.targets)}）`);
+  const ok = await confirmDelete("この実績を削除します。", `${logDays(log)} ${typeLabel(log.work_type)}（${targetSummary(log.targets)}）`);
   if (!ok) {
     return;
   }
@@ -1120,7 +1477,7 @@ async function remove() {
     await state().store.deleteLog(log.id);
     await reload();
     dialog.close();
-    ctx.setStatus("記録を削除しました");
+    ctx.setStatus("実績を削除しました");
   } catch (error) {
     showError(`削除できませんでした: ${error.message}`);
   }

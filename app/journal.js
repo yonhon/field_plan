@@ -92,7 +92,7 @@ async function flush() {
     }
   } catch (error) {
     entries.forEach((entry) => unsaved.add(entry));
-    ctx.setStatus(`変更の記録を保存できませんでした: ${error.message}`);
+    ctx.setStatus(`変更の履歴を保存できませんでした: ${error.message}`);
   }
   saving = false;
   if (!$("journalView").hidden) {
@@ -186,9 +186,9 @@ export function renderJournal() {
         .join("");
       return (
         `<section class="panel journal-day" data-day="${day}"><h2>${dayTitle(day)}</h2>` +
-        `<label>メモ（なぜそうしたか。記録の番号は #41 のように書くと、その行へ飛べます）` +
+        `<label>メモ（なぜそうしたか。変更の番号は #41 のように書くと、その行へ飛べます）` +
         `<textarea data-note="${day}" rows="${Math.min(Math.max(body.split("\n").length, 2), 10)}">${escapeHtml(body)}</textarea></label>` +
-        `${links ? `<div class="row journal-refs"><span class="muted">メモが触れている記録:</span>${links}</div>` : ""}` +
+        `${links ? `<div class="row journal-refs"><span class="muted">メモが触れている変更:</span>${links}</div>` : ""}` +
         `<ul class="change-list">${rows}</ul>` +
         `${released ? `<h3>アプリの更新</h3><ul class="change-list">${released}</ul>` : ""}</section>`
       );

@@ -1778,7 +1778,7 @@ async function deleteField() {
     return;
   }
   const ok = await confirmDelete(
-    `この圃場を削除します。外形、下絵、プラン ${state.plans.length} つ（区域、区画、畝、日程）がすべて消えます。開発日誌の記録とメモは残ります。`,
+    `この圃場を削除します。外形、下絵、プラン ${state.plans.length} つ（区域、区画、畝、日程）がすべて消えます。変更の履歴とメモは残ります。`,
     `圃場「${field.name}」`
   );
   if (!ok || state.field.id !== field.id) {
@@ -1808,8 +1808,8 @@ function renderPlans() {
   $("planSelect").value = state.plan.id;
   const active = state.plans.find((plan) => plan.id === activeId);
   $("activePlanInfo").textContent = active
-    ? `実際に使うプラン: ${active.name}。作業の記録は、このプランの畝につなぎます。`
-    : "実際に使うプランが決まっていません。決めると、作業の記録を入れられます。";
+    ? `実際に使うプラン: ${active.name}。作業の計画（管理作業）と実績は、このプランの畝に入力します。`
+    : "実際に使うプランが決まっていません。決めると、作業の実績と管理作業の計画を入力できます。";
   renderFields();
   renderPlanButtons();
   renderLogs();
@@ -2529,7 +2529,7 @@ function openTarget(entry) {
     showView("map");
     select(id);
   } else if (kind) {
-    status("この記録の相手は、もうありません。");
+    status("この変更の相手は、もうありません。");
   }
 }
 
@@ -2626,7 +2626,7 @@ async function startApp() {
   try {
     await initJournal({ state, openTarget, setStatus: (text) => ($("saveStatus").textContent = text) });
   } catch (error) {
-    $("saveStatus").textContent = `変更の記録を読み込めませんでした: ${error.message}`;
+    $("saveStatus").textContent = `変更の履歴を読み込めませんでした: ${error.message}`;
   }
   initHistory({
     state,

@@ -4,7 +4,7 @@
 import { plantingNumbers, summarize, cropLabel } from "./lib/crops.js";
 import { polygonArea, rectSize } from "./lib/geometry.js";
 import { firstHarvestDay, inputText, logEnd, specText, usageTable } from "./lib/logs.js";
-import { harvestEnd, planProblems, worksRange } from "./lib/schedule.js";
+import { harvestEnd, isManagement, planProblems, workName, worksRange } from "./lib/schedule.js";
 
 class ToolInputError extends Error {}
 
@@ -111,8 +111,10 @@ function pickPlan(data, name) {
   return data.plans.find((plan) => plan.id === recent?.plan_id) || data.plans[0];
 }
 
+// 計画の作業。管理作業（防除、追肥など）は management を付け、株の手入れ・その他は中身も名前に添える
 const workLine = (part, work) => ({
-  work: part.typeLabel(work.work_type),
+  work: workName(part.typeLabel(work.work_type), work.detail?.spec),
+  ...(isManagement(work.work_type) ? { management: true } : {}),
   start: work.plan_start,
   end: work.plan_end,
   ...(work.note ? { note: work.note } : {}),
@@ -284,12 +286,13 @@ export const TOOLS = [
       const groups = new Map();
       for (const work of dated) {
         const planting = part.plantings.find((item) => item.id === work.planting_id);
-        const key = `${work.plan_start}|${work.plan_end}|${work.work_type}|${planting?.crop_name || ""}|${work.cancelled_on || ""}`;
+        const key = `${work.plan_start}|${work.plan_end}|${workName(work.work_type, work.detail?.spec)}|${planting?.crop_name || ""}|${work.cancelled_on || ""}`;
         if (!groups.has(key)) {
           groups.set(key, {
             start: work.plan_start,
             end: work.plan_end,
-            work: part.typeLabel(work.work_type),
+            work: workName(part.typeLabel(work.work_type), work.detail?.spec),
+            ...(isManagement(work.work_type) ? { management: true } : {}),
             ...(planting?.crop_name ? { crop: planting.crop_name } : {}),
             ...(work.cancelled_on ? { cancelled_on: work.cancelled_on } : {}),
             places: [],
@@ -414,7 +417,7 @@ export const TOOLS = [
       const typeLabel = (code) => data.workTypes.find((type) => type.code === code)?.label || code;
       const records = data.workLogs
         // 期間にかかる記録（何日かにわたる記録は、終えた日が from 以降で、始めた日が to 以前）
-        .filter((log) => (!from || logEnd(log) >= from) && (!to || log.date <= to) && matchText(typeLabel(log.work_type), args.work))
+        .filter((log) => (!from || logEnd(log) >= from) && (!to || log.date <= to) && matchText(workName(typeLabel(log.work_type), log.spec), args.work))
         .map((log) => ({ log, targets: (log.targets || []).filter((target) => matchText(target.crop_name, args.crop) && matchText(target.label, args.place)) }))
         .filter((item) => item.targets.length)
         .sort((a, b) => b.log.date.localeCompare(a.log.date) || String(b.log.created_at).localeCompare(String(a.log.created_at)));
@@ -447,7 +450,7 @@ export const TOOLS = [
           return {
             date: log.date,
             ...(logEnd(log) > log.date ? { end_date: logEnd(log), days: Math.round((Date.parse(logEnd(log)) - Date.parse(log.date)) / 86400000) + 1 } : {}),
-            work: typeLabel(log.work_type),
+            work: workName(typeLabel(log.work_type), log.spec),
             places: [...targets]
               .sort((a, b) => a.label.localeCompare(b.label, "ja", { numeric: true }))
               .map((target) => {

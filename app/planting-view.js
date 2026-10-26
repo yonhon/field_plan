@@ -5,7 +5,7 @@ import { record } from "./journal.js";
 import { openLogEditor, uncancelWork } from "./log-view.js";
 import { bedAreas, compressedAxis, dayGap, firstHarvestDay, inputText, logEnd, plantingStart, shiftAfterActual, specDiff, specText, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled } from "./pesticide.js";
-import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, localToday } from "./schedule.js";
+import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, localToday, workName } from "./schedule.js";
 import { ICON_LABELS, accumulate, addTwoWeek, fetchStations, parseForecast, weatherIcon } from "./weather.js";
 import { officeForecast, weatherSettings } from "./weather-view.js";
 import {
@@ -247,7 +247,7 @@ function usageHtml(c) {
   const logs = state().logs || [];
   const table = usageTable(logs, c.planting.id, c.planting.crop_name);
   if (!table.ingredients.length && !table.products.length) {
-    return '<section class="panel"><h2>農薬の使用回数</h2><p class="muted">この作付の防除の記録は、まだありません。</p></section>';
+    return '<section class="panel"><h2>農薬の使用回数</h2><p class="muted">この作付の防除の実績は、まだありません。</p></section>';
   }
   const over = (item) => item.max && item.count >= item.max;
   const rows = [
@@ -389,7 +389,7 @@ function headHtml(c, active) {
   }
   const go = (item, arrow) =>
     item ? `<button type="button" class="chip-btn" data-act="go" data-kind="${item.kind}" data-id="${item.id}">${arrow === "prev" ? "← " : ""}${escapeHtml(item.label)}${arrow === "next" ? " →" : ""}</button>` : "";
-  const recordButton = active && c.planting ? '<button type="button" class="primary-btn" data-act="record">＋ この作付の記録を入れる</button>' : "";
+  const recordButton = active && c.planting ? '<button type="button" class="primary-btn" data-act="record">＋ この作付の作業を入力する</button>' : "";
   return (
     `<div class="detail-head"><button type="button" class="text-btn" data-act="back">← 工程表に戻る</button>` +
     `<h2>${escapeHtml(title)}</h2><span class="muted">${escapeHtml(info)}</span>` +
@@ -400,7 +400,7 @@ function headHtml(c, active) {
 const tableNote = (mode) =>
   ({
     plan: "計画の作業です。行を押すと、日程の画面で作業の計画を開きます。",
-    act: "記録だけです。日付を押すと、記録を直す画面を開きます。",
+    act: "実績だけです。日付を押すと、実績を直す窓を開きます。",
   })[mode];
 
 // 工程の小さな図。作業の種類ごとの行に、計画の帯と実績の帯を重ねる。作業のない期間は詰める
@@ -432,7 +432,7 @@ function timelineHtml(c, mode, actuals) {
   const bars = [...lanes.values()].flat();
   const axis = compressedAxis([...bars.map((bar) => [bar.start, bar.end]), [today, today]], { minGap: MIN_GAP_DAYS });
   if (!bars.length || !axis) {
-    return '<h2>工程</h2><p class="muted">日付の入った作業や記録がまだありません。</p>';
+    return '<h2>工程</h2><p class="muted">日付の入った計画や実績がまだありません。</p>';
   }
   const pct = (units) => `${((units / axis.total) * 100).toFixed(3)}%`;
   const span = (start, end) => `left:${pct(axis.x(start))};width:${pct(axis.x(end) + 1 - axis.x(start))}`;
@@ -477,15 +477,15 @@ function diffHtml(c, actuals, logs) {
     const diff = plantLog ? specDiff(plantLog.spec, plannedSpec(c.planting)) : [];
     if (diff.length) {
       const text = diff
-        .map((item) => `${item.label}は、記録が ${item.key === "staggered" ? (item.actual ? "千鳥" : "千鳥なし") : `${item.actual}${item.unit}`}、計画が ${item.key === "staggered" ? (item.planned ? "千鳥" : "千鳥なし") : `${item.planned ?? "なし"}${item.planned === null ? "" : item.unit}`}`)
+        .map((item) => `${item.label}は、実績が ${item.key === "staggered" ? (item.actual ? "千鳥" : "千鳥なし") : `${item.actual}${item.unit}`}、計画が ${item.key === "staggered" ? (item.planned ? "千鳥" : "千鳥なし") : `${item.planned ?? "なし"}${item.planned === null ? "" : item.unit}`}`)
         .join("。");
       // 計画は書き換えない。次からの作付のために、品目の設定値を記録に合わせられる
       const crop = state().crops.find((item) => item.id === c.planting.crop_id);
       const action = !crop
         ? '<p class="muted">品目の一覧にない品目なので、品目の設定値には合わせられません。</p>'
         : specDiff(plantLog.spec, cropSpec(crop)).length
-          ? `<button type="button" class="chip-btn" data-act="apply-spec" data-spec-log="${plantLog.id}">品目の設定値を記録に合わせる</button>`
-          : '<p class="muted">品目の設定値は、記録と同じです。</p>';
+          ? `<button type="button" class="chip-btn" data-act="apply-spec" data-spec-log="${plantLog.id}">品目の設定値を実績に合わせる</button>`
+          : '<p class="muted">品目の設定値は、実績と同じです。</p>';
       parts.push(`<p>定植の${escapeHtml(text)}です。</p>${action}`);
     }
   }
@@ -523,7 +523,7 @@ function tableHtml(c, mode, actuals, logs) {
   }
   entries.sort((a, b) => a.key.localeCompare(b.key));
   if (!entries.length) {
-    return '<p class="muted">作業も記録もまだありません。</p>';
+    return '<p class="muted">計画も実績もまだありません。</p>';
   }
   // 気温・降水量の列は、定植・播種の日が決まり、観測所を選んであり、実績を出しているときだけ
   const showWeather = showActual && Boolean(wx?.planted && wx.configured);
@@ -552,8 +552,9 @@ function tableHtml(c, mode, actuals, logs) {
   return `<div class="table-scroll"><table class="work-table detail-table"><thead>${head}</thead><tbody>${rows.join("")}</tbody></table></div>`;
 }
 
-const typeCell = (type, tag) =>
-  `<td><span class="swatch" style="background:${WORK_COLORS[type] || "#888"}"></span><strong>${escapeHtml(anyTypeLabel(type))}</strong>${tag ? `<br><span class="muted">${escapeHtml(tag)}</span>` : ""}</td>`;
+// 作業の欄。株の手入れ・その他は中身も添える（spec は実績の仕様か、計画の予定の中身）
+const typeCell = (type, tag, spec) =>
+  `<td><span class="swatch" style="background:${WORK_COLORS[type] || "#888"}"></span><strong>${escapeHtml(workName(anyTypeLabel(type), spec))}</strong>${tag ? `<br><span class="muted">${escapeHtml(tag)}</span>` : ""}</td>`;
 
 function logLines(log) {
   return [specText(log.work_type, log.spec), ...(log.inputs || []).map(inputText), log.note].filter(Boolean);
@@ -595,7 +596,7 @@ function workRow(c, { work, linked, actual }, mode, today) {
     }
   }
   const gapCell = mode === "both" ? `<td class="detail-gap-cell">${escapeHtml(work.cancelled_on ? "" : dayGap(work, actual))}</td>` : "";
-  return `<tr>${typeCell(work.work_type, tag)}${planCell}${actualCell}${gapCell}</tr>`;
+  return `<tr>${typeCell(work.work_type, tag, work.detail?.spec)}${planCell}${actualCell}${gapCell}</tr>`;
 }
 
 function logRow(log, mode) {
@@ -603,7 +604,7 @@ function logRow(log, mode) {
   const lines = logLines(log)
     .map((line) => `<br><span class="detail-line">${escapeHtml(line)}</span>`)
     .join("");
-  return `<tr>${typeCell(log.work_type, "計画にない作業")}${showPlan ? '<td class="muted">－</td>' : ""}<td>${logLink(log)}${lines}</td>${mode === "both" ? "<td></td>" : ""}</tr>`;
+  return `<tr>${typeCell(log.work_type, "計画にない実績", log.spec)}${showPlan ? '<td class="muted">－</td>' : ""}<td>${logLink(log)}${lines}</td>${mode === "both" ? "<td></td>" : ""}</tr>`;
 }
 
 // ---- 操作 ----
@@ -662,7 +663,7 @@ async function applySpec(logId) {
       kind: "crops.spec",
       target: ["crop", crop.id],
       plan: false,
-      text: `品目「${crop.name}」の設定値を、${c.block.name} 畝${c.bed.seq} の定植の記録に合わせた`,
+      text: `品目「${crop.name}」の設定値を、${c.block.name} 畝${c.bed.seq} の定植の実績に合わせた`,
       before,
       after,
     });

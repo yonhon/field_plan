@@ -194,19 +194,29 @@ alter table field.works drop column if exists actual_end;
 alter table field.works add column if not exists cancelled_on date;
 alter table field.works add column if not exists cancel_note text not null default '';
 
--- 作業の種類のうち、計画に置けるもの。false は記録だけに使う（灌水、防除など）
+-- 作業の種類のうち、工程の作業（「作業の計画」の表で計画を入れ、順番の確認と並べ直しの対象）か。
+-- false は管理作業（防除、追肥、除草、灌水、株の手入れ、その他）。管理作業の計画と実績は、入力の窓で入れる
 alter table field.work_types add column if not exists plannable boolean not null default true;
 
 insert into field.work_types (code, label, sort, default_days, min_gap_days, scope, plannable) values
   ('nursery_sow', '育苗の播種',   85, 1, 0, 'bed', true),
-  ('water',       '灌水',        200, 1, 0, 'bed', false),
-  ('check',       '発芽確認',    210, 1, 0, 'bed', false),
+  ('spray',       '防除',        200, 1, 0, 'bed', false),
+  ('topdress',    '追肥',        210, 1, 0, 'bed', false),
   ('weed',        '除草',        220, 1, 0, 'bed', false),
-  ('spray',       '防除',        230, 1, 0, 'bed', false),
-  ('topdress',    '追肥',        240, 1, 0, 'bed', false),
-  ('install',     '資材の設置',  250, 1, 0, 'bed', false),
-  ('other',       'その他',      260, 1, 0, 'bed', false)
-on conflict (code) do nothing;
+  ('water',       '灌水',        230, 1, 0, 'bed', false),
+  ('care',        '株の手入れ',  240, 1, 0, 'bed', false),
+  ('other',       'その他',      250, 1, 0, 'bed', false)
+on conflict (code) do update set sort = excluded.sort;
+
+-- 発芽確認と資材の設置は、その他の中身にした。これまでの実績を移し替えてから、種類を消す
+update field.work_logs set work_type = 'other', spec = spec || '{"items": ["発芽確認"]}'::jsonb where work_type = 'check';
+update field.work_logs set work_type = 'other', spec = spec || '{"items": ["資材の設置"]}'::jsonb where work_type = 'install';
+delete from field.work_types where code in ('check', 'install');
+
+-- 管理作業の計画の、予定の中身（仕様、株の手入れ・その他の中身、予定の農薬や肥料）。入力の窓の内容をそのまま持つ
+alter table field.works add column if not exists detail jsonb not null default '{}';
+-- 入力の窓で一緒に入力した管理作業の計画のまとまり（直すとき、消すときに「一緒に入力した全部」を選べるように）
+alter table field.works add column if not exists batch_id uuid;
 
 -- 実際に使うプラン。作業の記録は、このプランの畝・作付・作業につなぐ。空なら記録を入れられない
 alter table field.fields add column if not exists active_plan_id uuid references field.plans (id) on delete set null;

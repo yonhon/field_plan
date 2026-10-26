@@ -6,6 +6,7 @@ import {
   diffDays,
   dueWorks,
   harvestEnd,
+  isManagement,
   localToday,
   planProblems,
   scheduleAnchored,
@@ -13,12 +14,13 @@ import {
   scheduleForward,
   typesForCrop,
   workDays,
+  workName,
   worksRange,
 } from "./schedule.js";
 import { cropLabel, plantingNumbers, summarize } from "./crops.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { completeWorks, logForWork, moveLogs, openLogEditor } from "./log-view.js";
+import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor } from "./log-view.js";
 import { lateWorks, layoutBars, logEnd, withActualDates, workActuals, workStatus } from "./logs.js";
 import { loadPref, savePref } from "./prefs.js";
 import { PAGE_PX, printPage } from "./print.js";
@@ -60,7 +62,8 @@ function typesFor(owner) {
   return typesForCrop(state().workTypes, cropOf(planting), planting ? plantingWorks(planting.id) : []);
 }
 const typeFor = (owner, code) => typesFor(owner).find((type) => type.code === code);
-const typeLabel = (code) => typeOf(code)?.label || code;
+// 工程の作業の種類になければ（管理作業）、すべての種類から探す
+const typeLabel = (code) => typeOf(code)?.label || anyTypeLabel(code);
 const bySeq = (a, b) => a.seq - b.seq;
 
 const blockBeds = (blockId) => state().beds.filter((bed) => bed.block_id === blockId).sort(bySeq);
@@ -73,8 +76,11 @@ export const isActivePlan = () => state().field.active_plan_id === state().plan.
 // 計画の作業の実績（作業の ID → { start, end }）。実際に使うプランでなければ空
 export const currentActuals = () => (isActivePlan() ? workActuals(state().logs || []) : new Map());
 
+// 工程の作業だけ。管理作業（防除など）は「作業の計画」の表と並べ直しの対象にしない（入力の窓で入れる）
+const processOnly = (works) => works.filter((work) => !isManagement(work.work_type));
+
 const kindOf = (owner) => (owner.block_id ? "block" : "bed");
-const worksOf = (owner) => (owner.block_id ? blockWorks(owner.block_id) : plantingWorks(owner.planting_id));
+const worksOf = (owner) => processOnly(owner.block_id ? blockWorks(owner.block_id) : plantingWorks(owner.planting_id));
 
 function formatDay(iso) {
   const [year, month, day] = iso.split("-").map(Number);
@@ -208,11 +214,11 @@ function weekItem({ work, works, places }, actuals, late) {
     ? ""
     : done
       ? `<button class="text-btn" data-week="edit-log" data-ids="${ids}">修正</button>`
-      : `<button class="chip-btn" data-week="edit" data-ids="${ids}" title="日付や内容を入れて記録します（初めは計画の日）">修正</button>` +
-        `<button class="primary-btn" data-week="done" data-ids="${ids}" title="計画どおりの日に行ったものとして記録します">完了</button>`;
+      : `<button class="chip-btn" data-week="edit" data-ids="${ids}" title="日付や内容を入れて、実績を入力します（初めは計画の日）">修正</button>` +
+        `<button class="primary-btn" data-week="done" data-ids="${ids}" title="計画どおりの日に行ったものとして、実績を入力します">完了</button>`;
   return (
     `<li class="${done ? "is-done" : ""}"><span class="week-date">${done ? "✓ " : ""}${formatRange(work)}</span>` +
-    `<span class="week-work"><span class="swatch" style="background:${TYPE_COLORS[work.work_type] || "#888"}"></span>${escapeHtml(typeLabel(work.work_type))}</span>` +
+    `<span class="week-work"><span class="swatch" style="background:${TYPE_COLORS[work.work_type] || "#888"}"></span>${escapeHtml(workName(typeLabel(work.work_type), work.detail?.spec))}</span>` +
     `<span class="muted">${escapeHtml(where)}${places.length === 1 && work.note ? ` / ${escapeHtml(work.note)}` : ""}${status ? `・${escapeHtml(status)}` : ""}</span>` +
     `${buttons ? `<span class="week-actions">${buttons}</span>` : ""}</li>`
   );
@@ -246,6 +252,11 @@ async function onWeekClick(event) {
     return;
   }
   if (button.dataset.week === "done") {
+    // 防除と追肥は、農薬や肥料の量を入れないと実績にならないので、計画の中身を入れた実績の窓を開く
+    if (["spray", "topdress"].includes(works[0].work_type)) {
+      openLogEditor(null, { works: works.filter((work) => !currentActuals().get(work.id)?.end) });
+      return;
+    }
     button.disabled = true;
     await completeWorks(works);
   } else if (button.dataset.week === "edit") {
@@ -381,7 +392,7 @@ function renderGantt() {
     ? mode === "both"
       ? "区画と畝ごとに、上の段が計画、下の段が実績です。計画の段の帯は、ドラッグで動かせます。"
       : mode === "act"
-        ? "記録の日です。計画にない作業（灌水、防除など）も出ます。"
+        ? "実績の日です。計画にない実績（灌水、防除など）も出ます。"
         : ""
     : "実績は、実際に使うプランを開くと出せます。";
   $("ganttModeNote").hidden = !$("ganttModeNote").textContent;
@@ -446,7 +457,10 @@ function renderGantt() {
       .map((bar, k) => {
         const { work, extra = "" } = dated[bar.item];
         const days = diffDays(bar.start, bar.end) + 1;
-        const tip = `<strong>${escapeHtml(typeLabel(work.work_type))}${escapeHtml(extra)}</strong>${fullDay(work.plan_start)} 〜 ${fullDay(work.plan_end)}（${workDays(work)} 日）`;
+        const name = workName(typeLabel(work.work_type), work.detail?.spec);
+        const tip =
+          `<strong>${escapeHtml(name)}${escapeHtml(extra)}</strong>${fullDay(work.plan_start)} 〜 ${fullDay(work.plan_end)}（${workDays(work)} 日）` +
+          (isManagement(work.work_type) && isActivePlan() ? "<br>押すと計画を直せます。Ctrl を押しながら横に動かすとコピー" : "");
         return (
           `<span class="gantt-bar${cutClass(bar)}${picked.has(work.id) ? " is-picked" : ""}${flaggedWorks.has(work.id) ? " is-flagged" : ""}" data-id="${work.id}" data-tip="${escapeHtml(tip)}" ` +
           `style="left:${x(bar.start)}px;width:${days * DAY_PX}px;${laneStyle(bar)}background-color:${TYPE_COLORS[work.work_type] || "#888"}">` +
@@ -463,7 +477,7 @@ function renderGantt() {
         const span = spans[bar.item];
         const days = diffDays(bar.start, bar.end) + 1;
         const range = span.start === span.end ? fullDay(span.start) : `${fullDay(span.start)} 〜 ${fullDay(span.end)}`;
-        const tip = `<strong>${escapeHtml(anyTypeLabel(span.type))}（実績${span.open ? "。まだ終わっていない" : ""}）</strong>${range}${canEdit() ? "<br>ドラッグで記録の日を動かせます" : ""}`;
+        const tip = `<strong>${escapeHtml(anyTypeLabel(span.type))}（実績${span.open ? "。まだ終わっていない" : ""}）</strong>${range}${canEdit() ? "<br>ドラッグで実績の日を動かせます" : ""}`;
         return (
           `<span class="gantt-actual-bar${cutClass(bar)}${span.open ? " is-open" : ""}" data-tip="${escapeHtml(tip)}" data-logs="${span.logs.join(",")}" ` +
           `data-start="${span.start}" data-end="${span.end}" data-type="${span.type}" ` +
@@ -679,7 +693,7 @@ function worksBlock(owner) {
 
 // 作付 1 つぶんの欄。見出しの行に、折りたたみ、品目、削除。その下に並べ直しの欄と作業の表
 function plantingSection(planting) {
-  const works = plantingWorks(planting.id);
+  const works = processOnly(plantingWorks(planting.id));
   const crop = cropOf(planting);
   const closed = folded.has(planting.id);
   const end = harvestEnd(works);
@@ -766,7 +780,7 @@ function arrangeDefault(owner, mode) {
     const starts = blockBeds(owner.block_id)
       .map((bed) => bedPlantings(bed.id)[0])
       .filter(Boolean)
-      .map((planting) => worksRange(plantingWorks(planting.id))?.start)
+      .map((planting) => worksRange(processOnly(plantingWorks(planting.id)))?.start)
       .filter(Boolean);
     return starts.sort()[0] || "";
   }
@@ -874,7 +888,7 @@ function draftWorks(crop, owner = {}) {
 // 前の作付（なければ区画）の作業が終わり、あける日数も過ぎた最初の日。どちらにも日付がなければ空
 function earliestStart(bed, seq) {
   const earlier = bedPlantings(bed.id).filter((item) => item.seq < seq).at(-1);
-  return startAfter(earlier ? plantingWorks(earlier.id) : blockWorks(bed.block_id));
+  return startAfter(processOnly(earlier ? plantingWorks(earlier.id) : blockWorks(bed.block_id)));
 }
 
 // 作付に、ひな形の作業を入れる。日付は品目の日数（収穫開始まで、収穫の日数）で決める。
@@ -1385,13 +1399,23 @@ function initGanttEditing() {
       renderSchedule();
       return;
     }
+    const pressed = state().works.find((work) => work.id === drag.id);
     if (!drag.moved) {
-      // 動かさずに離した: その行を「作業の計画」で開く
-      openInSchedule(drag.row.dataset.block ? "block" : "bed", drag.row.dataset.block || drag.row.dataset.bed);
+      // 動かさずに離した: 管理作業の計画は、入力の窓で開く。工程の作業は、その行を「作業の計画」で開く
+      if (pressed && isManagement(pressed.work_type) && isActivePlan()) {
+        openPlanEditor(pressed);
+      } else {
+        openInSchedule(drag.row.dataset.block ? "block" : "bed", drag.row.dataset.block || drag.row.dataset.bed);
+      }
       renderSchedule();
       return;
     }
     const works = pickedWorks();
+    // 同じ行の中で Ctrl を押しながら動かした管理作業の計画は、その日数だけ後ろ（前）にコピーする（繰り返しの計画）
+    if (!target && drag.days && event.ctrlKey && works.every((work) => isManagement(work.work_type)) && isActivePlan()) {
+      copyPlanWorks(works, drag.days).then(() => renderSchedule());
+      return;
+    }
     if (target) {
       run(async () => {
         const first = works.map((work) => addDays(work.plan_start, drag.days)).sort()[0];
@@ -1444,7 +1468,7 @@ function initGanttEditing() {
     actualDrag.parts.forEach((part) => (part.style.transform = `translateX(${actualDrag.days * DAY_PX}px)`));
     const { start, end, type } = actualDrag.bar.dataset;
     const moved = (iso) => fullDay(addDays(iso, actualDrag.days));
-    tip.innerHTML = `<strong>${escapeHtml(anyTypeLabel(type))}の記録</strong>${start === end ? moved(start) : `${moved(start)} 〜 ${moved(end)}`}`;
+    tip.innerHTML = `<strong>${escapeHtml(anyTypeLabel(type))}の実績</strong>${start === end ? moved(start) : `${moved(start)} 〜 ${moved(end)}`}`;
     tip.hidden = false;
     tip.style.left = `${Math.max(8, Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8))}px`;
     tip.style.top = `${event.clientY + 18}px`;

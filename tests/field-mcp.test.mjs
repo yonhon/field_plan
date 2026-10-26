@@ -318,6 +318,37 @@ test("get_records: 何日かにわたる記録は、始めた日と終えた日�
   assert.equal((await inField("get_records", { work: "防除" })).data.records[0].end_date, undefined);
 });
 
+test("管理作業: 計画に management の印、株の手入れは中身を名前に添える", async () => {
+  const data = {
+    ...DATA,
+    works: [
+      ...DATA.works,
+      { ...work("m1", { planting_id: "p1" }, "spray", 9, "2027-04-20", "2027-04-20"), detail: { spec: {}, inputs: [] }, batch_id: "x" },
+      { ...work("m2", { planting_id: "p1" }, "care", 10, "2027-04-22", "2027-04-22"), detail: { spec: { items: ["摘葉", "誘引"] } }, batch_id: "y" },
+    ],
+    workTypes: [...DATA.workTypes, { code: "care", label: "株の手入れ", sort: 240, default_days: 1, min_gap_days: 0, scope: "bed", plannable: false }],
+    workLogs: [
+      ...DATA.workLogs,
+      {
+        id: "l9", field_id: "f1", date: "2027-04-23", work_type: "care", finishes: false, spec: { items: ["土寄せ"] }, note: "", created_at: "2027-04-23T09:00:00Z",
+        targets: [{ id: "x9", log_id: "l9", planting_id: "p1", bed_id: "bed1", block_id: "b1", work_id: null, label: "区画1 畝1 葉ネギ", crop_name: "葉ネギ", area_m2: 31.2, spray_l: null }],
+        inputs: [],
+      },
+    ],
+  };
+  const { inField } = setup({ data });
+  const works = (await inField("get_schedule", { from: "2027-04-20", to: "2027-04-22" })).data.works;
+  assert.deepEqual(
+    works.filter((item) => item.management).map((item) => item.work),
+    ["防除", "株の手入れ（摘葉・誘引）"]
+  );
+  // 管理作業は、工程の作業と重なっても、日程の無理として挙げない
+  assert.deepEqual((await inField("get_plan")).data.problems.filter((problem) => /防除|株の手入れ/.test(problem.message)), []);
+  // 実績の名前にも中身。作業の名前の一部（中身）で絞れる
+  assert.equal((await inField("get_records", { work: "摘葉" })).data.records.length, 0);
+  assert.equal((await inField("get_records", { work: "土寄せ" })).data.records[0].work, "株の手入れ（土寄せ）");
+});
+
 test("get_pesticide_usage: 作付ごとの使用回数と上限", async () => {
   const { inField, call } = setup();
   const usage = (await inField("get_pesticide_usage")).data;

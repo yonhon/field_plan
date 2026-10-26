@@ -26,7 +26,7 @@
         <button class="tab-btn is-active" data-view="map">圃場図<span id="mapBadge" class="tab-badge" hidden></span></button>
         <button class="tab-btn" data-view="schedule">日程<span id="scheduleBadge" class="tab-badge" hidden></span></button>
         <button class="tab-btn" data-view="crops">品目</button>
-        <button class="tab-btn" data-view="journal">記録</button>
+        <button class="tab-btn" data-view="journal">履歴</button>
       </nav>
       <div class="header-right">
         <button id="undoBtn" class="text-btn edit-only" title="元に戻す（Ctrl+Z）" hidden>↶ 元に戻す</button>
@@ -248,7 +248,7 @@
 
       <section class="panel">
         <div class="panel-heading">
-          <h2 id="logTitle">最近の記録</h2>
+          <h2 id="logTitle">最近の実績</h2>
           <button id="logToggle" class="text-btn" hidden>すべて</button>
         </div>
         <p id="logNote" class="muted" hidden></p>
@@ -338,7 +338,7 @@
             <button id="pastePickedBtn" class="chip-btn">貼り付け</button>
             <button id="deletePickedBtn" class="text-btn danger">削除</button>
           </div>
-          <p class="muted edit-only">帯をクリックで選択（Ctrl を押しながらで、同じ行の帯を複数）。ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。貼り付け先は、行をクリックして選んだ区画や畝です。</p>
+          <p class="muted edit-only">帯をクリックで選択（Ctrl を押しながらで、同じ行の帯を複数）。ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。貼り付け先は、行をクリックして選んだ区画や畝です。管理作業（防除、除草など）の帯は、押すと計画の窓が開き、Ctrl を押しながら横に動かして離すと、その日へコピーします。管理作業の計画は「＋ 入力する」で計画に切り替えて入れます。</p>
           <div id="gantt"></div>
         </section>
 
@@ -363,7 +363,7 @@
         </section>
       </div>
 
-      <button id="logAddBtn" class="fab" type="button">＋ 記録する</button>
+      <button id="logAddBtn" class="fab" type="button">＋ 入力する</button>
     </main>
 
     <main id="plantingView" class="schedule" hidden>

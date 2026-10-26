@@ -1,7 +1,7 @@
 // 作業の記録の計算。画面（log-view.js）とテストから使う。
 // 記録はプランではなく圃場に付け、実際に使うプランの区画・畝・作付・作業へは ID でつなぐ。
 import { bedAngle, centroid, crossRange, polygonArea, rectSize } from "./geometry.js";
-import { addDays, diffDays, existsOn, worksRange } from "./schedule.js";
+import { addDays, diffDays, existsOn, isManagement, worksRange } from "./schedule.js";
 
 const bySeq = (a, b) => a.seq - b.seq;
 
@@ -36,7 +36,7 @@ export function plantingStart(planting, works, logs = []) {
     .filter((log) => (log.targets || []).some((target) => target.planting_id === planting.id))
     .map((log) => log.date)
     .sort()[0];
-  return recorded || worksRange(works.filter((work) => work.planting_id === planting.id))?.start || null;
+  return recorded || worksRange(works.filter((work) => work.planting_id === planting.id && !isManagement(work.work_type)))?.start || null;
 }
 
 // その日に畝にある作付。その日までに始まった作付のうち、いちばん新しいもの。まだどれも始まっていなければ、次に来る作付。
@@ -194,7 +194,8 @@ export function withActualDates(works, actuals) {
 // 作業どうしの間隔は保つ（計画で手で空けた間隔や、品目の設定値のない作付の収穫までの間隔を崩さないため）。
 // 返り値は { days, works }（days はずらす日数、works はずらした作業）。終わった作業がなければ null
 export function shiftAfterActual(works, actuals) {
-  const sorted = [...works].sort(bySeq);
+  // 管理作業（防除など）は、遅れに合わせてずらさない
+  const sorted = works.filter((work) => !isManagement(work.work_type)).sort(bySeq);
   let anchor = -1;
   sorted.forEach((work, i) => {
     if (actuals.get(work.id)?.end && work.plan_end) {
@@ -312,6 +313,7 @@ export const SPEC_FIELDS = {
     ["width_cm", "幅（cm）"],
   ],
   harvest: [["harvest_kg", "収穫量（kg）"]],
+  care: [["thin_gap_cm", "間引きで残した株間（cm）"]],
 };
 
 // 記録の仕様を短い文にする。例: 株間（cm） 30・条数 3・千鳥
