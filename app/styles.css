@@ -255,6 +255,17 @@ h3 {
   width: 100%;
 }
 
+/* チェック欄は幅いっぱいにしない。数の欄の下の端にそろえる */
+.form-grid input[type="checkbox"] {
+  width: auto;
+}
+
+.form-grid label.check {
+  gap: 6px;
+  align-self: end;
+  min-height: 34px;
+}
+
 .planting-bar {
   margin-top: 8px;
 }
@@ -2003,6 +2014,7 @@ body.plan-busy #scheduleView {
 .detail-line {
   font-size: 12px;
   color: #3d5154;
+  white-space: pre-line; /* メモの改行を生かし、長い行は折り返す（表のセルは折り返さない設定） */
 }
 
 .detail-gap td {

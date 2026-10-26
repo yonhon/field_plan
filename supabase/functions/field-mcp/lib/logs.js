@@ -358,6 +358,10 @@ export function usageTable(logs, plantingId, cropName) {
   const sorted = [...logs].filter((log) => (log.targets || []).some((target) => target.planting_id === plantingId)).sort((a, b) => a.date.localeCompare(b.date));
   for (const log of sorted) {
     for (const input of log.inputs || []) {
+      // 使用基準の写しがない記録でも、本剤の名前は記録に入れた名前で出す（登録番号のままにしない）
+      if (input.kind === "pesticide" && input.reg_no && !productRows.has(String(input.reg_no))) {
+        productRows.set(String(input.reg_no), { name: input.name || String(input.reg_no), max: null });
+      }
       const standard = input.kind === "pesticide" && input.standard;
       if (!standard) {
         continue;

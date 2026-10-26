@@ -257,6 +257,9 @@ test("農薬の使用回数は、作付ごとに、登録番号と有効成分�
   // 最後の防除（3/12）と、収穫 7 日前まで
   assert.equal(firstHarvestDay(logs, "p1", "レタス"), "2026-03-19");
   assert.equal(firstHarvestDay(logs, "p2", "レタス"), null);
+  // 使用基準の写しがない記録は、本剤の名前を記録に入れた名前で出す。上限は空
+  const plain = usageTable([spray("s4", "2026-03-01", ["p1"], [{ kind: "pesticide", reg_no: "300", name: "粒剤 5", standard: null }])], "p1", "レタス");
+  assert.deepEqual(plain.products, [{ reg_no: "300", count: 1, name: "粒剤 5", max: null }]);
 });
 
 test("防除の指摘", () => {
