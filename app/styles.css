@@ -2245,6 +2245,80 @@ body.plan-busy #scheduleView {
   margin: 2px 0 6px;
 }
 
+/* 品目の「FAMIC の作物名」。選んだ名前のチップと、検索欄 */
+.famic-crops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 240px;
+  max-width: 340px;
+  white-space: normal;
+}
+
+.famic-chip {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #eef5f5;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.famic-chip-x {
+  flex: none;
+  padding: 0 4px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.famic-chip-x:hover {
+  color: var(--danger);
+}
+
+.crop-table .famic-search {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+/* 候補の一覧。表の外に置き、長い名前も折り返して全部見せる */
+.famic-suggest {
+  position: fixed;
+  z-index: 60;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(19, 38, 42, 0.16);
+  font-size: 13px;
+}
+
+.famic-suggest li {
+  padding: 6px 10px;
+  border-bottom: 1px solid #eef3f3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.famic-suggest li.is-active,
+.famic-suggest li[data-famic-pick]:hover {
+  background: #e3f0f0;
+}
+
+.famic-suggest .famic-more {
+  cursor: default;
+  font-size: 12px;
+}
+
 .famic-warn {
   color: #9c2f25;
 }

@@ -24,8 +24,11 @@ const CROP_FIELDS = [
   ["harvest_days", "収穫の日数", "int"],
   ["note", "メモ", "text"],
 ];
-// 農薬の使用基準（FAMIC）を使うときだけ出す欄。品目に対応する FAMIC の作物名（「、」で区切って複数）
-const FAMIC_FIELD = ["famic_crops", "FAMIC の作物名（、で区切る）", "list"];
+// 農薬の使用基準（FAMIC）を使うときだけ出す欄。品目に対応する FAMIC の作物名（複数）。
+// 作物名には「野菜類(レタス、キャベツ、…を除く)」や「稲、麦類、果樹類、…」のように「、」を含むものがあるので、
+// 文字を区切って読むのではなく、候補から 1 つずつ選んで足す
+const FAMIC_FIELD = ["famic_crops", "FAMIC の作物名", "list"];
+const MAX_SUGGEST = 40; // 候補の一覧に出す数
 const cropFields = () => (famicEnabled() ? [...CROP_FIELDS.slice(0, -1), FAMIC_FIELD, CROP_FIELDS.at(-1)] : CROP_FIELDS);
 const FERTILIZER_FIELDS = [
   ["name", "銘柄", "text"],
@@ -35,6 +38,8 @@ const FERTILIZER_FIELDS = [
 ];
 
 let ctx = null; // { state, setStatus }
+let famicNames = []; // FAMIC の作物名の候補（適用部にある作物名）
+let suggestFor = null; // 候補の一覧を出している検索欄
 
 async function run(action) {
   ctx.setStatus("保存中…");
@@ -62,7 +67,10 @@ function cell(row, [key, , kind]) {
     return `<input type="text" data-field="${key}" value="${escapeHtml(value)}" />`;
   }
   if (kind === "list") {
-    return `<input type="text" data-field="${key}" list="famicCropList" placeholder="例: キャベツ、野菜類" value="${escapeHtml((value || []).join("、"))}" />`;
+    const chips = (value || [])
+      .map((name) => `<span class="famic-chip">${escapeHtml(name)}<button type="button" class="famic-chip-x" data-famic-remove="${escapeHtml(name)}" aria-label="${escapeHtml(name)} を外す">×</button></span>`)
+      .join("");
+    return `<div class="famic-crops" data-list="${key}">${chips}<input type="text" class="famic-search" placeholder="作物名を探して足す（例: レタス）" autocomplete="off" /></div>`;
   }
   return `<input type="number" min="0" step="${kind === "int" ? 1 : "any"}" data-field="${key}" value="${value ?? ""}" />`;
 }
@@ -96,10 +104,6 @@ function parse(input, kind) {
   if (kind === "fertilizer") {
     return input.value || null;
   }
-  if (kind === "list") {
-    // 全角にそろえて（FAMIC の作物名と同じ形）、区切りで分ける
-    return [...new Set(input.value.normalize("NFKC").split(/[、,\s]+/).map((name) => name.trim()).filter(Boolean))];
-  }
   if (input.value.trim() === "") {
     return null;
   }
@@ -113,6 +117,180 @@ function unusedName(rows, base) {
     name = `${base} ${n}`;
   }
   return name;
+}
+
+// 1 つの欄の値を保存する。変更の記録には、変える前と後の値を、読める形で書く
+function saveValue(storeTable, row, field, value) {
+  const shown = (item) =>
+    field[2] === "check"
+      ? item ? "あり" : "なし"
+      : field[2] === "fertilizer"
+        ? ctx.state.fertilizers.find((entry) => entry.id === item)?.name || "なし"
+        : field[2] === "list"
+          ? (item || []).join(" ／ ") || "空"
+          : item === null || item === "" ? "空" : item;
+  const what = storeTable === "crops" ? "品目" : "肥料";
+  record({
+    kind: `${storeTable}.${field[0]}`,
+    target: [storeTable === "crops" ? "crop" : "fertilizer", row.id],
+    plan: false,
+    text: field[0] === "name" ? `${what}の名前を変更` : `${what}「${row.name}」の${field[1]}を変更`,
+    before: shown(row[field[0]]),
+    after: shown(value),
+  });
+  row[field[0]] = value;
+  run(async () => {
+    await ctx.state.store.upsert(storeTable, [row]);
+    // 品目の名前を変えたら、作付に写してある名前も合わせる
+    if (storeTable === "crops" && field[0] === "name") {
+      const plantings = ctx.state.plantings.filter((planting) => planting.crop_id === row.id);
+      plantings.forEach((planting) => {
+        planting.crop_name = value;
+      });
+      await ctx.state.store.upsert("plantings", plantings);
+    }
+  });
+}
+
+// ---- FAMIC の作物名の選択 ----
+// 選んだ名前はチップで並べ、× で外す。検索欄に入れた文字を含む作物名を、候補の一覧に出す。
+// 候補の一覧は表の外（body の直下）に置き、長い名前も折り返して全部見せる
+
+const suggestBox = () => $("famicSuggest");
+
+function matches(query) {
+  const q = query.trim().normalize("NFKC");
+  if (!q) {
+    return [];
+  }
+  const hits = famicNames.filter((name) => name.includes(q));
+  // 同じ名前、その文字で始まる名前、短い名前の順
+  const rank = (name) => (name === q ? 0 : name.startsWith(q) ? 1 : 2);
+  return hits.sort((a, b) => rank(a) - rank(b) || a.length - b.length || a.localeCompare(b, "ja"));
+}
+
+function hideSuggest() {
+  suggestFor = null;
+  suggestBox().hidden = true;
+}
+
+function showSuggest(input) {
+  const crop = ctx.state.crops.find((item) => item.id === input.closest("tr[data-id]")?.dataset.id);
+  const chosen = new Set(crop?.famic_crops || []);
+  const hits = matches(input.value).filter((name) => !chosen.has(name));
+  const box = suggestBox();
+  if (!input.value.trim()) {
+    hideSuggest();
+    return;
+  }
+  suggestFor = input;
+  box.innerHTML = hits.length
+    ? hits
+        .slice(0, MAX_SUGGEST)
+        .map((name, i) => `<li role="option" data-famic-pick="${escapeHtml(name)}"${i === 0 ? ' class="is-active"' : ""}>${escapeHtml(name)}</li>`)
+        .join("") + (hits.length > MAX_SUGGEST ? `<li class="muted famic-more">ほかに ${hits.length - MAX_SUGGEST} 件。文字を足して絞ってください。</li>` : "")
+    : `<li class="muted famic-more">${famicNames.length ? "合う作物名がありません。" : "作物名の一覧を読めていません。"}</li>`;
+  box.hidden = false;
+  placeSuggest();
+}
+
+// 候補の一覧を、検索欄のすぐ下に置く。検索欄が画面から外れたら閉じる
+function placeSuggest() {
+  const box = suggestBox();
+  if (!suggestFor || box.hidden) {
+    return;
+  }
+  const rect = suggestFor.getBoundingClientRect();
+  if (!suggestFor.isConnected || rect.bottom < 0 || rect.top > window.innerHeight) {
+    hideSuggest();
+    return;
+  }
+  const width = Math.min(Math.max(rect.width, 360), window.innerWidth - 16);
+  box.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+  box.style.top = `${rect.bottom + 2}px`;
+  box.style.width = `${width}px`;
+  box.style.maxHeight = `${Math.max(160, window.innerHeight - rect.bottom - 16)}px`;
+}
+
+function changeFamicCrops(input, change) {
+  const row = ctx.state.crops.find((item) => item.id === input.closest("tr[data-id]")?.dataset.id);
+  if (!row) {
+    return;
+  }
+  const next = change([...(row.famic_crops || [])]);
+  saveValue("crops", row, FAMIC_FIELD, next);
+}
+
+function pick(name) {
+  const input = suggestFor;
+  hideSuggest();
+  if (input) {
+    changeFamicCrops(input, (list) => (list.includes(name) ? list : [...list, name]));
+  }
+}
+
+function moveActive(step) {
+  const items = [...suggestBox().querySelectorAll("[data-famic-pick]")];
+  if (!items.length) {
+    return;
+  }
+  const now = items.findIndex((item) => item.classList.contains("is-active"));
+  const next = items[(now + step + items.length) % items.length];
+  items.forEach((item) => item.classList.toggle("is-active", item === next));
+  next.scrollIntoView({ block: "nearest" });
+}
+
+function initFamicPicker() {
+  const table = $("cropTable");
+  table.addEventListener("input", (event) => {
+    if (event.target.classList.contains("famic-search")) {
+      showSuggest(event.target);
+    }
+  });
+  table.addEventListener("focusin", (event) => {
+    if (event.target.classList.contains("famic-search") && event.target.value.trim()) {
+      showSuggest(event.target);
+    }
+  });
+  table.addEventListener("focusout", (event) => {
+    if (event.target === suggestFor) {
+      hideSuggest();
+    }
+  });
+  table.addEventListener("keydown", (event) => {
+    if (event.target !== suggestFor || suggestBox().hidden) {
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      moveActive(event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const active = suggestBox().querySelector("[data-famic-pick].is-active");
+      if (active) {
+        pick(active.dataset.famicPick);
+      }
+    } else if (event.key === "Escape") {
+      hideSuggest();
+    }
+  });
+  table.addEventListener("click", (event) => {
+    const remove = event.target.closest("[data-famic-remove]");
+    if (remove) {
+      changeFamicCrops(remove, (list) => list.filter((name) => name !== remove.dataset.famicRemove));
+    }
+  });
+  // 押した時点で検索欄からフォーカスが外れて一覧が閉じないよう、mousedown で選ぶ
+  suggestBox().addEventListener("mousedown", (event) => {
+    const item = event.target.closest("[data-famic-pick]");
+    event.preventDefault();
+    if (item) {
+      pick(item.dataset.famicPick);
+    }
+  });
+  // 表を横に送ったり、画面を動かしたりしたら、一覧を検索欄に付いていかせる（候補の中のスクロールは除く）
+  window.addEventListener("scroll", (event) => event.target !== suggestBox() && placeSuggest(), true);
+  window.addEventListener("resize", placeSuggest);
 }
 
 function bind(tableId, storeTable, fields, rowsOf, afterDelete) {
@@ -129,36 +307,7 @@ function bind(tableId, storeTable, fields, rowsOf, afterDelete) {
       renderCrops();
       return;
     }
-    // 記録には、変える前の名前と、読める形の値を書く
-    const shown = (item) =>
-      field[2] === "check"
-        ? item ? "あり" : "なし"
-        : field[2] === "fertilizer"
-          ? ctx.state.fertilizers.find((entry) => entry.id === item)?.name || "なし"
-          : field[2] === "list"
-            ? (item || []).join("、") || "空"
-            : item === null || item === "" ? "空" : item;
-    const what = storeTable === "crops" ? "品目" : "肥料";
-    record({
-      kind: `${storeTable}.${field[0]}`,
-      target: [storeTable === "crops" ? "crop" : "fertilizer", row.id],
-      plan: false,
-      text: field[0] === "name" ? `${what}の名前を変更` : `${what}「${row.name}」の${field[1]}を変更`,
-      before: shown(row[field[0]]),
-      after: shown(value),
-    });
-    row[field[0]] = value;
-    run(async () => {
-      await ctx.state.store.upsert(storeTable, [row]);
-      // 品目の名前を変えたら、作付に写してある名前も合わせる
-      if (storeTable === "crops" && field[0] === "name") {
-        const plantings = ctx.state.plantings.filter((planting) => planting.crop_id === row.id);
-        plantings.forEach((planting) => {
-          planting.crop_name = value;
-        });
-        await ctx.state.store.upsert("plantings", plantings);
-      }
-    });
+    saveValue(storeTable, row, field, value);
   });
   $(tableId).addEventListener("click", (event) => {
     const id = event.target.closest("tr[data-id]")?.dataset.id;
@@ -177,9 +326,10 @@ export function initCrops(context) {
     state.store
       .famicCropNames()
       .then((names) => {
-        $("famicCropList").innerHTML = names.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+        famicNames = names;
       })
       .catch(() => {});
+    initFamicPicker();
   }
   bind("cropTable", "crops", cropFields, () => state.crops, async (crop) => {
     const used = state.plantings.filter((planting) => planting.crop_id === crop.id);
