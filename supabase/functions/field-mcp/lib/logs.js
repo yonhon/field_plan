@@ -405,15 +405,15 @@ export function firstHarvestDay(logs, plantingId, cropName) {
   return first;
 }
 
-// 防除の記録を入れるときの指摘。保存は止めない。
-// groups は品目のまとまりごとの { name, area, liters, row（その品目の使用基準。なければ null）, plantings: [{ id, harvestStart }] }。
-// countsOf(作付の ID) はその作付のこれまでの使用回数（pesticideCounts の結果）
+// 防除の記録を入れるときの指摘。保存は止めない。選んだ作物名の基準に照らした結果だけを出し、
+// 作物名の当てはめが正しいかは判定しない（指摘が出ないことを、正しい印と受け取られないように）。
+// groups は品目のまとまりごとの { name, area, liters, row（選んだ作物名と使い方の基準。まだ選んでいなければ null）,
+// plantings: [{ id, harvestStart }] }。countsOf(作付の ID) はその作付のこれまでの使用回数（pesticideCounts の結果）
 export function sprayWarnings({ date, dilution, regNo, ingredients = [], groups, countsOf }) {
   const warnings = [];
   for (const group of groups) {
     const row = group.row;
     if (!row) {
-      warnings.push(`${group.name}: この品目には使用基準がありません（この品目には使えない農薬の可能性があります）`);
       continue;
     }
     if (dilution && row.dilution_min && dilution < row.dilution_min) {
@@ -460,6 +460,50 @@ export function sprayWarnings({ date, dilution, regNo, ingredients = [], groups,
     }
   }
   return [...new Set(warnings)];
+}
+
+// 記録の使用基準の写しから、品目のまとまりで選んだ作物名と使い方（use_key は「適用病害虫|使用方法」）。
+// 品目で選んだ記録は品目の名前（crop_name）で、区画で選んだ記録はまとまりの名前（group）で探す。
+// 使い方を写しの一番上に持つ形（品目ごとに選ぶ前の記録）も読む
+export function standardChoice(standard, { cropName = "", groupName = "" }) {
+  const row = (standard?.rows || []).find((item) => (cropName ? item.crop_name === cropName : item.group === groupName));
+  if (!row?.crop) {
+    return null;
+  }
+  const target = row.target ?? standard.target;
+  const method = row.method ?? standard.method;
+  return { crop: row.crop, use_key: target && method ? `${target}|${method}` : "" };
+}
+
+// 防除の記録を入れるときの、品目のまとまりの初めの選択。前回の選択を入れる。
+// 1. その品目（区画）に同じ農薬を使った、いちばん新しい記録の作物名と使い方
+// 2. なければ、その品目（区画）でいちばん新しく選んだ作物名（この農薬の作物名にあるときだけ。使い方は 1 つしかなければそれ）
+// rows はこの農薬の使用基準の行（{ crop, target, method }）。見つからなければ null
+export function previousChoice(logs, { regNo, cropName = "", groupName = "", excludeLogId = null }, rows) {
+  const keysOf = (crop) => [...new Set(rows.filter((row) => row.crop === crop).map((row) => `${row.target}|${row.method}`))];
+  const sorted = logs
+    .filter((log) => log.id !== excludeLogId)
+    .sort((a, b) => b.date.localeCompare(a.date) || String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  let fallback = null;
+  for (const log of sorted) {
+    for (const input of log.inputs || []) {
+      if (input.kind !== "pesticide" || !input.standard) {
+        continue;
+      }
+      const choice = standardChoice(input.standard, { cropName, groupName });
+      if (!choice || !keysOf(choice.crop).length) {
+        continue;
+      }
+      if (String(input.reg_no) === String(regNo)) {
+        return { crop: choice.crop, use_key: keysOf(choice.crop).includes(choice.use_key) ? choice.use_key : "" };
+      }
+      if (!fallback) {
+        const keys = keysOf(choice.crop);
+        fallback = { crop: choice.crop, use_key: keys.length === 1 ? keys[0] : "" };
+      }
+    }
+  }
+  return fallback;
 }
 
 // 選んだ品目の使用基準の行から、初めの希釈倍率。下限（いちばん濃くしてよい倍率）のうち、いちばん大きいもの。

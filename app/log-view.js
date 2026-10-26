@@ -562,14 +562,13 @@ function spraySection(items) {
       .map((input) => `<p class="muted">${escapeHtml(input.name)}の希釈倍率は、いちばん厳しい${escapeHtml(input._dilutionBy)}の基準（${input._dilutionValue} 倍）に合わせました。直せます。</p>`)
       .join("");
     standards =
-      (draft.mode === "blocks" ? '<p class="muted">区画で選んだときは、品目の使用基準とは照らしません。</p>' : "") +
-      (boxes ? `<div class="log-section"><h3>品目ごとの使用基準</h3>${boxes}${notes}<p class="muted" id="logBaseline"></p>` +
+      (boxes ? `<div class="log-section"><h3>${draft.mode === "blocks" ? "区画" : "品目"}ごとの使用基準</h3>${boxes}${notes}<p class="muted" id="logBaseline"></p>` +
         `<p class="muted"><a href="${famic.NOTICE_URL}" target="_blank" rel="noopener">総使用回数についての注意事項（FAMIC）</a></p></div>` : "");
   }
   return `${standards}<div class="log-section"><h3>実際に散布した液の量</h3>${rows}<p class="muted" id="logSprayTotal"></p></div><ul class="famic-warnings" id="logWarnings" hidden></ul>`;
 }
 
-// 防除の対象の、品目のまとまり（区画で選ぶときは区画）。使用基準を照らすための形
+// 防除の対象の、品目のまとまり（区画で選ぶときは区画）。作物名と使い方を選び、使用基準を照らす単位
 function sprayGroups(items = pickedItems()) {
   const groups = new Map();
   for (const item of items) {
@@ -581,7 +580,6 @@ function sprayGroups(items = pickedItems()) {
         cropName: choice?.name || "",
         area: 0,
         plantingIds: [],
-        famicCrops: [],
       });
     }
     const group = groups.get(item.group);
@@ -589,9 +587,6 @@ function sprayGroups(items = pickedItems()) {
     if (item.planting_id) {
       group.plantingIds.push(item.planting_id);
     }
-  }
-  for (const group of groups.values()) {
-    group.famicCrops = draft.mode === "crops" ? famic.famicCropsOf(group.plantingIds, data) : [];
   }
   return [...groups.values()];
 }
@@ -651,7 +646,7 @@ function updateTotals() {
   if (!famic.famicEnabled() || draft.work_type !== "spray") {
     return;
   }
-  const groups = draft.mode === "crops" ? sprayGroups() : [];
+  const groups = sprayGroups();
   // 基準散布量の合計と、そこから計算した製品の量（散布する前に、作る液の量を決めるため）
   const baseline = famic.baselineLiters(draft.inputs, groups);
   const baselineBox = dialog.querySelector("#logBaseline");
@@ -697,6 +692,14 @@ function setType(code) {
   updateTotals();
 }
 
+// 希釈倍率が空か、前に基準に合わせた値なら、選んだ作物名のうち、いちばん厳しい基準に合わせる
+function applySuggestedDilution(input) {
+  const suggested = famic.suggestedDilution(input, sprayGroups());
+  if (suggested && (num(input.dilution) === null || input._dilutionBy)) {
+    Object.assign(input, { dilution: suggested.value, _dilutionBy: suggested.by, _dilutionValue: suggested.value });
+  }
+}
+
 function onClick(event) {
   const button = event.target.closest("[data-act]");
   if (!button || button.tagName === "INPUT") {
@@ -723,6 +726,16 @@ function onClick(event) {
   } else if (act === "famic-pick") {
     const i = Number(button.closest(".log-input").querySelector("[data-results]").dataset.results);
     famic.pick(draft.inputs[i], button.dataset.reg, sprayGroups()).catch((error) => showError(`使用基準を読めませんでした: ${error.message}`));
+  } else if (act === "famic-crop") {
+    const input = draft.inputs[Number(button.dataset.i)];
+    famic.chooseCrop(input, button.dataset.g, button.dataset.crop, sprayGroups());
+    applySuggestedDilution(input);
+    renderDialog();
+    updateTotals();
+  } else if (act === "famic-crop-reset") {
+    famic.resetCrop(draft.inputs[Number(button.dataset.i)], button.dataset.g);
+    renderDialog();
+    updateTotals();
   } else if (act === "famic-unpick") {
     famic.unpick(draft.inputs[Number(button.dataset.i)]);
     renderDialog();
@@ -862,14 +875,10 @@ function onChange(event) {
   } else if (el.dataset.spec && el.type === "checkbox") {
     draft.spec[el.dataset.spec] = el.checked;
   } else if (el.dataset.in !== undefined && el.dataset.k === "use_key") {
-    // 使い方・適用病害虫を選んだ: 使い方を使用基準のものにし、希釈倍率が空なら、いちばん厳しい品目の基準に合わせる
+    // まとまりの使い方・適用病害虫を選んだ: 使い方を使用基準のものにし、希釈倍率をいちばん厳しい基準に合わせる
     const input = draft.inputs[Number(el.dataset.in)];
-    input.use_key = el.value;
-    input.method = el.value ? el.value.split("|")[1] : input.method;
-    const suggested = famic.suggestedDilution(input, sprayGroups());
-    if (suggested && (num(input.dilution) === null || input._dilutionBy)) {
-      Object.assign(input, { dilution: suggested.value, _dilutionBy: suggested.by, _dilutionValue: suggested.value });
-    }
+    famic.chooseUse(input, el.dataset.g, el.value, sprayGroups());
+    applySuggestedDilution(input);
     renderDialog();
     updateTotals();
   } else if (el.dataset.in !== undefined && el.tagName === "SELECT") {
@@ -885,6 +894,18 @@ function onChange(event) {
 
 function onInput(event) {
   const el = event.target;
+  if (el.dataset.famicFilter !== undefined) {
+    // 作物名の絞り込み: 一覧だけを描き直す（入れている文字を消さないため）
+    const i = Number(el.dataset.famicFilter);
+    const input = draft.inputs[i];
+    input._filters[el.dataset.g] = el.value;
+    const group = sprayGroups().find((item) => item.key === el.dataset.g);
+    const list = el.closest(".famic-choice")?.querySelector(".famic-crop-list");
+    if (group && list) {
+      list.innerHTML = famic.cropListHtml(input, i, group);
+    }
+    return;
+  }
   if (el.dataset.f === "note") {
     draft.note = el.value;
   } else if (el.dataset.spec && el.type !== "checkbox") {
@@ -957,7 +978,7 @@ function buildLog() {
       spec[key] = num(value);
     }
   }
-  const groups = kind === "pesticide" && famic.famicEnabled() && draft.mode === "crops" ? sprayGroups(items) : [];
+  const groups = kind === "pesticide" && famic.famicEnabled() ? sprayGroups(items) : [];
   const inputs = draft.inputs
     .filter((input) => (input.name || "").trim() || input.fertilizer_id || input.amount !== null || input.dilution !== null)
     .map((input, seq) => {
@@ -1006,6 +1027,19 @@ async function save() {
     showError("対象の畝か区画を選んでください。");
     return;
   }
+  // 登録番号のある農薬は、まとまりごとに作物名と使い方を選ばないと保存しない（当てはまる作物名がなければ使えない農薬）
+  if (draft.work_type === "spray" && famic.famicEnabled()) {
+    const missing = famic.missingChoices(draft.inputs, sprayGroups());
+    if (missing.length) {
+      const first = missing[0];
+      showError(
+        first.input._uses
+          ? `${first.input.name}: ${first.group.name}の作物名と使い方・適用病害虫を選んでください。登録されている作物名に当てはまるものがなければ、この農薬は使えません。`
+          : `${first.input.name}: 使用基準を読み込んでいます。少し待ってから保存してください。`
+      );
+      return;
+    }
+  }
   const button = dialog.querySelector('[data-act="save"]');
   button.disabled = true;
   ctx.setStatus("記録を保存中…");
@@ -1050,6 +1084,7 @@ export function initLogs(context) {
   ctx = context;
   famic.initPesticide({
     state: context.state,
+    draftId: () => draft?.id || null,
     // 使用基準を読み終えたら、窓を描き直す（入れかけの文字は draft に入っている）
     refresh: () => {
       if (draft && dialog?.open) {

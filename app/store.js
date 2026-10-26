@@ -183,12 +183,9 @@ export function createSupabaseStore(client, options) {
     async loadProducts(regNos) {
       return regNos.length ? check(await client.from("famic_products").select("*").in("reg_no", regNos.map(Number)).order("ord")) : [];
     },
-    async loadUses(regNo, crops) {
-      return crops.length ? check(await client.from("famic_uses").select("*").eq("reg_no", Number(regNo)).in("crop", crops)) : [];
-    },
-    // FAMIC の作物名の一覧。1 回に 1,000 行までしか返らないので、分けて読む
-    async famicCropNames() {
-      return (await allRows(() => client.from("famic_crop_names").select("crop").order("crop"))).map((row) => row.crop);
+    // 農薬 1 つの使用基準を、すべての作物名の分読む（多いもので 700 行ほど。1 回に 1,000 行までなので、分けて読む）
+    async loadUses(regNo) {
+      return allRows(() => client.from("famic_uses").select("*").eq("reg_no", Number(regNo)).order("id"));
     },
     async famicVersion() {
       const rows = check(await client.from("famic_imports").select("*").order("id", { ascending: false }).limit(1));
@@ -437,13 +434,9 @@ export function createLocalStore() {
       const { products = [] } = read().famic || {};
       return products.filter((row) => regNos.map(Number).includes(row.reg_no));
     },
-    async loadUses(regNo, crops) {
+    async loadUses(regNo) {
       const { uses = [] } = read().famic || {};
-      return uses.filter((row) => row.reg_no === Number(regNo) && crops.includes(row.crop));
-    },
-    async famicCropNames() {
-      const { uses = [] } = read().famic || {};
-      return [...new Set(uses.map((row) => row.crop))].sort();
+      return uses.filter((row) => row.reg_no === Number(regNo));
     },
     async saveFieldWeather(fieldId, { base_lat, base_lng, weather }) {
       update((data) => {

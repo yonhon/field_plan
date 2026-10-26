@@ -10,7 +10,9 @@ import {
   lateWorks,
   matchWork,
   pesticideCounts,
+  previousChoice,
   sprayWarnings,
+  standardChoice,
   usageTable,
   shiftAfterActual,
   specDiff,
@@ -278,9 +280,47 @@ test("防除の指摘", () => {
   assert.ok(warnings.some((text) => text.includes("成分A を含む農薬の使用回数が、この防除で 4 回")));
   assert.ok(!warnings.some((text) => text.includes("成分B を含む農薬の使用回数")));
   assert.ok(warnings.some((text) => text.includes("収穫の開始（03/25）まで 5 日")));
-  assert.deepEqual(sprayWarnings({ ...base, dilution: 2000, groups: [group({ row: null })], countsOf: () => none }), [
-    "レタス: この品目には使用基準がありません（この品目には使えない農薬の可能性があります）",
-  ]);
+  // 作物名をまだ選んでいない品目は、何も言わない（当てはめの正誤は判定しない）
+  assert.deepEqual(sprayWarnings({ ...base, dilution: 2000, groups: [group({ row: null })], countsOf: () => none }), []);
+});
+
+test("作物名と使い方の選択: 写しから読む、前回の選択を入れる", () => {
+  // 品目ごとに選んだ写し（品目の名前で探す）と、区画で選んだ写し（まとまりの名前で探す）
+  const perGroup = { rows: [{ crop_name: "リーフレタス", group: "リーフレタス（マルチ）", crop: "非結球レタス", target: "アブラムシ類", method: "散布" }] };
+  assert.deepEqual(standardChoice(perGroup, { cropName: "リーフレタス" }), { crop: "非結球レタス", use_key: "アブラムシ類|散布" });
+  assert.equal(standardChoice(perGroup, { cropName: "キャベツ" }), null);
+  const block = { rows: [{ crop_name: "", group: "区画1", crop: "野菜類", target: "一年生雑草", method: "全面土壌散布" }] };
+  assert.deepEqual(standardChoice(block, { groupName: "区画1" }), { crop: "野菜類", use_key: "一年生雑草|全面土壌散布" });
+  // 品目ごとに選ぶ前の写し（使い方を一番上に持つ）
+  const old = { target: "ネキリムシ類", method: "土壌混和", rows: [{ crop_name: "リーフレタス", crop: "レタス" }] };
+  assert.deepEqual(standardChoice(old, { cropName: "リーフレタス" }), { crop: "レタス", use_key: "ネキリムシ類|土壌混和" });
+  assert.equal(standardChoice(null, { cropName: "リーフレタス" }), null);
+
+  // この農薬（100）の使用基準の行
+  const rows = [
+    { crop: "非結球レタス", target: "アブラムシ類", method: "散布" },
+    { crop: "非結球レタス", target: "ヨトウムシ", method: "散布" },
+    { crop: "レタス", target: "アブラムシ類", method: "散布" },
+    { crop: "野菜類(いちごを除く)", target: "ハダニ類", method: "散布" },
+  ];
+  const input = (regNo, crop, target) => ({ kind: "pesticide", reg_no: regNo, standard: { rows: [{ crop_name: "リーフレタス", crop, target, method: "散布" }] } });
+  const log = (id, date, inputs) => ({ id, date, inputs });
+  const where = { regNo: 100, cropName: "リーフレタス" };
+  // 1. 同じ農薬の、いちばん新しい記録の選択（ほかの農薬の記録が新しくても）
+  const logs = [
+    log("a", "2026-09-01", [input(100, "レタス", "アブラムシ類")]),
+    log("b", "2026-10-01", [input(100, "非結球レタス", "ヨトウムシ")]),
+    log("c", "2026-10-10", [input(200, "野菜類(いちごを除く)", "ハダニ類")]),
+  ];
+  assert.deepEqual(previousChoice(logs, where, rows), { crop: "非結球レタス", use_key: "ヨトウムシ|散布" });
+  // 直している記録の選択は使わない
+  assert.deepEqual(previousChoice(logs, { ...where, excludeLogId: "b" }, rows), { crop: "レタス", use_key: "アブラムシ類|散布" });
+  // 2. 同じ農薬の記録がなければ、その品目でいちばん新しく選んだ作物名（この農薬にあるときだけ。使い方は 1 つならそれ）
+  assert.deepEqual(previousChoice([logs[2]], where, rows), { crop: "野菜類(いちごを除く)", use_key: "ハダニ類|散布" });
+  assert.deepEqual(previousChoice([log("d", "2026-10-11", [input(300, "非結球レタス", "ナメクジ類")])], where, rows), { crop: "非結球レタス", use_key: "" });
+  // この農薬にない作物名や、ほかの品目の選択は使わない
+  assert.equal(previousChoice([log("e", "2026-10-12", [input(300, "だいこん", "アブラムシ類")])], where, rows), null);
+  assert.equal(previousChoice(logs, { regNo: 100, cropName: "キャベツ" }, rows), null);
 });
 
 test("初めの希釈倍率は、下限のうちいちばん大きいもの", () => {

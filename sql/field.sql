@@ -417,12 +417,10 @@ create table if not exists field.famic_uses (
 
 create index if not exists famic_uses_reg_crop_idx on field.famic_uses (reg_no, crop);
 
--- 適用部にある作物名の一覧（品目の画面で、FAMIC の作物名を選ぶときの候補）
-create or replace view field.famic_crop_names with (security_invoker = on) as
-  select distinct crop from field.famic_uses where crop <> '' order by crop;
-
--- 品目に対応する FAMIC の作物名（複数）。防除の記録で選べる使用基準は、この作物名の行だけ
-alter table field.crops add column if not exists famic_crops text[] not null default '{}';
+-- 品目と FAMIC の作物名の対応は、前もって決めない。防除を記録するときに、農薬に登録されている作物名から
+-- 品目ごとに選び、記録の写し（work_log_inputs.standard）に残す。以前の対応の列と、その候補の一覧は消す
+drop view if exists field.famic_crop_names;
+alter table field.crops drop column if exists famic_crops;
 
 -- 入れ替えの途中の表。取り込み係がここに分けて入れ、field.famic_finish() が本番の表と入れ替える
 create table if not exists field.famic_products_next (like field.famic_products including all);
