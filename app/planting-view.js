@@ -50,6 +50,9 @@ export function openPlantingDetail(kind, id) {
   Object.assign(target, { kind, id });
 }
 
+// 開いている作付（区画）。画面の URL に書く
+export const plantingTarget = () => ({ ...target });
+
 // 開いている相手の、区画・畝・作付と、計画の作業、記録
 function context() {
   const s = state();
@@ -767,6 +770,8 @@ function onClick(event) {
   if (act === "back") {
     ctx.showView("schedule");
   } else if (act === "go") {
+    // 隣の作付へは、履歴を積まずに URL を置き換える（戻るボタンで、日程にすぐ戻れるように）
+    history.replaceState({ fieldPlanView: "planting" }, "", `#detail/${el.dataset.kind}/${el.dataset.id}`);
     openPlantingDetail(el.dataset.kind, el.dataset.id);
     renderPlantingDetail();
     window.scrollTo(0, 0);

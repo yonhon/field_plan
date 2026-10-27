@@ -37,7 +37,7 @@ import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
 import { initLogs, renderLogs } from "./log-view.js";
-import { initPlantingView, openPlantingDetail, renderPlantingDetail } from "./planting-view.js";
+import { initPlantingView, openPlantingDetail, plantingTarget, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
@@ -2442,7 +2442,40 @@ $("rotation").addEventListener("change", (event) => {
 // ---- 圃場図と日程の切り替え ----
 
 // 作付の詳細（planting）は、日程のタブの中の画面として扱う
-function showView(view) {
+// 画面の URL。#map、#schedule、#crops、#journal、作付の詳細は #detail/planting/作付の ID、区画の詳細は #detail/block/区画の ID。
+// 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）
+const VIEW_NAMES = ["map", "schedule", "crops", "journal"];
+
+function routeFromHash() {
+  const hash = decodeURIComponent(location.hash.slice(1));
+  const detail = /^detail\/(planting|block)\/([\w-]+)$/.exec(hash);
+  if (detail) {
+    return { view: "planting", kind: detail[1], id: detail[2] };
+  }
+  return VIEW_NAMES.includes(hash) ? { view: hash } : null;
+}
+
+function hashOf(view) {
+  if (view === "planting") {
+    const target = plantingTarget();
+    return `#detail/${target.kind}/${target.id}`;
+  }
+  return `#${view}`;
+}
+
+function openRoute(route, mode) {
+  if (route.view === "planting") {
+    openPlantingDetail(route.kind, route.id);
+  }
+  showView(route.view, { history: mode });
+}
+
+// history: push（履歴に積む）、replace（いまの履歴を書き換える）、none（戻る・進むで来たので、触らない）
+function showView(view, { history: mode = "push" } = {}) {
+  const hash = hashOf(view);
+  if (mode !== "none" && location.hash !== hash) {
+    window.history[mode === "replace" ? "replaceState" : "pushState"]({ fieldPlanView: view }, "", hash);
+  }
   const tab = view === "planting" ? "schedule" : view;
   document.querySelectorAll(".tab-btn").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.view === tab);
@@ -2470,6 +2503,14 @@ function showView(view) {
 
 document.querySelectorAll(".tab-btn").forEach((button) => {
   button.addEventListener("click", () => showView(button.dataset.view));
+});
+
+// ブラウザーの戻る・進み。URL の画面を出す（アプリを開く前の画面では何もしない）
+window.addEventListener("popstate", () => {
+  if ($("viewTabs").hidden) {
+    return;
+  }
+  openRoute(routeFromHash() || { view: "map" }, "none");
 });
 
 // 記録の行をクリックしたときに、その相手を開く。もうないものは開けない
@@ -2617,16 +2658,22 @@ async function startApp() {
   initWeather({ state, setStatus: (text) => ($("saveStatus").textContent = text), onWeatherChanged: renderPlantingDetail });
   renderWeatherSettings();
   syncWeather();
-  // スマホは作業の確認が主なので、日程から開く。
-  // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）
-  if (window.matchMedia("(max-width: 800px)").matches) {
-    showView("schedule");
+  // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホは作業の確認が主なので日程、PC は圃場図。
+  // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）。履歴の画面は、読み込んでから開く
+  const route = routeFromHash();
+  if (route && route.view !== "journal") {
+    openRoute(route, "replace");
+  } else if (!route) {
+    showView(window.matchMedia("(max-width: 800px)").matches ? "schedule" : "map", { history: "replace" });
   }
   initCrops({ state, setStatus: (text) => ($("saveStatus").textContent = text) });
   try {
     await initJournal({ state, openTarget, setStatus: (text) => ($("saveStatus").textContent = text) });
   } catch (error) {
     $("saveStatus").textContent = `変更の履歴を読み込めませんでした: ${error.message}`;
+  }
+  if (route?.view === "journal") {
+    openRoute(route, "replace");
   }
   initHistory({
     state,
