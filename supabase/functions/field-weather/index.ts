@@ -14,11 +14,37 @@ const CORS = {
 const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
-// 地点の一覧。ページの部品（bundle.js）に埋め込まれている。日本語の一覧が先にある
+// 地点の一覧。ページの部品（bundle.js）に埋め込まれている。日本語の一覧が先にある。
+// 一覧には、予報のデータを出していない地点も多く入っている（2026-10 に 155 地点のうち 92 地点）ので、
+// データのある地点だけを返す。確かめた結果は、関数が動いているあいだ 6 時間覚えておく
+const STATIONS_TTL_MS = 6 * 60 * 60 * 1000;
+let stationsCache: { at: number; list: { no: number; name: string; fuk: number }[] } | null = null;
+
 async function stations() {
+  if (stationsCache && Date.now() - stationsCache.at < STATIONS_TTL_MS) {
+    return stationsCache.list;
+  }
   const text = await (await fetch(`${BASE}/top/js/bundle.js`)).text();
   const block = /stnData:\[(.*?)\]/s.exec(text)?.[1] ?? "";
-  return [...block.matchAll(/\{No:(\d+),Name:"([^"]+)",Fuk:(\d+)/g)].map((m) => ({ no: Number(m[1]), name: m[2], fuk: Number(m[3]) }));
+  const all = [...block.matchAll(/\{No:(\d+),Name:"([^"]+)",Fuk:(\d+)/g)].map((m) => ({ no: Number(m[1]), name: m[2], fuk: Number(m[3]) }));
+  const available = new Set<number>();
+  for (let i = 0; i < all.length; i += 20) {
+    const part = all.slice(i, i + 20);
+    const found = await Promise.all(
+      part.map((item) =>
+        fetch(`${BASE}/data/Latest/data_${item.no}.json`, { method: "HEAD" })
+          .then((response) => response.ok)
+          .catch(() => false)
+      )
+    );
+    part.forEach((item, k) => found[k] && available.add(item.no));
+  }
+  const list = all.filter((item) => available.has(item.no));
+  // 気象庁を読めなかった（1 地点もない）ときは覚えず、次の呼び出しで読み直す
+  if (list.length) {
+    stationsCache = { at: Date.now(), list };
+  }
+  return list;
 }
 
 type Item = { yy: number; mm: number; dd: number; elem: number; fcst?: number; lower?: number; upper?: number };

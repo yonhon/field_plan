@@ -327,9 +327,12 @@ function forecastHtml() {
     forecast.loading = true;
     Promise.all([
       officeForecast(settings.office),
-      settings.twoweek ? state().store.twoWeek(settings.twoweek).catch(() => null) : null,
+      // 2 週間気温予報を読めなくても、週間天気予報の分は出す（読めなかったことだけを知らせる）
+      settings.twoweek ? state().store.twoWeek(settings.twoweek).catch(() => false) : null,
     ])
-      .then(([json, twoWeek]) => Object.assign(forecast, { key, days: addTwoWeek(parseForecast(json, settings, today), twoWeek, today), error: "" }))
+      .then(([json, twoWeek]) =>
+        Object.assign(forecast, { key, days: addTwoWeek(parseForecast(json, settings, today), twoWeek || null, today), error: "", twoWeekFailed: twoWeek === false })
+      )
       .catch((error) => Object.assign(forecast, { key, days: null, error: error.message }))
       .finally(() => {
         forecast.loading = false;
@@ -365,8 +368,11 @@ function forecastHtml() {
     .join("");
   return (
     `<section class="panel">${title}<table class="wx-forecast"><thead><tr><th>日</th><th>天気</th><th>気温</th><th>降水確率</th><th>風</th></tr></thead><tbody>${rows}</tbody></table>` +
-    '<p class="muted">風は 3 日目まで（矢印は風の吹いていく向き）。8 日目からは気温だけで、2 週間気温予報の値（薄い文字）。予報は先の日ほど外れやすい。</p>' +
-    '<p class="muted wx-source">気象庁の予報を加工して作成</p></section>'
+    // 出典だけを書く。2 週間気温予報を読めなかったときは、その知らせを先頭に出し、出典からも外す
+    (forecast.twoWeekFailed
+      ? '<p class="muted wx-source"><span class="error">2 週間気温予報を読めませんでした。</span>出典: 気象庁の予報（府県天気予報）を加工して作成</p>'
+      : '<p class="muted wx-source">出典: 気象庁の予報（府県天気予報・2 週間気温予報）を加工して作成</p>') +
+    "</section>"
   );
 }
 
