@@ -6,7 +6,7 @@ import { openLogEditor, uncancelWork } from "./log-view.js";
 import { bedAreas, compressedAxis, dayGap, firstHarvestDay, inputText, logEnd, plantingStart, shiftAfterActual, specDiff, specText, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, localToday, workName } from "./schedule.js";
-import { ICON_LABELS, accumulate, addTwoWeek, fetchStations, parseForecast, weatherIcon } from "./weather.js";
+import { ICON_LABELS, accumulate, addTwoWeek, fetchAreas, fetchStations, parseForecast, weatherIcon } from "./weather.js";
 import { officeForecast, weatherSettings } from "./weather-view.js";
 import {
   actualSpans,
@@ -315,6 +315,14 @@ const ICONS = {
 };
 
 // これから 2 週間の予報。予報はまだ読んでいなければ読みにいく
+// 予報の出典。選んだ区域と地点の名前を書く。2 週間気温予報を読めなかったときは、その知らせを先頭に出し、出典から外す
+function forecastSource(settings) {
+  const office = `${forecast.areaName ? `${forecast.areaName}の` : ""}府県天気予報`;
+  const twoWeek = settings.twoweek && !forecast.twoWeekFailed ? `・${forecast.twoWeekName ? `${forecast.twoWeekName}の` : ""}2 週間気温予報` : "";
+  const failed = forecast.twoWeekFailed ? '<span class="error">2 週間気温予報を読めませんでした。</span>' : "";
+  return `<p class="muted wx-source">${failed}出典: 気象庁の予報（${escapeHtml(office + twoWeek)}）を加工して作成</p>`;
+}
+
 function forecastHtml() {
   const settings = weatherSettings();
   const title = "<h2>これから 2 週間の予報</h2>";
@@ -329,9 +337,18 @@ function forecastHtml() {
       officeForecast(settings.office),
       // 2 週間気温予報を読めなくても、週間天気予報の分は出す（読めなかったことだけを知らせる）
       settings.twoweek ? state().store.twoWeek(settings.twoweek).catch(() => false) : null,
+      // 出典に書く区域の名前（予報区の一覧は、気象の欄でも読んでいるので、手元に残っていればそれを使う）
+      fetchAreas().catch(() => null),
     ])
-      .then(([json, twoWeek]) =>
-        Object.assign(forecast, { key, days: addTwoWeek(parseForecast(json, settings, today), twoWeek || null, today), error: "", twoWeekFailed: twoWeek === false })
+      .then(([json, twoWeek, areas]) =>
+        Object.assign(forecast, {
+          key,
+          days: addTwoWeek(parseForecast(json, settings, today), twoWeek || null, today),
+          error: "",
+          twoWeekFailed: twoWeek === false,
+          areaName: areas?.class10s?.[settings.area]?.name || areas?.offices?.[settings.office]?.name || "",
+          twoWeekName: twoWeek?.name || "",
+        })
       )
       .catch((error) => Object.assign(forecast, { key, days: null, error: error.message }))
       .finally(() => {
@@ -369,9 +386,7 @@ function forecastHtml() {
   return (
     `<section class="panel">${title}<table class="wx-forecast"><thead><tr><th>日</th><th>天気</th><th>気温</th><th>降水確率</th><th>風</th></tr></thead><tbody>${rows}</tbody></table>` +
     // 出典だけを書く。2 週間気温予報を読めなかったときは、その知らせを先頭に出し、出典からも外す
-    (forecast.twoWeekFailed
-      ? '<p class="muted wx-source"><span class="error">2 週間気温予報を読めませんでした。</span>出典: 気象庁の予報（府県天気予報）を加工して作成</p>'
-      : '<p class="muted wx-source">出典: 気象庁の予報（府県天気予報・2 週間気温予報）を加工して作成</p>') +
+    forecastSource(settings) +
     "</section>"
   );
 }

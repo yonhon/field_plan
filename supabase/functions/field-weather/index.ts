@@ -2,7 +2,7 @@
 // 気象庁の 2 週間気温予報のデータは、ブラウザーから直接は読めない（CORS を許していない）ので、ここで読んで返す。
 // 配備: supabase functions deploy field-weather（JWT を確かめる。画面からログインした利用者だけが呼べる）
 // 呼び方（POST の JSON）:
-//   { station: 47662 } → { report, days: [{ date, max, min, max_lower, max_upper, min_lower, min_upper }] }
+//   { station: 47662 } → { report, name, days: [{ date, max, min, max_lower, max_upper, min_lower, min_upper }] }
 //   { list: true }     → { stations: [{ no, name, fuk }] }（地点の一覧）
 const BASE = "https://www.data.jma.go.jp/cpd/twoweek";
 const CORS = {
@@ -20,13 +20,27 @@ const reply = (body: unknown, status = 200) =>
 const STATIONS_TTL_MS = 6 * 60 * 60 * 1000;
 let stationsCache: { at: number; list: { no: number; name: string; fuk: number }[] } | null = null;
 
+// 一覧にあるすべての地点（データのない地点も含む）。地点の名前を引くのにも使う
+let allCache: { at: number; list: { no: number; name: string; fuk: number }[] } | null = null;
+
+async function allStations() {
+  if (allCache && Date.now() - allCache.at < STATIONS_TTL_MS) {
+    return allCache.list;
+  }
+  const text = await (await fetch(`${BASE}/top/js/bundle.js`)).text();
+  const block = /stnData:\[(.*?)\]/s.exec(text)?.[1] ?? "";
+  const list = [...block.matchAll(/\{No:(\d+),Name:"([^"]+)",Fuk:(\d+)/g)].map((m) => ({ no: Number(m[1]), name: m[2], fuk: Number(m[3]) }));
+  if (list.length) {
+    allCache = { at: Date.now(), list };
+  }
+  return list;
+}
+
 async function stations() {
   if (stationsCache && Date.now() - stationsCache.at < STATIONS_TTL_MS) {
     return stationsCache.list;
   }
-  const text = await (await fetch(`${BASE}/top/js/bundle.js`)).text();
-  const block = /stnData:\[(.*?)\]/s.exec(text)?.[1] ?? "";
-  const all = [...block.matchAll(/\{No:(\d+),Name:"([^"]+)",Fuk:(\d+)/g)].map((m) => ({ no: Number(m[1]), name: m[2], fuk: Number(m[3]) }));
+  const all = await allStations();
   const available = new Set<number>();
   for (let i = 0; i < all.length; i += 20) {
     const part = all.slice(i, i + 20);
@@ -90,7 +104,14 @@ Deno.serve(async (request) => {
       return reply({ error: "station を指定してください" }, 400);
     }
     const result = await forecast(station);
-    return result ? reply(result) : reply({ error: "この地点の 2 週間気温予報を読めませんでした" }, 404);
+    if (!result) {
+      return reply({ error: "この地点の 2 週間気温予報を読めませんでした" }, 404);
+    }
+    // 地点の名前も返す（画面の出典に書く）。名前を引けなくても、予報は返す
+    const name = await allStations()
+      .then((list) => list.find((item) => item.no === station)?.name ?? null)
+      .catch(() => null);
+    return reply({ ...result, name });
   } catch (error) {
     return reply({ error: String(error) }, 502);
   }
