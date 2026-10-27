@@ -267,7 +267,7 @@ export async function openLogEditor(log = null, preset = {}) {
       ? log.targets.some((target) => target.bed_id || target.planting_id) || !log.targets.length
         ? "crops"
         : "blocks"
-      : presetWorks.some((work) => work.block_id)
+      : presetWorks.some((work) => work.block_id) || (!presetWorks.length && preset.blockId)
         ? "blocks"
         : "crops",
     beds: new Set(),
@@ -281,6 +281,9 @@ export async function openLogEditor(log = null, preset = {}) {
   const existing = log ? log.targets : ownerWorks.map((work) => ({ ...targetForWork(work, draft.date), work_id: work.id }));
   if (!log && preset.plantingId) {
     existing.push(targetForWork({ planting_id: preset.plantingId }, draft.date));
+  }
+  if (!log && preset.blockId && !presetWorks.length) {
+    existing.push(targetForWork({ block_id: preset.blockId }, draft.date));
   }
   if (existing.length) {
     const choices = currentChoices();
@@ -1513,6 +1516,7 @@ export function initLogs(context) {
       openLogEditor(log);
     }
   });
-  $("logAddBtn").addEventListener("click", () => openLogEditor());
+  // 工程表で行を選んでいれば、その畝（区画）を対象に入れて開く
+  $("logAddBtn").addEventListener("click", () => openLogEditor(null, ctx.selectedTarget?.() || {}));
   renderLogs();
 }

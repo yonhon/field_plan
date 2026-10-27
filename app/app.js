@@ -42,7 +42,7 @@ import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
-import { initSchedule, openInSchedule, renderSchedule } from "./schedule-view.js";
+import { initSchedule, openInSchedule, renderSchedule, selectedRowPreset } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore } from "./store.js";
 
 const config = window.FIELD_PLAN_CONFIG;
@@ -2606,7 +2606,7 @@ async function startApp() {
     renderSchedule();
     renderPlantingDetail();
   };
-  initLogs({ state, activePlanData, setStatus: (text) => ($("saveStatus").textContent = text), onLogsChanged: refreshRecords });
+  initLogs({ state, activePlanData, setStatus: (text) => ($("saveStatus").textContent = text), onLogsChanged: refreshRecords, selectedTarget: selectedRowPreset });
   initPlantingView({
     state,
     showView,

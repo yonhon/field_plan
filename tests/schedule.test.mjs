@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_WORK_TYPES as types,
   MANAGEMENT_TYPES,
+  dayWidth,
+  ganttWindow,
   isManagement,
   workName,
   TEMPLATES,
@@ -229,4 +231,15 @@ test("かかる日数が 1 日の作業は、前後の作業と同じ日に重�
   // あとに空ける日数がある作業（すき込みのあとの 21 日）は、1 日でも同じ日に重ねない
   const incorporate = sequenceProblems([work("incorporate", "2027-06-01", "2027-06-01"), work("ridge", "2027-06-01", "2027-06-01")], types);
   assert.equal(incorporate.length, 1);
+});
+
+test("工程表の表示期間と、1 日の幅", () => {
+  // 全体は作業のある範囲。3 か月と 1 か月は今日を中心に
+  assert.deepEqual(ganttWindow("all", "2026-07-01", "2027-06-30", "2026-10-27"), { from: "2026-07-01", to: "2027-06-30" });
+  assert.deepEqual(ganttWindow("3m", "2026-07-01", "2027-06-30", "2026-10-27"), { from: "2026-09-12", to: "2026-12-11" });
+  assert.deepEqual(ganttWindow("1m", "2026-07-01", "2027-06-30", "2026-10-27"), { from: "2026-10-12", to: "2026-11-11" });
+  // 期間が幅にちょうど収まる幅。狭すぎれば 5px（横に送る）、広すぎれば 60px
+  assert.equal(dayWidth(910, 91), 10);
+  assert.equal(dayWidth(1000, 365), 5);
+  assert.equal(dayWidth(1000, 10), 60);
 });

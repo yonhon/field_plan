@@ -1238,96 +1238,125 @@ body.plan-busy #scheduleView {
   white-space: nowrap;
 }
 
-/* 工程表。1 日 7 px（schedule-view.js の DAY_PX）で横に並べる */
+/* 工程表。1 行が 1 つの区画（畝）で、左に名前の列（横に送っても残る）、右に帯の欄。
+   1 日の幅は、表示期間が画面の幅に収まるように schedule-view.js が決める。寸法は schedule-view.js の NAME_W、BAR_TOP、BAR_H と合わせる */
 .gantt-inner {
   position: relative;
-  padding-top: 40px; /* 月の見出し 22px と、今日・開始・目標の札 18px */
 }
 
-.gantt-months {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-}
-
-.gantt-month {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  padding-left: 4px;
-  border-left: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
+.gantt-axis,
 .gantt-row {
-  position: relative;
-  padding: 4px 0;
-  cursor: pointer;
+  display: flex;
+  border-bottom: 1px solid #edf2f2;
+}
+
+.gantt-axis {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--surface);
+  border-bottom-color: var(--line);
+}
+
+.gantt-axis .gantt-track {
+  height: 34px;
+}
+
+.gantt-name {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 180px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .gantt-row.block .gantt-name {
   font-weight: 700;
 }
 
-.gantt-row.bed {
-  padding: 1px 0 1px 12px;
-}
-
-.gantt-row.bed .gantt-name {
-  font-size: 11px;
+.gantt-bed {
+  flex: none;
   color: var(--muted);
 }
 
-.gantt-row.bed .gantt-track {
-  height: 14px;
+.gantt-crops {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
 }
 
-.gantt-row.bed .gantt-bar {
-  font-size: 10px;
-  line-height: 14px;
-}
-
-.gantt-name {
-  position: sticky;
-  left: 0;
-  display: inline-block;
-  padding: 0 4px;
-  background: rgba(255, 255, 255, 0.85);
-  font-size: 12px;
+/* 名前のリンク（区画の名前、畝の番号、品目の名前）。下線も色の変化も付けない */
+.gantt-link {
+  color: inherit;
+  text-decoration: none;
 }
 
 .gantt-track {
   position: relative;
-  height: 22px;
-  border-radius: 4px;
-  background: rgba(200, 216, 215, 0.25);
+  flex: none;
+  height: 34px;
+}
+
+.gantt-month,
+.gantt-week {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding-left: 3px;
+  border-left: 1px solid #d5e2e1;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.gantt-week {
+  top: 17px;
+  border-left-color: #edf2f2;
+}
+
+.gantt-row {
+  cursor: default;
+}
+
+/* 選んだ行（貼り付けの入れ先、「＋ 入力する」の対象）。計画の薄い帯が見えるよう、背景は薄く */
+.gantt-row.is-selected .gantt-name,
+.gantt-row.is-selected .gantt-track {
+  background: #e4efee;
 }
 
 .gantt-bar {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  padding: 0 4px;
-  border-radius: 3px;
+  padding: 0 5px;
+  border-radius: 5px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
   color: #fff;
-  font-size: 11px;
-  line-height: 22px;
+  font-size: 12px;
+  line-height: 26px;
   white-space: nowrap;
   overflow: hidden;
+  cursor: grab;
 }
 
-.gantt-bar {
-  cursor: grab;
+/* 「計画と実績」で、実績のある計画の帯は薄く出し、その下側に実績の細い帯を重ねる */
+.gantt-bar.is-faded {
+  opacity: 0.38;
+  color: var(--text);
+  font-weight: 700;
 }
 
 .gantt-bar.is-picked {
   box-shadow: 0 0 0 2px var(--text), 0 0 0 4px #fff;
+  opacity: 1;
 }
 
 /* ドラッグ中は、動かしている帯を手前に出し、その下にある行を拾えるようにする。
@@ -1341,11 +1370,6 @@ body.plan-busy #scheduleView {
 .gantt-row.is-drop .gantt-track {
   background: #cfe6e3;
   box-shadow: inset 0 0 0 2px var(--accent);
-}
-
-.gantt-row.is-open .gantt-name {
-  color: var(--accent);
-  text-decoration: underline;
 }
 
 .gantt-tools {
@@ -1371,15 +1395,16 @@ body.plan-busy #scheduleView {
 
 .gantt-mark {
   position: absolute;
-  top: 22px;
+  top: 0;
   bottom: 0;
+  z-index: 2;
   border-left: 2px solid var(--text);
   pointer-events: none;
 }
 
 .gantt-mark span {
   position: absolute;
-  top: 0;
+  top: 17px;
   left: 0;
   padding: 0 4px;
   font-size: 11px;
@@ -1765,44 +1790,15 @@ body.plan-busy #scheduleView {
   white-space: nowrap;
 }
 
-/* 工程表の実績の段。計画の段と同じ並びで、ドラッグはできない */
-.gantt-actual {
-  position: relative;
-  padding: 1px 0;
-}
-
-.gantt-actual.block .gantt-name {
-  font-weight: 700;
-}
-
-.gantt-actual.bed {
-  padding: 1px 0 1px 12px;
-}
-
-.gantt-actual.bed .gantt-name {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.gantt-actual .gantt-track {
-  height: 14px;
-  background: rgba(11, 107, 114, 0.07);
-}
-
-.gantt-actual.is-sub {
-  padding-top: 0;
-}
-
+/* 工程表の実績の帯。「計画と実績」では計画の帯の下側に細く重ね、「実績」だけのときは計画の帯と同じ太さ */
 .gantt-actual-bar {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
-  min-width: 4px;
-  padding: 0 4px;
-  border-radius: 3px;
+  z-index: 1;
+  padding: 0 5px;
+  border-radius: 4px;
   color: #fff;
-  font-size: 10px;
-  line-height: 10px;
+  font-size: 12px;
+  line-height: 26px;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -1831,21 +1827,15 @@ body.plan-busy #scheduleView {
   }
 }
 
-.gantt-lane {
-  margin-left: 6px;
-  font-size: 10px;
-  font-weight: 400;
-  color: var(--muted);
+/* 凡例の、計画（薄い）と実績（細い）の見本 */
+.swatch.is-faded-key {
+  background: var(--accent);
+  opacity: 0.38;
 }
 
-.gantt-link {
-  color: inherit;
-  text-decoration: underline dotted;
-  text-underline-offset: 2px;
-}
-
-.gantt-link:hover {
-  color: var(--accent);
+.swatch.is-thin-key {
+  height: 5px;
+  background: var(--accent);
 }
 
 /* ---- 作付の詳細 ---- */

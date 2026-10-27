@@ -5,6 +5,9 @@ import {
   addDays,
   diffDays,
   dueWorks,
+  GANTT_RANGES,
+  dayWidth,
+  ganttWindow,
   harvestEnd,
   isManagement,
   localToday,
@@ -21,7 +24,7 @@ import { cropLabel, plantingNumbers, summarize } from "./crops.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor } from "./log-view.js";
-import { lateWorks, layoutBars, logEnd, withActualDates, workActuals, workStatus } from "./logs.js";
+import { lateWorks, layoutBars, logEnd, plantingOnDate, withActualDates, workActuals, workStatus } from "./logs.js";
 import { loadPref, savePref } from "./prefs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
@@ -30,7 +33,13 @@ const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
   String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-const DAY_PX = 7;
+// 工程表の寸法。1 日の幅は、表示期間が画面の幅に収まるように描くたびに決める（dayPx）
+let dayPx = 7;
+const NAME_W = 180; // 名前の列の幅
+const BAR_TOP = 4; // 帯の欄の上の余白
+const BAR_H = 26; // 計画の帯の高さ（「実績」だけのときは実績の帯も）
+const THIN_H = 10; // 「計画と実績」で計画の帯の下側に重ねる、実績の帯の高さ
+const MIN_BAR_PX = 12; // 1 日の作業も、押せるようにこの幅より細くしない
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 const SCOPE_LABELS = { block: "区画の作業（畝立ての前まで）", bed: "畝の作業（畝立てから後）" };
 
@@ -49,6 +58,10 @@ const ARRANGE_MODES = {
 const picked = new Set(); // 工程表で選んでいる作業の ID
 let clipboard = null; // コピーか切り取りをした作業 { works, cut }
 let barDrag = null; // 工程表で帯をドラッグしている途中の状態
+// 工程表で選んでいる行（"block:区画の ID" か "bed:畝の ID"）。貼り付けの入れ先と、「＋ 入力する」の対象になる。
+// 下の「作業の計画」で開いている区画・畝（sel）とは別に覚える
+let rowSel = null;
+let ganttScrollKey = ""; // 工程表の横の位置を保つための、表示期間とプラン
 let actualDrag = null; // 工程表で実績の帯をドラッグしている途中の状態
 let addingFor = null; // 「作付を追加」の日付の初期値を入れたときの状態
 
@@ -338,6 +351,18 @@ export function ganttMode() {
   return GANTT_MODES[saved] ? saved : "plan";
 }
 
+// 工程表の表示期間（全体／3 か月／1 か月）。圃場ごとに覚える
+export function ganttRange() {
+  const saved = loadPref(state().field.id, "ganttRange");
+  return GANTT_RANGES[saved] ? saved : "3m";
+}
+
+function rangeButtons(range) {
+  return Object.entries(GANTT_RANGES)
+    .map(([key, label]) => `<button type="button" class="chip-btn${key === range ? " is-on" : ""}" data-gantt-range="${key}" aria-pressed="${key === range}">${label}</button>`)
+    .join("");
+}
+
 export function setGanttMode(mode) {
   savePref(state().field.id, "ganttMode", mode);
 }
@@ -384,13 +409,15 @@ export const blockTarget = (blockId) => (target) => !target.bed_id && !target.pl
 // その畝（の作付）の記録か
 export const bedTarget = (bed, plantingIds) => (target) => target.bed_id === bed.id || plantingIds.includes(target.planting_id);
 
-function renderGantt() {
+// fit を渡すと（PDF 出力）、表示期間を「全体」にして、その幅（px）に収める
+function renderGantt(fit = null) {
   const mode = ganttMode();
   $("ganttModes").hidden = !isActivePlan();
   $("ganttModes").innerHTML = modeButtons(mode);
+  $("ganttRanges").innerHTML = rangeButtons(ganttRange());
   $("ganttModeNote").textContent = isActivePlan()
     ? mode === "both"
-      ? "区画と畝ごとに、上の段が計画、下の段が実績です。計画の段の帯は、ドラッグで動かせます。"
+      ? "計画は太い帯、実績は計画の帯の下側に重ねた細い帯です。実績のある計画は薄く出します。"
       : mode === "act"
         ? "実績の日です。計画にない実績（灌水、防除など）も出ます。"
         : ""
@@ -422,27 +449,47 @@ function renderGantt() {
     return;
   }
   const all = [...dated.flatMap((work) => [work.plan_start, work.plan_end]), ...allSpans.flatMap((span) => [span.start, span.end])].sort();
-  const first = `${addDays(all[0], -3).slice(0, 8)}01`;
-  const last = addDays(all.at(-1), 7);
-  const x = (iso) => diffDays(first, iso) * DAY_PX;
-  const width = x(last) + DAY_PX;
   const today = localToday();
+  // 表示期間が画面の幅にちょうど収まるように 1 日の幅を決める。作業のある範囲は全部描くので、期間の外は横に送って見られる
+  const range = fit ? "all" : ganttRange();
+  const dataFirst = `${addDays(all[0], -3).slice(0, 8)}01`;
+  const dataLast = addDays(all.at(-1), 7);
+  const view = ganttWindow(range, dataFirst, dataLast, today);
+  const first = view.from < dataFirst ? view.from : dataFirst;
+  const last = view.to > dataLast ? view.to : dataLast;
+  const available = Math.max(320, (fit || $("gantt").clientWidth || 1000) - NAME_W - 2);
+  dayPx = dayWidth(available, diffDays(view.from, view.to) + 1);
+  const x = (iso) => diffDays(first, iso) * dayPx;
+  const width = Math.ceil(x(last) + dayPx);
+  const barWidth = (start, end) => Math.max(MIN_BAR_PX, (diffDays(start, end) + 1) * dayPx);
 
-  const months = [];
-  for (let day = first; day <= last; day = `${addDays(day, 32).slice(0, 8)}01`) {
-    months.push(`<span class="gantt-month" style="left:${x(day)}px">${Number(day.slice(0, 4))}年${Number(day.slice(5, 7))}月</span>`);
+  // 目盛り: 月の始めと、1 日の幅に余裕があれば週の始め（月曜）
+  const ticks = [];
+  for (let day = first; day <= last; day = addDays(day, 1)) {
+    if (day.endsWith("-01") || day === first) {
+      ticks.push(`<span class="gantt-month" style="left:${x(day)}px">${Number(day.slice(5, 7)) === 1 || day === first ? `${Number(day.slice(0, 4))}年` : ""}${Number(day.slice(5, 7))}月</span>`);
+    } else if (dayPx >= 4 && new Date(`${day}T00:00:00Z`).getUTCDay() === 1) {
+      ticks.push(`<span class="gantt-week" style="left:${x(day)}px">${Number(day.slice(5, 7))}/${Number(day.slice(8))}</span>`);
+    }
   }
   const flaggedWorks = new Set(problems.map((problem) => problem.work_id).filter(Boolean));
   // 帯の置き方（layoutBars）。1 日の作業と長い作業が重なる日は 1 日の作業を描き、長い作業はほかの日に普通の高さで描く。
-  // 上下の段に分けるのは、1 日の作業どうしが同じ日に重なるときだけ
-  const laneStyle = ({ lane, lanes }) => (lanes > 1 ? `top:${(lane * 100) / lanes}%;height:${100 / lanes}%;bottom:auto;` : "");
+  // 上下に分けるのは、1 日の作業どうしが同じ日に重なるときだけ。計画は帯の欄の上から BAR_H の高さ、
+  // 実績は「計画と実績」では計画の帯の下側に細く重ね、「実績」だけのときは計画と同じ太さにする
+  const laneStyle = ({ lane, lanes }, thin = false) => {
+    if (thin && lanes === 1) {
+      return `top:${BAR_TOP + BAR_H - THIN_H}px;height:${THIN_H}px;`;
+    }
+    const h = BAR_H / lanes;
+    return `top:${BAR_TOP + lane * h}px;height:${h - (lanes > 1 ? 1 : 0)}px;`;
+  };
   const cutClass = (bar) => `${bar.cutStart ? " cut-start" : ""}${bar.cutEnd ? " cut-end" : ""}`;
   // 分かれた作業の名前は、いちばん長い切れ端にだけ書く
   const labelled = (layout) => {
     const best = new Map();
     layout.forEach((bar, k) => {
       const days = diffDays(bar.start, bar.end) + 1;
-      if (bar.lanes === 1 && days * DAY_PX > 60 && (!best.has(bar.item) || days > best.get(bar.item).days)) {
+      if (bar.lanes === 1 && days * dayPx > 60 && (!best.has(bar.item) || days > best.get(bar.item).days)) {
         best.set(bar.item, { k, days });
       }
     });
@@ -456,14 +503,15 @@ function renderGantt() {
     return layout
       .map((bar, k) => {
         const { work, extra = "" } = dated[bar.item];
-        const days = diffDays(bar.start, bar.end) + 1;
         const name = workName(typeLabel(work.work_type), work.detail?.spec);
         const tip =
           `<strong>${escapeHtml(name)}${escapeHtml(extra)}</strong>${fullDay(work.plan_start)} 〜 ${fullDay(work.plan_end)}（${workDays(work)} 日）` +
           (isManagement(work.work_type) && isActivePlan() ? "<br>押すと計画を直せます。Ctrl を押しながら横に動かすとコピー" : "");
+        // 「計画と実績」では、実績のある計画の帯を薄くし、その上に実績の帯を重ねる
+        const faded = showActual && actuals.has(work.id) ? " is-faded" : "";
         return (
-          `<span class="gantt-bar${cutClass(bar)}${picked.has(work.id) ? " is-picked" : ""}${flaggedWorks.has(work.id) ? " is-flagged" : ""}" data-id="${work.id}" data-tip="${escapeHtml(tip)}" ` +
-          `style="left:${x(bar.start)}px;width:${days * DAY_PX}px;${laneStyle(bar)}background-color:${TYPE_COLORS[work.work_type] || "#888"}">` +
+          `<span class="gantt-bar${faded}${cutClass(bar)}${picked.has(work.id) ? " is-picked" : ""}${flaggedWorks.has(work.id) ? " is-flagged" : ""}" data-id="${work.id}" data-tip="${escapeHtml(tip)}" ` +
+          `style="left:${x(bar.start)}px;width:${barWidth(bar.start, bar.end)}px;${laneStyle(bar)}background-color:${TYPE_COLORS[work.work_type] || "#888"}">` +
           `${named.has(k) ? escapeHtml(typeLabel(work.work_type)) : ""}</span>`
         );
       })
@@ -471,59 +519,57 @@ function renderGantt() {
   };
   const actualBars = (spans) => {
     const layout = layoutBars(spans);
-    const named = labelled(layout);
+    const named = showPlan ? new Set() : labelled(layout);
     return layout
       .map((bar, k) => {
         const span = spans[bar.item];
-        const days = diffDays(bar.start, bar.end) + 1;
         const range = span.start === span.end ? fullDay(span.start) : `${fullDay(span.start)} 〜 ${fullDay(span.end)}`;
         const tip = `<strong>${escapeHtml(anyTypeLabel(span.type))}（実績${span.open ? "。まだ終わっていない" : ""}）</strong>${range}${canEdit() ? "<br>ドラッグで実績の日を動かせます" : ""}`;
         return (
           `<span class="gantt-actual-bar${cutClass(bar)}${span.open ? " is-open" : ""}" data-tip="${escapeHtml(tip)}" data-logs="${span.logs.join(",")}" ` +
           `data-start="${span.start}" data-end="${span.end}" data-type="${span.type}" ` +
-          `style="left:${x(bar.start)}px;width:${days * DAY_PX}px;${laneStyle(bar)}background-color:${TYPE_COLORS[span.type] || "#888"}">` +
+          `style="left:${x(bar.start)}px;width:${barWidth(bar.start, bar.end)}px;${laneStyle(bar, showPlan)}background-color:${TYPE_COLORS[span.type] || "#888"}">` +
           `${named.has(k) ? escapeHtml(anyTypeLabel(span.type)) : ""}</span>`
         );
       })
       .join("");
   };
-  const openRow = sel.target === "block" ? `data-block="${sel.blockId}"` : `data-bed="${sel.target}"`;
-  const lane = (text) => (mode === "both" ? `<span class="gantt-lane">${text}</span>` : "");
-  // 計画の段（帯をドラッグできる）と、実績の段（ドラッグできない）
-  const row = (cls, name, content, attrs) =>
-    `<div class="gantt-row ${cls}${attrs === openRow ? " is-open" : ""}" ${attrs}><div class="gantt-name">${name}${lane("計画")}</div><div class="gantt-track">${content}</div></div>`;
-  // 実績の段。data-actual-block / data-actual-bed は、帯をドラッグしたときに、どの畝（区画）の記録を動かすかに使う
-  const actualRow = (cls, name, content, attrs) =>
-    `<div class="gantt-actual ${cls}${mode === "both" ? " is-sub" : ""}" ${attrs}><div class="gantt-name">${mode === "both" ? "" : name}${lane("実績")}</div><div class="gantt-track">${content}</div></div>`;
+  // 1 行が 1 つの区画（畝）。左に名前の列、右に帯の欄。data-block / data-bed は計画の帯のドラッグと貼り付けの行、
+  // data-actual-block / data-actual-bed は、実績の帯をドラッグしたときに、どの畝（区画）の実績を動かすかに使う
+  const keys = new Set();
+  const row = (cls, key, attrs, name, content) => {
+    keys.add(key);
+    return (
+      `<div class="gantt-row ${cls}${rowSel === key ? " is-selected" : ""}" ${attrs}>` +
+      `<div class="gantt-name">${name}</div><div class="gantt-track" style="width:${width}px">${content}</div></div>`
+    );
+  };
   const link = (kind, id, text) => `<a href="#" class="gantt-link" data-detail="${kind}" data-id="${id}">${escapeHtml(text)}</a>`;
 
   const rows = [];
   for (const block of state().blocks) {
-    const name = link("block", block.id, block.name);
-    if (showPlan) {
-      rows.push(row("block", name, bars(blockWorks(block.id).map((work) => ({ work }))), `data-block="${block.id}"`));
-    }
-    if (showActual) {
-      rows.push(actualRow("block", name, actualBars(spansOf.get(block.id)), `data-actual-block="${block.id}" data-name="${escapeHtml(block.name)}"`));
-    }
+    const content = (showPlan ? bars(blockWorks(block.id).map((work) => ({ work }))) : "") + (showActual ? actualBars(spansOf.get(block.id)) : "");
+    rows.push(row("block", `block:${block.id}`, `data-block="${block.id}" data-actual-block="${block.id}" data-name="${escapeHtml(block.name)}"`, link("block", block.id, block.name), content));
     for (const bed of blockBeds(block.id)) {
       const plantings = bedPlantings(bed.id);
-      // 作付ごとに、品目の名前を作付の詳細へのリンクにする
+      // 畝の番号は、今日その畝にある作付の詳細へ。品目の名前は、それぞれの作付の詳細へ
+      const current = plantingOnDate(plantings, state().works, today, state().logs || []);
+      const bedName = current ? link("planting", current.id, `畝${bed.seq}`) : `畝${bed.seq}`;
       const crops = plantings.map((planting) => link("planting", planting.id, planting.crop_name || `作付 ${planting.seq}`)).join(" → ");
-      const gone = bed.removed_on ? `（〜${formatDay(bed.removed_on)}）` : "";
-      const name = `畝${bed.seq}${crops ? ` ${crops}` : ""}${gone}`;
-      if (showPlan) {
-        // 作付が複数あっても、1 本の畝の帯はまとめて段に分ける
-        const content = bars(
-          plantings.flatMap((planting) => plantingWorks(planting.id).map((work) => ({ work, extra: planting.crop_name ? `（${planting.crop_name}）` : "" })))
-        );
-        rows.push(row("bed", name, content, `data-bed="${bed.id}"`));
-      }
-      if (showActual) {
-        const label = `${block.name} 畝${bed.seq}`;
-        rows.push(actualRow("bed", name, actualBars(spansOf.get(bed.id)), `data-actual-bed="${bed.id}" data-name="${escapeHtml(label)}"`));
-      }
+      const gone = bed.removed_on ? `<span class="muted">（〜${formatDay(bed.removed_on)}）</span>` : "";
+      const content =
+        (showPlan
+          ? bars(plantings.flatMap((planting) => plantingWorks(planting.id).map((work) => ({ work, extra: planting.crop_name ? `（${planting.crop_name}）` : "" }))))
+          : "") + (showActual ? actualBars(spansOf.get(bed.id)) : "");
+      const label = `${block.name} 畝${bed.seq}`;
+      rows.push(
+        row("bed", `bed:${bed.id}`, `data-bed="${bed.id}" data-actual-bed="${bed.id}" data-name="${escapeHtml(label)}"`, `<span class="gantt-bed">${bedName}</span><span class="gantt-crops">${crops}${gone}</span>`, content)
+      );
     }
+  }
+  // 選んでいた行がなくなったら（畝を消した、プランを替えた）、選択を外す
+  if (rowSel && !keys.has(rowSel)) {
+    rowSel = null;
   }
 
   const used = new Set([...(showPlan ? dated.map((work) => work.work_type) : []), ...allSpans.map((span) => span.type)]);
@@ -531,31 +577,40 @@ function renderGantt() {
     .filter((type) => used.has(type.code))
     .map((type) => `<span><span class="swatch" style="background:${TYPE_COLORS[type.code] || "#888"}"></span>${escapeHtml(type.label)}</span>`)
     .join("");
-  const mark = today >= first && today <= last ? `<span class="gantt-mark today" style="left:${x(today)}px"><span>今日</span></span>` : "";
+  const overlay = showPlan && showActual ? '<span><span class="swatch is-faded-key"></span>計画（実績のあるものは薄く）</span><span><span class="swatch is-thin-key"></span>実績（細い帯）</span>' : "";
+  const mark = today >= first && today <= last ? `<span class="gantt-mark today" style="left:${NAME_W + x(today)}px"><span>今日</span></span>` : "";
 
-  const previous = $("gantt").querySelector(".gantt-scroll")?.scrollLeft;
+  const scroller = $("gantt").querySelector(".gantt-scroll");
+  // 描き直しでは横の位置を保つ。初めて描くときと、表示期間を替えたときは、表示期間の始めを左に合わせる
+  const scrollKey = `${range}|${state().plan.id}|${fit || ""}`;
+  const keep = scroller && ganttScrollKey === scrollKey ? scroller.scrollLeft : null;
+  ganttScrollKey = scrollKey;
   $("gantt").innerHTML =
-    `<div class="gantt-scroll"><div class="gantt-inner" style="width:${width}px">` +
-    `<div class="gantt-months">${months.join("")}</div>${rows.join("")}${mark}` +
-    `</div></div><div class="gantt-legend">${legend}<span><span class="swatch is-flagged"></span>白い対角線: 確認が必要</span></div>`;
-  // 初めて描くときは、今日が左から少し入った位置に来るように送る。描き直しでは位置を保つ
-  $("gantt").querySelector(".gantt-scroll").scrollLeft = previous ?? (mark ? Math.max(x(today) - 60, 0) : 0);
+    `<div class="gantt-scroll"><div class="gantt-inner" style="width:${NAME_W + width}px">` +
+    `<div class="gantt-axis"><div class="gantt-name"></div><div class="gantt-track" style="width:${width}px">${ticks.join("")}</div></div>` +
+    `${rows.join("")}${mark}` +
+    `</div></div><div class="gantt-legend">${legend}${overlay}<span><span class="swatch is-flagged"></span>白い対角線: 確認が必要</span></div>`;
+  $("gantt").querySelector(".gantt-scroll").scrollLeft = keep ?? Math.max(x(view.from), 0);
+  $("gantt").dataset.dayPx = dayPx; // 1 日の幅（確かめるときに読む）
   renderPickTools();
 }
 
 // 工程表の全体を、横向きの紙の幅に収まる倍率で印刷に回す
+// 表示期間によらず、作業のある範囲の全体を紙の幅に合わせて描いてから写し、画面はもとの表示期間に戻す
 function printGantt() {
-  const inner = $("gantt").querySelector(".gantt-inner");
-  if (!inner) {
+  if (!$("gantt").querySelector(".gantt-inner")) {
     notify("日付の入った作業がまだありません。");
     return;
   }
+  renderGantt(PAGE_PX.landscape[0]);
+  const zoom = Math.min(1, PAGE_PX.landscape[0] / $("gantt").querySelector(".gantt-inner").offsetWidth).toFixed(4);
   const copy = $("gantt").cloneNode(true);
-  copy.querySelectorAll(".is-picked, .is-open").forEach((element) => element.classList.remove("is-picked", "is-open"));
+  renderGantt();
+  copy.querySelectorAll(".is-picked, .is-selected").forEach((element) => element.classList.remove("is-picked", "is-selected"));
   printPage({
     name: "工程表",
     title: `工程表　プラン: ${$("schedulePlanName").textContent}　出力日: ${fullDay(localToday())}`,
-    body: `<div style="zoom:${Math.min(1, PAGE_PX.landscape[0] / inner.offsetWidth).toFixed(4)}">${copy.innerHTML}</div>`,
+    body: `<div style="zoom:${zoom}">${copy.innerHTML}</div>`,
     landscape: true,
   });
 }
@@ -844,7 +899,6 @@ function newWork(owner, workType, seq) {
   };
 }
 
-const currentOwner = () => (sel.target === "block" ? { block_id: sel.blockId } : { planting_id: sel.plantingId });
 const ownedBy = (work, owner) => (owner.block_id ? work.block_id === owner.block_id : work.planting_id === owner.planting_id);
 
 // ある区画または作付の作業を、まるごと入れ替えて保存する
@@ -1155,6 +1209,27 @@ function renderPickTools() {
   }
   $("pastePickedBtn").disabled = !clipboard;
   $("pastePickedBtn").textContent = clipboard ? `貼り付け（${clipboard.works.length} 件）` : "貼り付け";
+  $("pastePickedBtn").title = rowSel ? "工程表で選んだ行に貼り付けます" : "先に、貼り付ける行を工程表で選んでください";
+}
+
+// 工程表の行を選ぶ（貼り付けの入れ先、「＋ 入力する」の対象）
+function selectRow(row) {
+  rowSel = rowKey(row);
+  $("gantt").querySelectorAll(".gantt-row").forEach((item) => item.classList.toggle("is-selected", rowKey(item) === rowSel));
+  renderPickTools();
+}
+
+// 「＋ 入力する」で、工程表で選んだ行を対象に入れて開くための値。畝なら今日その畝にある作付、区画なら区画
+export function selectedRowPreset() {
+  if (!rowSel || $("scheduleView").hidden || !isActivePlan()) {
+    return {};
+  }
+  const [kind, id] = rowSel.split(":");
+  if (kind === "block") {
+    return { blockId: id };
+  }
+  const planting = plantingOnDate(bedPlantings(id), state().works, localToday(), state().logs || []);
+  return planting ? { plantingId: planting.id } : {};
 }
 
 function showPicked() {
@@ -1271,19 +1346,22 @@ function copyPicked(cut) {
   }
 }
 
-// 「作業の計画」で開いている区画や作付に貼り付ける
+// 工程表で選んだ行（区画か畝）に貼り付ける。畝では、貼り付ける作業の日付が入る作付に入れる
+// （帯を別の行へドラッグしたときと同じ決め方。作付がなければ作る）
 function pastePicked() {
   if (!clipboard) {
     return;
   }
+  if (!rowSel) {
+    notify("貼り付ける行（区画か畝）を、工程表で選んでください。");
+    return;
+  }
   const { works, cut } = clipboard;
+  const [kind, id] = rowSel.split(":");
   run(async () => {
-    let owner = currentOwner();
-    if (sel.target !== "block" && !sel.plantingId) {
-      const source = state().plantings.find((planting) => planting.id === works[0].planting_id);
-      sel.plantingId = (await newPlanting(sel.target, source?.crop_name, source?.crop_id || null)).id;
-      owner = { planting_id: sel.plantingId };
-    }
+    const first = works.map((work) => work.plan_start).filter(Boolean).sort()[0] || null;
+    const source = state().plantings.find((planting) => planting.id === works[0].planting_id);
+    const owner = await ownerForRow({ dataset: kind === "block" ? { block: id } : { bed: id } }, first, source);
     if (cut) {
       // 切り取ったあとで消された作業は、もう移せない
       const originals = state().works.filter((work) => works.some((item) => item.id === work.id));
@@ -1355,7 +1433,7 @@ function initGanttEditing() {
       return;
     }
     barDrag.moved = true;
-    barDrag.days = Math.round(dx / DAY_PX);
+    barDrag.days = Math.round(dx / dayPx);
     gantt.classList.add("is-dragging");
     const under = document.elementFromPoint(event.clientX, event.clientY)?.closest(".gantt-row");
     barDrag.target = under && gantt.contains(under) && under !== barDrag.row ? under : null;
@@ -1364,7 +1442,7 @@ function initGanttEditing() {
     const top = (row) => row.querySelector(".gantt-track").getBoundingClientRect().top;
     const offsetY = barDrag.target ? top(barDrag.target) - top(barDrag.row) : 0;
     gantt.querySelectorAll(".gantt-bar.is-picked").forEach((bar) => {
-      bar.style.transform = `translate(${barDrag.days * DAY_PX}px, ${offsetY}px)`;
+      bar.style.transform = `translate(${barDrag.days * dayPx}px, ${offsetY}px)`;
     });
     // 同じ行の中で動かしているあいだは、動かした先の日付で無理を見直して、斜線を付け外しする
     if (!barDrag.target) {
@@ -1401,13 +1479,11 @@ function initGanttEditing() {
     }
     const pressed = state().works.find((work) => work.id === drag.id);
     if (!drag.moved) {
-      // 動かさずに離した: 管理作業の計画は、入力の窓で開く。工程の作業は、その行を「作業の計画」で開く
+      // 動かさずに離した: その帯と行を選ぶ。管理作業の計画は、計画の窓も開く
+      selectRow(drag.row);
       if (pressed && isManagement(pressed.work_type) && isActivePlan()) {
         openPlanEditor(pressed);
-      } else {
-        openInSchedule(drag.row.dataset.block ? "block" : "bed", drag.row.dataset.block || drag.row.dataset.bed);
       }
-      renderSchedule();
       return;
     }
     const works = pickedWorks();
@@ -1447,7 +1523,7 @@ function initGanttEditing() {
       return;
     }
     pressedBar = true;
-    const row = bar.closest(".gantt-actual");
+    const row = bar.closest(".gantt-row");
     // 1 日の作業をよけて分かれた帯は、まとめて動かす
     const parts = [...row.querySelectorAll(".gantt-actual-bar")].filter(
       (item) => item.dataset.logs === bar.dataset.logs && item.dataset.start === bar.dataset.start && item.dataset.type === bar.dataset.type
@@ -1464,8 +1540,8 @@ function initGanttEditing() {
       return;
     }
     actualDrag.moved = true;
-    actualDrag.days = Math.round(dx / DAY_PX);
-    actualDrag.parts.forEach((part) => (part.style.transform = `translateX(${actualDrag.days * DAY_PX}px)`));
+    actualDrag.days = Math.round(dx / dayPx);
+    actualDrag.parts.forEach((part) => (part.style.transform = `translateX(${actualDrag.days * dayPx}px)`));
     const { start, end, type } = actualDrag.bar.dataset;
     const moved = (iso) => fullDay(addDays(iso, actualDrag.days));
     tip.innerHTML = `<strong>${escapeHtml(anyTypeLabel(type))}の実績</strong>${start === end ? moved(start) : `${moved(start)} 〜 ${moved(end)}`}`;
@@ -1481,7 +1557,12 @@ function initGanttEditing() {
     }
     drag.parts.forEach((part) => (part.style.transform = ""));
     tip.hidden = true;
-    if (event.type === "pointercancel" || !drag.moved || !drag.days) {
+    if (event.type === "pointercancel") {
+      return;
+    }
+    // 動かさずに離した: その行を選ぶ
+    if (!drag.moved || !drag.days) {
+      selectRow(drag.row);
       return;
     }
     const { actualBlock, actualBed, name } = drag.row.dataset;
@@ -1497,8 +1578,8 @@ function initGanttEditing() {
   gantt.addEventListener("pointerup", finishActual);
   gantt.addEventListener("pointercancel", finishActual);
 
-  // 帯のない所をクリックすると、選択を外して、その行を「作業の計画」で開く。
-  // 行の名前の品目（区画の名前）は、作付の詳細へのリンク
+  // 名前のリンク（区画の名前、畝の番号、品目の名前）は、詳細を開く。
+  // 帯のない所を押すと、帯の選択を外して、その行を選ぶ（下の「作業の計画」は切り替えない）
   gantt.addEventListener("click", (event) => {
     const link = event.target.closest("[data-detail]");
     if (link) {
@@ -1507,12 +1588,39 @@ function initGanttEditing() {
       return;
     }
     const row = event.target.closest(".gantt-row");
-    if (pressedBar || event.target.closest(".gantt-bar") || !row) {
+    if (!row) {
+      return;
+    }
+    const bar = event.target.closest(".gantt-bar, .gantt-actual-bar");
+    if (bar && !canEdit()) {
+      // スマホ（帯は動かせない）: 帯を押しても行を選ぶ。管理作業の計画は、計画の窓を開く
+      selectRow(row);
+      const work = bar.classList.contains("gantt-bar") ? state().works.find((item) => item.id === bar.dataset.id) : null;
+      if (work && isManagement(work.work_type) && isActivePlan()) {
+        openPlanEditor(work);
+      }
+      return;
+    }
+    if (pressedBar || bar) {
       return;
     }
     picked.clear();
-    openInSchedule(row.dataset.block ? "block" : "bed", row.dataset.block || row.dataset.bed);
-    renderSchedule();
+    showPicked();
+    selectRow(row);
+  });
+  // 表示期間（全体／3 か月／1 か月）
+  $("ganttRanges").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-gantt-range]");
+    if (button) {
+      savePref(state().field.id, "ganttRange", button.dataset.ganttRange);
+      renderGantt();
+    }
+  });
+  // 画面の幅が変わったら、表示期間が幅に収まるように描き直す
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => !$("scheduleView").hidden && renderGantt(), 200);
   });
 
   $("copyPickedBtn").addEventListener("click", () => copyPicked(false));

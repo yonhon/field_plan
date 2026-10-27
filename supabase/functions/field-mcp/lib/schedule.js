@@ -41,6 +41,24 @@ export const WORK_ITEMS = {
   other: ["発芽確認", "資材の設置", "資材の撤去", "その他"],
 };
 
+// 工程表の表示期間。全体、今日を中心に 3 か月（前後 45 日）、1 か月（前後 15 日）
+export const GANTT_RANGES = { all: "全体", "3m": "3 か月", "1m": "1 か月" };
+
+// 表示期間 kind で、画面の幅に収める期間 { from, to }。全体なら、作業のある範囲 [first, last] そのもの
+export function ganttWindow(kind, first, last, today) {
+  if (kind === "3m" || kind === "1m") {
+    const half = kind === "3m" ? 45 : 15;
+    return { from: addDays(today, -half), to: addDays(today, half) };
+  }
+  return { from: first, to: last };
+}
+
+// 1 日の幅（px）。days 日が width px にちょうど収まる幅。狭すぎるとき（min 未満）は min にして横に送り、
+// 広すぎるとき（max より広い）は max にする
+export function dayWidth(width, days, min = 5, max = 60) {
+  return Math.min(max, Math.max(min, width / Math.max(days, 1)));
+}
+
 // 作業の名前に中身を添える。例: 株の手入れ（摘葉・誘引）、その他（支柱の撤去）
 export function workName(label, spec = {}) {
   const items = (spec?.items || []).map((item) => (item === "その他" && spec.other ? spec.other : item)).filter(Boolean);

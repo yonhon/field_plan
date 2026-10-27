@@ -326,6 +326,7 @@
             <h2>工程表</h2>
             <div class="row">
               <div id="ganttModes" class="log-modes" role="group" aria-label="工程表の表示" hidden></div>
+              <div id="ganttRanges" class="log-modes" role="group" aria-label="工程表の表示期間"></div>
               <p class="muted">プラン: <span id="schedulePlanName"></span></p>
               <button id="ganttPdfBtn" class="chip-btn" title="工程表の全体を PDF にします">PDF出力</button>
             </div>
@@ -338,7 +339,7 @@
             <button id="pastePickedBtn" class="chip-btn">貼り付け</button>
             <button id="deletePickedBtn" class="text-btn danger">削除</button>
           </div>
-          <p class="muted edit-only">帯をクリックで選択（Ctrl を押しながらで、同じ行の帯を複数）。ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。貼り付け先は、行をクリックして選んだ区画や畝です。管理作業（防除、除草など）の帯は、押すと計画の窓が開き、Ctrl を押しながら横に動かして離すと、その日へコピーします。管理作業の計画は「＋ 入力する」で計画に切り替えて入れます。</p>
+          <p class="muted edit-only">行や帯を押すと、その区画（畝）を選びます。選んだ行は、貼り付けの入れ先と、「＋ 入力する」の対象になります。帯は Ctrl を押しながらで複数選べ（同じ行の中）、ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。管理作業（防除、除草など）の帯は、押すと計画の窓も開き、Ctrl を押しながら横に動かして離すと、その日へコピーします。区画・畝・品目の名前を押すと、詳細を開きます。下の「作業の計画」で開く区画（畝）は、「区画と畝」の図で選びます。</p>
           <div id="gantt"></div>
         </section>
 
@@ -402,8 +403,17 @@
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // 読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
       const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js", "pesticide.js", "weather.js", "weather-view.js", "prefs.js"];
+      // 見た目（styles.css）も、古い版が残っていると新しい部品と合わなくなる。更新を確かめ、版の印（更新日時）を付けて読み直す
+      async function refreshStyles() {
+        const response = await fetch("./styles.css", { cache: "no-cache" });
+        const stamp = response.headers.get("last-modified") || response.headers.get("etag");
+        const link = document.querySelector('link[href^="./styles.css"]');
+        if (stamp && link) {
+          link.href = `./styles.css?v=${encodeURIComponent(stamp)}`;
+        }
+      }
       try {
-        await Promise.all(parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })));
+        await Promise.all([...parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })), refreshStyles().catch(() => {})]);
         await import("./app.js");
       } catch (error) {
         const box = document.getElementById("fatalError");
