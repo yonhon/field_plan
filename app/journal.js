@@ -116,7 +116,9 @@ function dayTitle(iso) {
   return `${year}/${month}/${day}（${WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()]}）`;
 }
 
-const clock = (iso) => new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false });
+// 書式は作るのに時間がかかるので、1 つを使い回す（記録は数百行ある）
+const CLOCK = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false });
+const clock = (iso) => CLOCK.format(new Date(iso));
 
 // 記録の文。値の変化があれば、後ろに「（前 → 後）」を付ける。新しく作ったものは、後の値だけを付ける
 export function changeText(entry) {
@@ -199,12 +201,14 @@ export function renderJournal() {
 export async function initJournal(context) {
   ctx = context;
   const { state } = ctx;
-  state.changes = await state.store.listChanges();
-  state.notes = await state.store.listNotes();
-  // アプリの更新の一覧は、読めなくても画面は使える
-  updates = await fetch("./updates.json", { cache: "no-cache" })
-    .then((response) => (response.ok ? response.json() : []))
-    .catch(() => []);
+  [state.changes, state.notes, updates] = await Promise.all([
+    state.store.listChanges(),
+    state.store.listNotes(),
+    // アプリの更新の一覧は、読めなくても画面は使える
+    fetch("./updates.json", { cache: "no-cache" })
+      .then((response) => (response.ok ? response.json() : []))
+      .catch(() => []),
+  ]);
 
   $("journalDays").addEventListener("change", (event) => {
     const day = event.target.dataset.note;
@@ -230,10 +234,15 @@ export async function initJournal(context) {
     const row = event.target.closest("li[data-id]");
     if (reference) {
       // メモが触れている記録の行へ動かして、少しのあいだ色を付ける
+      // 画面の外の日は高さを見積もりで置いているので、飛ぶあいだは、すべての日を描いて位置を正しくする
       const line = document.getElementById(`change-${reference.dataset.ref}`);
+      $("journalDays").classList.add("is-jumping");
       line.scrollIntoView({ block: "center", behavior: "smooth" });
       line.classList.add("is-marked");
-      setTimeout(() => line.classList.remove("is-marked"), 2500);
+      setTimeout(() => {
+        line.classList.remove("is-marked");
+        $("journalDays").classList.remove("is-jumping");
+      }, 2500);
     } else if (row) {
       ctx.openTarget(state.changes.find((entry) => entry.id === row.dataset.id));
     }

@@ -152,9 +152,10 @@ export function renderStrip() {
   const high = Math.max(view.max, ...view.strips.map((strip) => strip.max));
   const span = high - low;
   const narrowest = Math.min(...view.strips.map((strip) => strip.max - strip.min), Infinity);
-  const available = Math.max(root().parentElement.clientWidth - 190, 200);
-  // ドラッグの途中で倍率が変わると畝が指からずれるので、そのあいだは始めたときの倍率を使う
-  view.scale = drag?.scale || Math.min(Math.max(available / span, Number.isFinite(narrowest) ? MIN_BED_PX / narrowest : 0), MAX_PX_PER_M);
+  // ドラッグの途中で倍率が変わると畝が指からずれるので、そのあいだは始めたときの倍率を使う。
+  // 幅を読むと、ブラウザーがその場で配置を計算し直すので、ドラッグ中は読まない
+  const available = () => Math.max(root().parentElement.clientWidth - 190, 200);
+  view.scale = drag?.scale || Math.min(Math.max(available() / span, Number.isFinite(narrowest) ? MIN_BED_PX / narrowest : 0), MAX_PX_PER_M);
   const x = (value) => (value - low) * view.scale;
   const editable = canEdit();
 
@@ -224,7 +225,7 @@ export function renderStrip() {
           `<div class="strip-title${ctx.flagged("bed", bed.id) ? " is-flagged" : ""}">畝${bed.seq}</div>${body}</div>`
       );
     });
-    columns.push(`<div class="strip-column" style="left:${x(strip.min)}px;width:${width}px;top:${COLUMN_TOP}px">${sections.join("")}</div>`);
+    columns.push(`<div class="strip-column" style="margin-left:${x(strip.min)}px;width:${width}px">${sections.join("")}</div>`);
   });
   dim(view.strips.length ? view.strips.at(-1).max : view.min, view.max, null);
   insertButton(view.strips.length ? view.strips.at(-1).max : view.min, view.max, view.strips.length);
@@ -236,13 +237,10 @@ export function renderStrip() {
     boxes.join("") +
     inserts.join("") +
     dims.join("") +
-    columns.join("") +
+    // 作業の列は、1 つのマスに重ねて置く。図の高さは、いちばん長い列に合わせてブラウザーが決める
+    `<div class="strip-columns" style="padding-top:${COLUMN_TOP}px">${columns.join("")}</div>` +
     (beds.length ? "" : `<p class="strip-empty strip-none" style="top:${COLUMN_TOP}px">この日に畝はありません。圃場図で区画を選び、畝を並べてください。</p>`) +
     `</div>`;
-  // 作業の列は重ねて置いているので、いちばん長い列に合わせて高さを決める
-  const field = root().querySelector(".strip-field");
-  const tallest = Math.max(40, ...[...field.querySelectorAll(".strip-column")].map((column) => column.offsetHeight));
-  field.style.height = `${COLUMN_TOP + tallest}px`;
 }
 
 // ---- 位置と幅の変更 ----

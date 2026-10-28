@@ -1722,21 +1722,40 @@ function renderFields() {
 // 圃場のプランと下絵を読み、圃場を入れ替える。開くプラン（前に開いていたプランか、先頭）を返す。
 // プランの中身は、続けて loadPlanData で読む
 async function loadFieldData(field) {
-  let plans = await state.store.loadPlans(field.id);
+  // DB の往復を待つ回数を減らすため、互いに関係のない読み込みは並べて行う
+  const loadBackdrop = async () => {
+    const backdrop = await state.store.loadBackdrop(field.id);
+    return { backdrop, backdropUrl: backdrop ? await state.store.imageUrl(backdrop.storage_path) : "" };
+  };
+  let [plans, { backdrop, backdropUrl }, logs] = await Promise.all([
+    state.store.loadPlans(field.id),
+    loadBackdrop(),
+    state.store.loadLogs(field.id),
+  ]);
   if (!plans.length) {
     plans = [await state.store.createPlan({ field_id: field.id, name: "プラン1" })];
   }
-  const backdrop = await state.store.loadBackdrop(field.id);
-  let backdropUrl = "";
-  if (backdrop) {
-    backdropUrl = await state.store.imageUrl(backdrop.storage_path);
-    backdrop.size = await imageSize(backdropUrl).catch(() => null);
-  }
-  const logs = await state.store.loadLogs(field.id);
   // 前にその圃場で開いていたプランと表示日。覚えていなければ、先頭のプランと今日
   const currentId = loadPref(field.id, "plan", CURRENT_PLAN_KEY);
   Object.assign(state, { field, plans, backdrop, backdropUrl, logs, viewDate: savedViewDate(field.id), alignment: null });
+  if (backdrop) {
+    measureBackdrop(backdrop, backdropUrl);
+  }
   return plans.find((plan) => plan.id === currentId) || plans[0];
+}
+
+// 下絵の画像の大きさ。外形を描く前の圃場で、図を下絵に合わせるのに使う。
+// 画像は大きいので、読み終わるのを待たずに画面を出し、読めたら合わせ直す
+function measureBackdrop(backdrop, url) {
+  imageSize(url)
+    .then((size) => {
+      backdrop.size = size;
+      if (state.backdrop === backdrop && state.field.outline.length < 2) {
+        fitView();
+        renderMap();
+      }
+    })
+    .catch(() => {});
 }
 
 async function openField(field) {
@@ -1847,11 +1866,13 @@ async function activePlanData() {
   if (id === state.plan.id) {
     return { blocks: state.blocks, beds: state.beds, plantings: state.plantings, works: state.works, crops: state.crops };
   }
-  const loaded = { crops: state.crops };
-  for (const table of ["blocks", "beds", "plantings", "works"]) {
-    loaded[table] = await state.store.list(table, id);
-  }
-  return loaded;
+  return { ...(await loadTables(["blocks", "beds", "plantings", "works"], id)), crops: state.crops };
+}
+
+// プランの下の表を、並べて読む。{ 表の名前: 行 } を返す
+async function loadTables(tables, planId) {
+  const rows = await Promise.all(tables.map((table) => state.store.list(table, planId)));
+  return Object.fromEntries(tables.map((table, index) => [table, rows[index]]));
 }
 
 // 圃場とプランの作成・コピー・名前の変更・削除・切り替えを、1 つずつ行う。
@@ -1872,10 +1893,7 @@ async function planTask(action) {
 }
 
 async function loadPlanData(plan) {
-  const loaded = {};
-  for (const table of ["zones", "blocks", "beds", "plantings", "works"]) {
-    loaded[table] = await state.store.list(table, plan.id);
-  }
+  const loaded = await loadTables(["zones", "blocks", "beds", "plantings", "works"], plan.id);
   // 読み終えてから、プランと中身を一度に入れ替える。読み込みの途中で「元に戻す」の写しを取られると、
   // 新しいプランに前のプランの中身（空のことがある）が付いた写しができ、それに戻すと中身が消える
   Object.assign(state, { plan }, loaded);
@@ -2591,7 +2609,13 @@ function describeLoadError(error) {
 async function startApp() {
   $("loginView").hidden = true;
   try {
-    state.fields = await state.store.loadFields();
+    const [fields, allWorkTypes, crops, fertilizers] = await Promise.all([
+      state.store.loadFields(),
+      state.store.loadWorkTypes(),
+      state.store.listAll("crops"),
+      state.store.listAll("fertilizers"),
+    ]);
+    Object.assign(state, { fields, allWorkTypes, workTypes: allWorkTypes.filter(isPlannable), crops, fertilizers });
     if (!state.fields.length) {
       state.fields = [await state.store.createField({ name: config.defaultFieldName })];
     }
@@ -2601,10 +2625,6 @@ async function startApp() {
     } catch {
       // 読めなければ先頭の圃場を開く
     }
-    state.allWorkTypes = await state.store.loadWorkTypes();
-    state.workTypes = state.allWorkTypes.filter(isPlannable);
-    state.crops = await state.store.listAll("crops");
-    state.fertilizers = await state.store.listAll("fertilizers");
     await loadPlanData(await loadFieldData(state.fields.find((field) => field.id === fieldId) || state.fields[0]));
   } catch (error) {
     showFatal(

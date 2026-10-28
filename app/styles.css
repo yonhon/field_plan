@@ -279,6 +279,16 @@ h3 {
 }
 
 /* 記録の画面 */
+/* 日の欄は数百あるので、画面の外の日は配置の計算を省く（高さは見積もりか、前に描いたときの高さ） */
+.journal-day {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
+}
+
+.is-jumping .journal-day {
+  content-visibility: visible;
+}
+
 .journal-day textarea {
   width: 100%;
   padding: 6px 8px;
@@ -1163,8 +1173,16 @@ body.plan-busy #scheduleView {
   font-weight: 700;
 }
 
+/* 作業の列は、1 つのマスに重ね、左の余白で横の位置を決める（高さを JS で測らずに済む） */
+.strip-columns {
+  display: grid;
+  min-height: 40px;
+}
+
 .strip-column {
-  position: absolute;
+  position: relative;
+  grid-area: 1 / 1;
+  align-self: start;
 }
 
 .strip-column-bed {
