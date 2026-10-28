@@ -2,10 +2,10 @@
 // 工程表の行の名前から開く。表示（計画／実績／計画と実績）は工程表と共有する
 import { confirmAction, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { openLogEditor, uncancelWork } from "./log-view.js";
+import { openLogEditor, openPlanEditor, uncancelWork } from "./log-view.js";
 import { bedAreas, compressedAxis, dayGap, firstHarvestDay, inputText, logEnd, plantingStart, shiftAfterActual, specDiff, specText, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled } from "./pesticide.js";
-import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, localToday, workName } from "./schedule.js";
+import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, isManagement, localToday, workName } from "./schedule.js";
 import { ICON_LABELS, accumulate, addTwoWeek, fetchAreas, fetchStations, parseForecast, weatherIcon } from "./weather.js";
 import { officeForecast, weatherSettings } from "./weather-view.js";
 import {
@@ -423,7 +423,7 @@ function headHtml(c, active) {
 
 const tableNote = (mode) =>
   ({
-    plan: "計画の作業です。行を押すと、日程の画面で作業の計画を開きます。",
+    plan: "計画の作業です。日付を押すと、計画を直す窓を開きます。",
     act: "実績だけです。日付を押すと、実績を直す窓を開きます。",
   })[mode];
 
@@ -595,7 +595,7 @@ function workRow(c, { work, linked, actual }, mode, today) {
   const tag = work.block_id && c.planting ? `${c.block.name}の作業` : "";
   const planLines = [work.note, work.work_type === "plant" && c.planting ? plannedSpecText(c.planting) : ""].filter(Boolean);
   const planCell = showPlan
-    ? `<td class="detail-plan" data-plan="${work.id}"><strong>${work.plan_start ? rangeText(work.plan_start, work.plan_end) : "日付なし"}</strong>` +
+    ? `<td class="detail-plan" data-plan="${work.id}"><a href="#" data-plan-edit="${work.id}"><strong>${work.plan_start ? rangeText(work.plan_start, work.plan_end) : "日付なし"}</strong></a>` +
       planLines.map((line) => `<br><span class="muted">${escapeHtml(line)}</span>`).join("") +
       "</td>"
     : "";
@@ -632,6 +632,83 @@ function logRow(log, mode) {
 }
 
 // ---- 操作 ----
+
+// 計画の日付を押したとき、計画を直す窓を開く。管理作業（防除など）の計画は、実際に使うプランなら入力の窓（計画を直す）で、
+// 中身や対象まで直せる。工程の作業（畝立て、定植など）は、開始日、終了日、メモを直す
+function openWorkPlanEditor(work) {
+  if (isManagement(work.work_type) && isActivePlan()) {
+    openPlanEditor(work);
+    return;
+  }
+  const c = context();
+  const place = c ? `${c.block.name}${c.bed && !work.block_id ? ` 畝${c.bed.seq}` : ""}` : "";
+  const name = workName(anyTypeLabel(work.work_type), work.detail?.spec);
+  const box = document.createElement("dialog");
+  box.className = "notice plan-edit";
+  box.innerHTML =
+    `<h3>計画を直す</h3><p class="muted">${escapeHtml(place)}の${escapeHtml(name)}</p>` +
+    `<div class="form-grid"><label>開始日<input type="date" data-k="start" value="${work.plan_start || ""}" /></label>` +
+    `<label>終了日<input type="date" data-k="end" value="${work.plan_end || ""}" /></label></div>` +
+    `<label>メモ<textarea data-k="note" rows="2">${escapeHtml(work.note || "")}</textarea></label>` +
+    `<p class="muted">開始日を変えると、日数を保って終了日も動きます。</p>` +
+    '<p class="error" data-k="error"></p>' +
+    '<div class="row"><button type="button" class="text-btn" data-action="cancel">キャンセル</button><button type="button" class="primary-btn" data-action="save">直す</button></div>';
+  document.body.append(box);
+  const field = (key) => box.querySelector(`[data-k="${key}"]`);
+  // 開始日を変えたら、日数を保って終了日も動かす（日程の画面の表と同じ）
+  const days = work.plan_start && work.plan_end ? diffDays(work.plan_start, work.plan_end) : 0;
+  field("start").addEventListener("change", () => {
+    if (field("start").value) {
+      field("end").value = addDays(field("start").value, days);
+    }
+  });
+  box.addEventListener("click", async (event) => {
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (action === "cancel") {
+      box.close();
+    } else if (action === "save") {
+      const start = field("start").value || null;
+      const end = field("end").value || start;
+      const note = field("note").value.trim();
+      if (start && end < start) {
+        field("error").textContent = "終了日は、開始日より後の日にしてください。";
+        return;
+      }
+      const before = { plan_start: work.plan_start, plan_end: work.plan_end, note: work.note };
+      const dated = start !== work.plan_start || end !== work.plan_end;
+      const noted = note !== (work.note || "");
+      if (!dated && !noted) {
+        box.close();
+        return;
+      }
+      Object.assign(work, { plan_start: start, plan_end: start ? end : null, note });
+      try {
+        await state().store.upsert("works", [work]);
+        if (dated) {
+          record({
+            kind: "work.date",
+            target: ["work", work.id],
+            text: `${place}の「${name}」の日付を変更`,
+            before: before.plan_start ? rangeText(before.plan_start, before.plan_end) : "日付なし",
+            after: start ? rangeText(start, end) : "日付なし",
+          });
+        }
+        if (noted) {
+          record({ kind: "work.note", target: ["work", work.id], text: `${place}の「${name}」のメモを変更`, before: before.note || "空", after: note || "空" });
+        }
+        ctx.setStatus("計画を直しました");
+        box.close();
+      } catch (error) {
+        Object.assign(work, before);
+        field("error").textContent = `直せませんでした: ${error.message}`;
+        return;
+      }
+      ctx.refresh();
+    }
+  });
+  box.addEventListener("close", () => box.remove());
+  box.showModal();
+}
 
 // 品目の設定値を、定植の記録の仕様に合わせる。今回の作付の計画は書き換えない。
 // 品目の設定値を使っている作付（作付に値がない作付）のうち、今回の作付と、このプランですでに始まった作付には、
@@ -733,7 +810,7 @@ async function reschedule() {
 }
 
 function onClick(event) {
-  const el = event.target.closest("[data-act], [data-log], [data-uncancel], [data-gantt-mode], [data-plan]");
+  const el = event.target.closest("[data-act], [data-log], [data-plan-edit], [data-uncancel], [data-gantt-mode], [data-plan]");
   if (!el) {
     return;
   }
@@ -747,6 +824,14 @@ function onClick(event) {
     const log = (state().logs || []).find((item) => item.id === el.dataset.log);
     if (log) {
       openLogEditor(log);
+    }
+    return;
+  }
+  if (el.dataset.planEdit) {
+    event.preventDefault();
+    const work = state().works.find((item) => item.id === el.dataset.planEdit);
+    if (work) {
+      openWorkPlanEditor(work);
     }
     return;
   }

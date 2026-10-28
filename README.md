@@ -46,6 +46,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 |---|---|
 | `sql/field.sql` | `field` スキーマとテーブルの定義、権限 |
 | `app/` | 画面。GitHub Pages に置く |
+| `docs/design-rules.md` | 画面のデザインのきまり（色、リンク）。画面を作るとき、直すときに守る |
 | `app/geometry.js` | 面積、辺の長さ、座標の変換、区画の分割、畝の配置 |
 | `app/schedule.js` | 日程の計算（並べ直しと逆算、無理の指摘、収穫完了予定日、今週の作業） |
 | `app/schedule-view.js` | 日程の画面 |

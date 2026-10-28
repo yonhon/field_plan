@@ -18,6 +18,14 @@ body {
   height: 100%;
 }
 
+/* リンクのきまり（docs/design-rules.md）: 下線は付けない。色はアプリのデザインに合わせ、ブラウザーの初めの色は使わない。
+   初めはアプリの色（--accent。押したあとも変えない）。まわりと同じ色にするところは color: inherit にする */
+a,
+a:visited {
+  color: var(--accent);
+  text-decoration: none;
+}
+
 body {
   margin: 0;
   display: flex;
@@ -2017,6 +2025,7 @@ body.plan-busy #scheduleView {
 .detail-plan {
   cursor: pointer;
 }
+
 
 .detail-line {
   font-size: 12px;
