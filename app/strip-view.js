@@ -5,7 +5,7 @@ import { notify } from "./dialog.js";
 import { bedAngle, edgeAngles, rectSize, viewAxes } from "./geometry.js";
 import { record } from "./journal.js";
 import { workActuals } from "./logs.js";
-import { WORK_COLORS, existsOn, harvestEnd } from "./schedule.js";
+import { WORK_COLORS, existsOn, harvestEnd, workName } from "./schedule.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -42,7 +42,9 @@ function workItems(works) {
   if (!works.length) {
     return '<p class="strip-empty">作業なし</p>';
   }
-  const label = (code) => ctx.state.workTypes.find((type) => type.code === code)?.label || code;
+  // 名前は、管理作業（防除など）も含めたすべての種類から探す。株の手入れ・その他は中身も添える
+  const types = ctx.state.allWorkTypes || ctx.state.workTypes;
+  const label = (work) => workName(types.find((type) => type.code === work.work_type)?.label || work.work_type, work.detail?.spec);
   // 実際に使うプランなら、終わった作業に済みの印、取りやめた作業に取り消し線を付ける
   const active = ctx.state.field.active_plan_id === ctx.state.plan.id;
   const actuals = active ? workActuals(ctx.state.logs || []) : new Map();
@@ -53,7 +55,7 @@ function workItems(works) {
         : "日付なし";
       const done = actuals.get(work.id)?.end ? '<span class="done-mark" title="完了">✓</span>' : "";
       const cancelled = active && work.cancelled_on ? ' class="is-cancelled" title="取りやめ"' : "";
-      return `<li${cancelled}><span class="swatch" style="background:${WORK_COLORS[work.work_type] || "#888"}"></span>${escapeHtml(label(work.work_type))}${done}<small>${dates}</small></li>`;
+      return `<li${cancelled}><span class="swatch" style="background:${WORK_COLORS[work.work_type] || "#888"}"></span>${escapeHtml(label(work))}${done}<small>${dates}</small></li>`;
     })
     .join("")}</ul>`;
 }
