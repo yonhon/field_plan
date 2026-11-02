@@ -14,7 +14,18 @@ import {
   parseStations,
   parseWind,
   weatherIcon,
+  weatherSettled,
 } from "../app/weather.js";
+
+test("昨日のアメダスの値だけを、時間がたったら取り直す", () => {
+  const now = Date.parse("2026-11-03T12:00:00+09:00");
+  const row = (date, source, fetched_at) => ({ date, source, fetched_at });
+  assert.equal(weatherSettled(row("2026-11-01", "amedas", "2026-11-02T00:00:00+09:00"), "2026-11-02", now), true);
+  assert.equal(weatherSettled(row("2026-11-02", "jma", "2026-11-03T00:00:00+09:00"), "2026-11-02", now), true);
+  assert.equal(weatherSettled(row("2026-11-02", "amedas", "2026-11-03T07:00:00+09:00"), "2026-11-02", now), true);
+  assert.equal(weatherSettled(row("2026-11-02", "amedas", "2026-11-03T05:00:00+09:00"), "2026-11-02", now), false);
+  assert.equal(weatherSettled(row("2026-11-02", "amedas", undefined), "2026-11-02", now), false);
+});
 
 test("観測所の一覧と、近い順", () => {
   const stations = parseStations({

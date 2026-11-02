@@ -7,6 +7,7 @@ const AMEDAS = "https://www.jma.go.jp/bosai/amedas";
 const FORECAST = "https://www.jma.go.jp/bosai/forecast/data/forecast";
 const MIN_HOURS = 20; // 日平均気温に要る毎正時の値の数。これより少ない日は欠測にする
 export const FETCH_DAYS = 10; // アメダスの値を、さかのぼって取りにいく日数
+const REFETCH_HOURS = 6; // 昨日の値を、前に取ってからこの時間は取り直さない
 
 // ---- 観測所 ----
 
@@ -94,6 +95,13 @@ export async function fetchDay(station, date) {
     }
   }
   return dailyFromRecords(records, date);
+}
+
+// DB の行を、気象庁から取り直さなくてよいか。昨日の分は、あとから直されることがあるので取り直す。
+// ただし、正式な値（GitHub Actions が気象庁の日別の表から入れた値。source が jma）は上書きせず、
+// 取ったばかりの値も取り直さない（起動のたびに 1 日分の 9 ファイルを読むことになる）
+export function weatherSettled(row, yesterday, now = Date.now()) {
+  return row.date < yesterday || row.source !== "amedas" || now - new Date(row.fetched_at) < REFETCH_HOURS * 60 * 60 * 1000;
 }
 
 // ---- 気象庁の過去の気象データ（正式な値） ----

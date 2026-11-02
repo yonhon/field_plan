@@ -7,6 +7,28 @@ import { uploadWithProgress } from "./upload.js";
 const BUCKET = "field-plan";
 const LOCAL_KEY = "field_plan_local";
 
+// 下絵の署名付き URL。発行のたびに URL が変わると、ブラウザーのキャッシュが効かず、起動のたびに画像全体を読み直す。
+// そこで長めの期限で発行してブラウザーに覚え、残りが少なくなるまで使い回す。ログアウトで忘れる
+const IMAGE_URLS_KEY = "field_plan_image_urls";
+const IMAGE_URL_SECONDS = 7 * 24 * 60 * 60;
+const IMAGE_URL_MARGIN_MS = 24 * 60 * 60 * 1000; // 開いたままでも期限が切れないよう、これより残りが少なければ発行し直す
+
+function savedImageUrls() {
+  try {
+    return JSON.parse(localStorage.getItem(IMAGE_URLS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+export function forgetImageUrls() {
+  try {
+    localStorage.removeItem(IMAGE_URLS_KEY);
+  } catch {
+    // 消せなくても、URL は期限で切れる
+  }
+}
+
 // プランの下にあるテーブル。どれも plan_id を持ち、list / upsert / remove で読み書きする。
 // children は、親の行を消したときに一緒に消える行（DB では外部キーが消す。ローカルではここを見て消す）
 const PLAN_TABLES = {
@@ -101,7 +123,19 @@ export function createSupabaseStore(client, options) {
       return error ? paths.length : paths.length - (data?.length ?? 0);
     },
     async imageUrl(path) {
-      return check(await client.storage.from(BUCKET).createSignedUrl(path, 3600)).signedUrl;
+      const saved = savedImageUrls();
+      const now = Date.now();
+      if (saved[path]?.expires - now > IMAGE_URL_MARGIN_MS) {
+        return saved[path].url;
+      }
+      const url = check(await client.storage.from(BUCKET).createSignedUrl(path, IMAGE_URL_SECONDS)).signedUrl;
+      const live = Object.entries(saved).filter(([, item]) => item.expires > now);
+      try {
+        localStorage.setItem(IMAGE_URLS_KEY, JSON.stringify({ ...Object.fromEntries(live), [path]: { url, expires: now + IMAGE_URL_SECONDS * 1000 } }));
+      } catch {
+        // 覚えられなくても、次の起動で発行し直すだけ
+      }
+      return url;
     },
     async loadPlans(fieldId) {
       return check(await client.from("plans").select("*").eq("field_id", fieldId).order("created_at"));

@@ -43,7 +43,7 @@ import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule, selectedRowPreset } from "./schedule-view.js";
-import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, inOrder, startOperation } from "./store.js";
+import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation } from "./store.js";
 
 const config = window.FIELD_PLAN_CONFIG;
 const $ = (id) => document.getElementById(id);
@@ -2822,6 +2822,7 @@ async function main() {
   });
   $("logoutBtn").addEventListener("click", async () => {
     await state.client.auth.signOut();
+    forgetImageUrls();
     location.reload();
   });
 

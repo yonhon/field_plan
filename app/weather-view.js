@@ -5,7 +5,7 @@
 import { notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { addDays, localToday } from "./schedule.js";
-import { FETCH_DAYS, fetchAreas, fetchDay, fetchForecast, fetchStations, nearestStations } from "./weather.js";
+import { FETCH_DAYS, fetchAreas, fetchDay, fetchForecast, fetchStations, nearestStations, weatherSettled } from "./weather.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -183,9 +183,7 @@ export async function syncWeather() {
   const to = addDays(today, -1);
   try {
     const have = await state().store.loadWeather(stations, from, to);
-    // 昨日の分は、あとから直されることがあるので取り直す。ただし、正式な値（GitHub Actions が気象庁の日別の表から
-    // 入れた値。source が jma）は上書きしない
-    const known = new Set(have.filter((row) => row.date < to || row.source !== "amedas").map((row) => `${row.station}|${row.date}`));
+    const known = new Set(have.filter((row) => weatherSettled(row, to)).map((row) => `${row.station}|${row.date}`));
     const rows = [];
     for (const station of stations) {
       for (let day = from; day <= to; day = addDays(day, 1)) {

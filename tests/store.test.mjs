@@ -1,7 +1,7 @@
 // ローカルの保存（app/store.js）のテスト。実行: node --test "tests/*.test.mjs"
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { createLocalStore, currentOperation, duringOperation, fetchWithOperation, inOrder, startOperation } from "../app/store.js";
+import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation } from "../app/store.js";
 
 const bed = { id: "bed1", plan_id: "p1", block_id: "b1", seq: 1 };
 const planting = { id: "pl1", plan_id: "p1", bed_id: "bed1", seq: 1 };
@@ -11,8 +11,52 @@ beforeEach(() => {
   globalThis.localStorage = {
     getItem: (key) => items.get(key) ?? null,
     setItem: (key, value) => items.set(key, value),
+    removeItem: (key) => items.delete(key),
   };
   localStorage.setItem("field_plan_local", JSON.stringify({ zones: [{ id: "z1", plan_id: "p1" }], blocks: [{ id: "b1", plan_id: "p1", zone_id: "z1" }] }));
+});
+
+function signingStore() {
+  const signed = [];
+  const client = {
+    storage: {
+      from: () => ({
+        createSignedUrl: async (path) => {
+          signed.push(path);
+          return { data: { signedUrl: `https://example.test/${path}?token=${signed.length}` }, error: null };
+        },
+      }),
+    },
+  };
+  return { store: createSupabaseStore(client, {}), signed };
+}
+
+test("下絵の URL は、次の起動でも同じものを使う", async () => {
+  const first = signingStore();
+  const url = await first.store.imageUrl("f1/a.png");
+  const second = signingStore();
+  assert.equal(await second.store.imageUrl("f1/a.png"), url);
+  assert.deepEqual(second.signed, []);
+  await second.store.imageUrl("f1/b.png");
+  assert.deepEqual(second.signed, ["f1/b.png"]);
+});
+
+test("下絵の URL は、期限が近いと発行し直し、切れた分を忘れる", async () => {
+  const day = 24 * 60 * 60 * 1000;
+  const items = { "f1/a.png": { url: "old", expires: Date.now() + day / 2 }, "f1/b.png": { url: "gone", expires: Date.now() - 1 } };
+  localStorage.setItem("field_plan_image_urls", JSON.stringify(items));
+  const { store, signed } = signingStore();
+  assert.notEqual(await store.imageUrl("f1/a.png"), "old");
+  assert.deepEqual(signed, ["f1/a.png"]);
+  assert.deepEqual(Object.keys(JSON.parse(localStorage.getItem("field_plan_image_urls"))), ["f1/a.png"]);
+});
+
+test("ログアウトで下絵の URL を忘れる", async () => {
+  await signingStore().store.imageUrl("f1/a.png");
+  forgetImageUrls();
+  const { store, signed } = signingStore();
+  await store.imageUrl("f1/a.png");
+  assert.deepEqual(signed, ["f1/a.png"]);
 });
 
 test("ふつうのローカルの保存は、親のない行も入る", async () => {
