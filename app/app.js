@@ -312,6 +312,16 @@ const visibleBlocks = () => state.blocks.filter(blockActive);
 const visibleBeds = () => state.beds.filter(bedExists);
 const tillableZoneAt = (point) => state.zones.find((zone) => zone.kind === "tillable" && pointInPolygon(point, zone.shape));
 
+// 選んだ図形が属する区域。圃場の外形を選んでいるときや、選んでいないときは null
+function frontZoneId() {
+  const found = state.selected && state.selected !== "outline" ? findShape(state.selected) : null;
+  if (!found) {
+    return null;
+  }
+  const block = found.kind === "bed" ? blockOf(found.item) : found.item;
+  return found.kind === "zone" ? found.item.id : block.zone_id;
+}
+
 // 名前のない有効圃場は、描いた順に番号を付けて呼ぶ
 function zoneLabel(zone) {
   if (zone.name) {
@@ -495,45 +505,54 @@ function renderMap(scale) {
   const beds = visibleBeds();
   // 表示日にない区画も、一覧で選んだときは場所が分かるように薄く描く
   const ghost = state.blocks.find((block) => block.id === state.selected && !blockActive(block));
-  for (const zone of state.zones) {
-    const color = ZONE_KINDS[zone.kind].color;
-    parts.push(
-      `<polygon class="shape${selectedClass(zone.id)}" data-shape="${zone.id}" ` +
-        `points="${svgPoints(zone.shape)}" fill="${color}" fill-opacity="0.35" stroke="${color}" />`
-    );
-    // 区画に分けた有効圃場は、区画の名前を出すので、有効圃場の名前は出さない
-    if (!blocks.some((block) => block.zone_id === zone.id)) {
-      parts.push(label(centroid(zone.shape), zoneLabel(zone)));
+  // 区域ごとに、区域、区画、畝の順で描く。選んだ図形の区域は、最後に描いていちばん上に見せる
+  const drawGroup = (zones, groupBlocks, groupBeds) => {
+    for (const zone of zones) {
+      const color = ZONE_KINDS[zone.kind].color;
+      parts.push(
+        `<polygon class="shape${selectedClass(zone.id)}" data-shape="${zone.id}" ` +
+          `points="${svgPoints(zone.shape)}" fill="${color}" fill-opacity="0.35" stroke="${color}" />`
+      );
+      // 区画に分けた有効圃場は、区画の名前を出すので、有効圃場の名前は出さない
+      if (!blocks.some((block) => block.zone_id === zone.id)) {
+        parts.push(label(centroid(zone.shape), zoneLabel(zone)));
+      }
     }
-  }
-  for (const block of ghost ? [...blocks, ghost] : blocks) {
-    parts.push(
-      `<polygon class="shape block${selectedClass(block.id)}" data-shape="${block.id}" ` +
-        `points="${svgPoints(block.shape)}" fill="${BLOCK_COLOR}" fill-opacity="${block === ghost ? 0.04 : 0.14}" stroke="${BLOCK_COLOR}" />`
-    );
-    if (!beds.some((bed) => bed.block_id === block.id)) {
-      parts.push(label(centroid(block.shape), block.name));
+    for (const block of groupBlocks) {
+      parts.push(
+        `<polygon class="shape block${selectedClass(block.id)}" data-shape="${block.id}" ` +
+          `points="${svgPoints(block.shape)}" fill="${BLOCK_COLOR}" fill-opacity="${block === ghost ? 0.04 : 0.14}" stroke="${BLOCK_COLOR}" />`
+      );
+      if (!beds.some((bed) => bed.block_id === block.id)) {
+        parts.push(label(centroid(block.shape), block.name));
+      }
     }
-  }
-  for (const bed of beds) {
-    const name = plantingOn(bed)?.crop_name || "";
-    const color = name ? cropColor(name) : BED_COLOR;
-    parts.push(
-      `<polygon class="shape bed${selectedClass(bed.id)}" data-shape="${bed.id}" ` +
-        `points="${svgPoints(bed.shape)}" fill="${color}" fill-opacity="0.8" stroke="${color}" />`
-    );
-    // 畝の番号と品目は、畝の向きに沿って書く。画面で小さい畝には書かない。
-    // 幅の狭い畝（70 cm など）でも読めるように、文字は 9px より小さくしない（畝から少しはみ出してよい）
-    const size = rectSize(bed.shape);
-    if (size.length * z > 50 && size.width * z > 4) {
-      const [a, b] = distance(bed.shape[0], bed.shape[1]) >= distance(bed.shape[1], bed.shape[2]) ? [bed.shape[0], bed.shape[1]] : [bed.shape[1], bed.shape[2]];
-      let degrees = (-Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
-      degrees = degrees > 90 ? degrees - 180 : degrees <= -90 ? degrees + 180 : degrees;
-      const center = centroid(bed.shape);
-      const text = `${bed.seq}${name ? ` ${name}` : ""}`;
-      parts.push(label(center, text, Math.min(fontSize, Math.max(size.width * 0.85, 9 / z)), `transform="rotate(${degrees} ${center[0]} ${-center[1]})"`));
+    for (const bed of groupBeds) {
+      const name = plantingOn(bed)?.crop_name || "";
+      const color = name ? cropColor(name) : BED_COLOR;
+      parts.push(
+        `<polygon class="shape bed${selectedClass(bed.id)}" data-shape="${bed.id}" ` +
+          `points="${svgPoints(bed.shape)}" fill="${color}" fill-opacity="0.8" stroke="${color}" />`
+      );
+      // 畝の番号と品目は、畝の向きに沿って書く。画面で小さい畝には書かない。
+      // 幅の狭い畝（70 cm など）でも読めるように、文字は 9px より小さくしない（畝から少しはみ出してよい）
+      const size = rectSize(bed.shape);
+      if (size.length * z > 50 && size.width * z > 4) {
+        const [a, b] = distance(bed.shape[0], bed.shape[1]) >= distance(bed.shape[1], bed.shape[2]) ? [bed.shape[0], bed.shape[1]] : [bed.shape[1], bed.shape[2]];
+        let degrees = (-Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+        degrees = degrees > 90 ? degrees - 180 : degrees <= -90 ? degrees + 180 : degrees;
+        const center = centroid(bed.shape);
+        const text = `${bed.seq}${name ? ` ${name}` : ""}`;
+        parts.push(label(center, text, Math.min(fontSize, Math.max(size.width * 0.85, 9 / z)), `transform="rotate(${degrees} ${center[0]} ${-center[1]})"`));
+      }
     }
-  }
+  };
+  const front = printing ? null : frontZoneId();
+  const allBlocks = ghost ? [...blocks, ghost] : blocks;
+  const inFront = (block) => block.zone_id === front;
+  const bedInFront = (bed) => inFront(blockOf(bed));
+  drawGroup(state.zones.filter((zone) => zone.id !== front), allBlocks.filter((block) => !inFront(block)), beds.filter((bed) => !bedInFront(bed)));
+  drawGroup(state.zones.filter((zone) => zone.id === front), allBlocks.filter(inFront), beds.filter(bedInFront));
 
   const selectedPoints = state.selected ? shapePoints(state.selected) : null;
   const selectedKind = state.selected === "outline" ? "outline" : state.selected ? findShape(state.selected)?.kind : null;
@@ -2132,6 +2151,14 @@ async function loadBackdropFile(file) {
 const pointers = new Map();
 let gesture = null; // { kind: "pan" | "vertex" | "rect" | "move" | "pinch", ... }
 
+// 選択中の図形の上を押したか。区域を選んだまま、その区画や畝の上からも動かせるよう、重なり順ではなく位置で見る。
+// 距離と長さの数字は、押すと値を入れる窓が開くので除く。外形と畝は、図の上では動かさない
+function pressedSelected(event) {
+  const { gap, edge } = event.target.dataset;
+  const points = state.selected && state.selected !== "outline" && !isBed(state.selected) ? shapePoints(state.selected) : null;
+  return Boolean(points) && gap === undefined && edge === undefined && pointInPolygon(clientToWorld(event), points);
+}
+
 map.addEventListener("pointerdown", (event) => {
   map.setPointerCapture(event.pointerId);
   pointers.set(event.pointerId, [event.clientX, event.clientY]);
@@ -2162,9 +2189,9 @@ map.addEventListener("pointerdown", (event) => {
     const zone = state.mode === "blockrect" ? tillableZoneAt(start) : null;
     const frame = zone ? zone.shape : state.field.outline;
     gesture = { kind: "rect", start, zone, angle: nearestEdgeAngle(start, frame), origin: [event.clientX, event.clientY] };
-  } else if (state.mode === "select" && state.selected !== "outline" && !isBed(state.selected) && target.dataset.shape && target.dataset.shape === state.selected) {
-    // 選択中の図形は、ドラッグでそのまま動かせる
-    gesture = { kind: "move", moved: false, start: [event.clientX, event.clientY], last: clientToWorld(event) };
+  } else if (state.mode === "select" && pressedSelected(event)) {
+    // 選択中の図形は、ドラッグでそのまま動かせる。動かさずに離したら、押した図形を選ぶ
+    gesture = { kind: "move", moved: false, start: [event.clientX, event.clientY], last: clientToWorld(event), shape: target.dataset.shape };
   } else {
     gesture = {
       kind: "pan",
@@ -2273,6 +2300,8 @@ function endPointer(event) {
       recordShape(state.selected, finished.was);
     } else if (finished.moved) {
       recordMove(state.selected);
+    } else if (finished.shape && event.type === "pointerup") {
+      state.selected = finished.shape;
     }
     state.selectedVertex = null;
     render();

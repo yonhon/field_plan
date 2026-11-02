@@ -264,6 +264,61 @@ test("実績の日付を動かす: 元に戻すと日付が戻り、やり直す
   assert.deepEqual(page.errors, []);
 });
 
+// 図の中の並び（あとのものほど上に見える）で、id が左から順に並んでいるか
+const drawnInOrder = (...ids) => page.run(`(() => {
+  const order = [...document.querySelectorAll("#map polygon[data-shape]")].map((shape) => shape.dataset.shape);
+  const places = ${JSON.stringify(ids)}.map((id) => order.indexOf(id));
+  return places.every((place, i) => place >= 0 && (i === 0 || place > places[i - 1]));
+})()`);
+const isSelected = (id) => `document.querySelector('#map polygon[data-shape="${id}"]').classList.contains("is-selected")`;
+
+// 区域 z1 に区画 b1 と畝 bed1、区域 z2 は中身なしで、全体が重なっている
+async function openGroups() {
+  const data = seed(1);
+  data.zones.push({ ...data.zones[0], id: "z2", shape: [[2, 2], [38, 2], [38, 18], [2, 18]] });
+  await page.loadApp(data);
+}
+
+const shapeX = async (table, id) => (await page.saved())[table].find((row) => row.id === id).shape[0][0];
+
+test("圃場図: 中身のない区域を選ぶと最上段に見え、ドラッグで動き、押しても選んだまま", options, async () => {
+  await openGroups();
+  const zone = await shapeX("zones", "z2");
+  const block = await shapeX("blocks", "b1");
+  await page.click('#shapeTree [data-shape="z2"]');
+  await page.waitFor(isSelected("z2"), "区域を選ぶ");
+  assert.equal(await drawnInOrder("z1", "b1", "bed1", "z2"), true);
+
+  await page.click("#map");
+  await page.waitFor(`document.getElementById("deleteShapeBtn").textContent === "区域を削除"`, "選択の表示");
+  assert.equal(await page.run(isSelected("z2")), true, "押しても区域を選んだまま");
+
+  await page.drag("#map", 60);
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "移動の保存");
+  assert.notEqual(await shapeX("zones", "z2"), zone);
+  assert.equal(await shapeX("blocks", "b1"), block, "ほかの区域の区画は動かない");
+  assert.deepEqual(page.errors, []);
+});
+
+test("圃場図: 区域を選ぶと、区域、区画、畝の順で最上段に見え、区画の上からも区域を動かせる", options, async () => {
+  await openGroups();
+  const zone = await shapeX("zones", "z1");
+  const block = await shapeX("blocks", "b1");
+  await page.click('#shapeTree [data-shape="z1"]');
+  await page.waitFor(isSelected("z1"), "区域を選ぶ");
+  assert.equal(await drawnInOrder("z2", "z1", "b1", "bed1"), true);
+
+  await page.drag("#map", 60);
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "移動の保存");
+  assert.notEqual(await shapeX("zones", "z1"), zone, "区域が動く");
+  assert.notEqual(await shapeX("blocks", "b1"), block, "中の区画も一緒に動く");
+
+  await page.click("#map");
+  await page.waitFor(isSelected("b1"), "押すと、上に見える区画を選ぶ");
+  assert.equal(await drawnInOrder("z2", "z1", "b1", "bed1"), true, "区画を選んでも、区画と畝は最上段のまま");
+  assert.deepEqual(page.errors, []);
+});
+
 test("作付を保存できないとき: 窓で知らせ、ほかの保存が終わっても消えない", options, async () => {
   await openStrip(1);
   await page.run(`(() => {
