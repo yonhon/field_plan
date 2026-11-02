@@ -1,5 +1,5 @@
 // 「品目」の画面。品目ごとの設定値と、肥料の銘柄を登録する。どちらもすべてのプランで共通。
-import { confirmDelete, notify } from "./dialog.js";
+import { confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { record } from "./journal.js";
 
 const $ = (id) => document.getElementById(id);
@@ -39,6 +39,7 @@ async function run(action) {
     ctx.setStatus("保存しました");
   } catch (error) {
     ctx.setStatus(`保存に失敗しました: ${error.message}`);
+    notifySaveFailed(error);
   }
   renderCrops();
 }

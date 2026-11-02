@@ -236,6 +236,28 @@ export function createSupabaseStore(client, options) {
   };
 }
 
+// 行の書き込みを、呼んだ順に 1 つずつ送る。同時に送ると、親の行より先に子の行が届いて断られることがある。
+// 前の書き込みが失敗しても、次の書き込みは送る。writing は、送り終えていない書き込みがあるあいだ true
+export function inOrder(store) {
+  let last = Promise.resolve();
+  let active = 0;
+  const queued = (write) => (...args) => {
+    active += 1;
+    const result = last.then(() => write(...args)).finally(() => {
+      active -= 1;
+    });
+    last = result.catch(() => {});
+    return result;
+  };
+  return {
+    ...store,
+    upsert: queued(store.upsert),
+    remove: queued(store.remove),
+    saveField: queued(store.saveField),
+    writing: () => active > 0,
+  };
+}
+
 export function createLocalStore({ strict = false } = {}) {
   const read = () => JSON.parse(localStorage.getItem(LOCAL_KEY) || "{}");
   const write = (data) => localStorage.setItem(LOCAL_KEY, JSON.stringify(data));

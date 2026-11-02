@@ -21,7 +21,7 @@ import {
   worksRange,
 } from "./schedule.js";
 import { cropLabel, plantingNumbers, summarize } from "./crops.js";
-import { confirmAction, confirmDelete, notify } from "./dialog.js";
+import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor } from "./log-view.js";
 import { lateWorks, layoutBars, logEnd, plantingOnDate, withActualDates, workActuals, workStatus } from "./logs.js";
@@ -127,6 +127,7 @@ async function run(action) {
     ctx.setStatus("保存しました");
   } catch (error) {
     ctx.setStatus(`保存に失敗しました: ${error.message}`);
+    notifySaveFailed(error);
   }
   renderSchedule();
 }
@@ -1658,16 +1659,8 @@ export function initSchedule(context) {
       const crop = state().crops.find((item) => item.id === cropId);
       if (crop && beds.length) {
         run(async () => {
-          await ctx.bedsSaved();
-          ctx.setStatus("保存中…");
-          try {
-            for (const bed of beds) {
-              await fillPlanting(await newPlanting(bed.id, crop.name, crop.id));
-            }
-          } catch (error) {
-            // 保存の状態の文字は、ほかの保存が終わると上書きされるので、窓で知らせる
-            notify(`作付（${crop.name}）を保存できませんでした。再読み込みして、畝と作付を確かめてください。\n${error.message}`);
-            throw error;
+          for (const bed of beds) {
+            await fillPlanting(await newPlanting(bed.id, crop.name, crop.id));
           }
           const block = state().blocks.find((item) => item.id === beds[0].block_id);
           record({

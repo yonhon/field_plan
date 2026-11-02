@@ -73,6 +73,9 @@ function connect(url) {
     if (waiting.has(message.id)) {
       waiting.get(message.id)(message);
       waiting.delete(message.id);
+    } else if (message.method === "Page.javascriptDialogOpening") {
+      // 保存中に閉じるときの確認。次のテストへ進めるよう、閉じる
+      send("Page.handleJavaScriptDialog", { accept: true });
     } else if (message.method === "Runtime.exceptionThrown") {
       const { exception, text } = message.params.exceptionDetails;
       errors.push(exception?.description?.split("\n")[0] || text);

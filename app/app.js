@@ -33,7 +33,7 @@ import {
   worldToImage,
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
-import { confirmAction, confirmDelete, notify } from "./dialog.js";
+import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
 import { initLogs, renderLogs } from "./log-view.js";
@@ -43,7 +43,7 @@ import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule, selectedRowPreset } from "./schedule-view.js";
-import { createLocalStore, createSupabaseStore } from "./store.js";
+import { createLocalStore, createSupabaseStore, inOrder } from "./store.js";
 
 const config = window.FIELD_PLAN_CONFIG;
 const $ = (id) => document.getElementById(id);
@@ -888,12 +888,42 @@ function render() {
 const pendingSaves = new Set();
 let saveTimer = null;
 
-function queueSave(key) {
-  pendingSaves.add(key);
+function scheduleSaves() {
   $("saveStatus").textContent = "保存中…";
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSaves, SAVE_DELAY_MS);
 }
+
+function queueSave(key) {
+  pendingSaves.add(key);
+  scheduleSaves();
+}
+
+// 保存の状態の文字を出す。送り残しがあるあいだは「保存しました」と出さず、送り残しをもう一度送る。
+// 続きの書き込みがあるあいだも出さない（その書き込みが終わったときに出る）
+function setStatus(text) {
+  if (text === "保存しました" && pendingSaves.size) {
+    scheduleSaves();
+  } else if (text !== "保存しました" || !state.store.writing()) {
+    $("saveStatus").textContent = text;
+  }
+}
+
+// まだ送っていない保存を、すぐに送る。親の行を先に保存したいときに使う
+async function sendPendingSaves() {
+  if (pendingSaves.size) {
+    clearTimeout(saveTimer);
+    await flushSaves();
+  }
+}
+
+// 保存が終わらないうちに閉じると、変更が消える。閉じる前に送り、確かめる
+window.addEventListener("beforeunload", (event) => {
+  if (pendingSaves.size || state.store?.writing()) {
+    sendPendingSaves();
+    event.preventDefault();
+  }
+});
 
 async function flushSaves() {
   const keys = [...pendingSaves];
@@ -923,6 +953,7 @@ async function flushSaves() {
   } catch (error) {
     keys.forEach((key) => pendingSaves.add(key));
     $("saveStatus").textContent = `保存に失敗しました: ${error.message}`;
+    notify(`変更を保存できませんでした。次に保存するときに、もう一度送ります。\n${error.message}`);
   }
 }
 
@@ -931,9 +962,10 @@ async function persist(action) {
   $("saveStatus").textContent = "保存中…";
   try {
     await action();
-    $("saveStatus").textContent = "保存しました";
+    setStatus("保存しました");
   } catch (error) {
-    $("saveStatus").textContent = `保存に失敗しました: ${error.message}`;
+    setStatus(`保存に失敗しました: ${error.message}`);
+    notifySaveFailed(error);
   }
 }
 
@@ -1399,6 +1431,7 @@ function createBlock(zone, shape) {
   });
   state.blocks.push(block);
   persist(async () => {
+    await sendPendingSaves(); // 親の区域が、まだ送られていないことがある
     await state.store.upsert("blocks", [...ended, block]);
     // 日程を新しい区画へ付け替えてから、置き換えた区画を消す（先に消すと日程も消える）
     await state.store.upsert("works", inherited);
@@ -1503,6 +1536,7 @@ function splitAt(point) {
     after: `${polygonArea(first.shape).toFixed(1)} ㎡ と ${polygonArea(second.shape).toFixed(1)} ㎡`,
   });
   persist(async () => {
+    await sendPendingSaves(); // 親の区域が、まだ送られていないことがある
     await state.store.upsert("blocks", [first, second]);
     await state.store.upsert("beds", moved);
     await state.store.upsert("works", copies);
@@ -1551,9 +1585,6 @@ function addBedsToBlock(block, options) {
   return created;
 }
 
-// いちばん新しく足した畝の保存。作付は畝を指すので、足した畝の作付は、これを待ってから保存する
-let bedsSaved = Promise.resolve();
-
 // 形の決まった畝を区画に足す。番号は、いまある畝の続き。足した畝を返す
 function createBeds(blockId, shapes) {
   const mine = state.beds.filter((bed) => bed.block_id === blockId);
@@ -1581,7 +1612,7 @@ function createBeds(blockId, shapes) {
     target: ["block", blockId],
     text: `${made.name}に畝を ${beds.length} 本追加（幅 ${Math.round(rectSize(shapes[0]).width * 100)} cm、長さ ${rectSize(shapes[0]).length.toFixed(1)} m）`,
   });
-  bedsSaved = persist(() => state.store.upsert("beds", beds));
+  persist(() => state.store.upsert("beds", beds));
   return beds;
 }
 
@@ -2651,7 +2682,6 @@ async function startApp() {
     plantingOn,
     appendBeds,
     createBeds,
-    bedsSaved: () => bedsSaved,
     renumberBeds,
     removeBed,
     removeBlockBeds,
@@ -2659,7 +2689,7 @@ async function startApp() {
       state.selected = id;
       return deleteSelectedShape();
     },
-    setStatus: (text) => ($("saveStatus").textContent = text),
+    setStatus,
     renderWarnings,
     openDetail: (kind, id) => {
       openPlantingDetail(kind, id);
@@ -2671,15 +2701,15 @@ async function startApp() {
     renderSchedule();
     renderPlantingDetail();
   };
-  initLogs({ state, activePlanData, setStatus: (text) => ($("saveStatus").textContent = text), onLogsChanged: refreshRecords, selectedTarget: selectedRowPreset });
+  initLogs({ state, activePlanData, setStatus, onLogsChanged: refreshRecords, selectedTarget: selectedRowPreset });
   initPlantingView({
     state,
     showView,
     openInSchedule,
-    setStatus: (text) => ($("saveStatus").textContent = text),
+    setStatus,
     refresh: refreshRecords,
   });
-  initWeather({ state, setStatus: (text) => ($("saveStatus").textContent = text), onWeatherChanged: renderPlantingDetail });
+  initWeather({ state, setStatus, onWeatherChanged: renderPlantingDetail });
   renderWeatherSettings();
   syncWeather();
   // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホは作業の確認が主なので日程、PC は圃場図。
@@ -2690,9 +2720,9 @@ async function startApp() {
   } else if (!route) {
     showView(window.matchMedia("(max-width: 800px)").matches ? "schedule" : "map", { history: "replace" });
   }
-  initCrops({ state, setStatus: (text) => ($("saveStatus").textContent = text) });
+  initCrops({ state, setStatus });
   try {
-    await initJournal({ state, openTarget, setStatus: (text) => ($("saveStatus").textContent = text) });
+    await initJournal({ state, openTarget, setStatus });
   } catch (error) {
     $("saveStatus").textContent = `変更の履歴を読み込めませんでした: ${error.message}`;
   }
@@ -2703,7 +2733,7 @@ async function startApp() {
     state,
     // プランを読み込んでいるあいだは、元に戻さない
     busy: () => state.planBusy,
-    setStatus: (text) => ($("saveStatus").textContent = text),
+    setStatus,
     // まだ送っていない図形の保存を、先に済ませる
     flush: async () => {
       clearTimeout(saveTimer);
@@ -2729,14 +2759,14 @@ async function startApp() {
 async function main() {
   const params = new URLSearchParams(location.search);
   if (params.has("local")) {
-    state.store = createLocalStore({ strict: params.has("strict") });
+    state.store = inOrder(createLocalStore({ strict: params.has("strict") }));
     $("saveStatus").textContent = "このブラウザーの中だけに保存します";
     await startApp();
     return;
   }
 
   state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, { db: { schema: "field" } });
-  state.store = createSupabaseStore(state.client, { url: config.supabaseUrl, anonKey: config.supabaseAnonKey });
+  state.store = inOrder(createSupabaseStore(state.client, { url: config.supabaseUrl, anonKey: config.supabaseAnonKey }));
 
   $("loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();

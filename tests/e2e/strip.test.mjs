@@ -152,6 +152,87 @@ test("畝に作付を追加する: 作付と作業が保存される", options, 
   assert.deepEqual(page.errors, []);
 });
 
+// 保存を失敗させる。when は、書き込む内容を受け取って失敗させるかを返す式。元に戻すときは restoreSaves
+const failSaves = (when) =>
+  page.run(`(() => {
+    const setItem = Storage.prototype.setItem;
+    window.restoreSaves = () => (Storage.prototype.setItem = setItem);
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "field_plan_local" && ((data) => ${when})(JSON.parse(value))) {
+        throw new Error("保存の失敗");
+      }
+      return setItem.call(this, key, value);
+    };
+  })()`);
+
+const status = () => page.run(`document.getElementById("saveStatus").textContent`);
+const savedWidth = async () => {
+  const [a, b] = (await page.saved()).beds.find((item) => item.id === "bed1").shape;
+  return Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) * 100);
+};
+
+// 畝 1 の幅を 150 cm にする（すぐには送らない自動保存）
+async function widenBed() {
+  await page.run(`window.prompt = () => "150"`);
+  await page.click('[data-dim="width:0"]');
+  await page.waitFor(`document.querySelector('[data-dim="width:0"]').textContent === "150cm"`, "畝幅が変わる");
+}
+
+const leaving = () => page.run(`(() => {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+})()`);
+
+test("畝の保存に失敗したとき: 窓で知らせる", options, async () => {
+  await openStrip(2);
+  await failSaves("data.beds.length === 3");
+  await page.click("#stripAddBtn");
+  await page.waitFor(`${openDialog}?.textContent.includes("保存の失敗")`, "失敗の窓");
+  assert.match(await status(), /保存に失敗しました/);
+});
+
+test("自動保存に失敗したとき: 窓で知らせ、次の保存で送り直し、保存するまで「保存しました」と出さない", options, async () => {
+  await openStrip(2);
+  await failSaves("true");
+  await widenBed();
+  await page.waitFor(`${openDialog}?.textContent.includes("保存の失敗")`, "失敗の窓");
+  await page.click('dialog.notice [data-action="close"]');
+  await page.waitFor(`!${openDialog}`, "窓が閉じる");
+  await page.run(`window.restoreSaves()`);
+  assert.equal(await savedWidth(), 100);
+
+  await page.click("#stripAddBtn");
+  await page.waitFor(`document.querySelectorAll("#strip .strip-bed").length === 3`, "図に 3 本");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).beds.length === 3`, "足した畝の保存");
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "保存の完了");
+  assert.equal(await savedWidth(), 150, "「保存しました」と出たら、送り残しは保存されている");
+});
+
+test("閉じる前: 保存が終わっていなければ確かめ、終わっていれば確かめない", options, async () => {
+  await openStrip(1);
+  assert.equal(await leaving(), false);
+  await widenBed();
+  assert.equal(await leaving(), true);
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "保存の完了");
+  assert.equal(await savedWidth(), 150, "確かめるときに、送り残しを送る");
+  assert.equal(await leaving(), false);
+});
+
+test("区域を作ってすぐ区画にする: 区域の保存を待たずに操作しても、両方保存される", options, async () => {
+  await page.loadApp({ ...seed(0), zones: [], blocks: [] });
+  await page.setValue("#sizeAlong", "10");
+  await page.setValue("#sizeDepth", "5");
+  await page.run(`document.querySelector('.mode-btn[data-mode="size"]').click()`);
+  await page.click("#map");
+  await page.run(`document.querySelector('.mode-btn[data-mode="block"]').click()`);
+  await page.click("#map");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).blocks.length === 1`, "区画の保存");
+  assert.equal((await page.saved()).zones.length, 1);
+  assert.equal(await page.run(`Boolean(${openDialog})`), false);
+  assert.deepEqual(page.errors, []);
+});
+
 test("作付を保存できないとき: 窓で知らせ、ほかの保存が終わっても消えない", options, async () => {
   await openStrip(1);
   await page.run(`(() => {
