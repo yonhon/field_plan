@@ -2653,7 +2653,7 @@ async function startApp() {
     removeBlockBeds,
     deleteBed: (id) => {
       state.selected = id;
-      deleteSelectedShape();
+      return deleteSelectedShape();
     },
     setStatus: (text) => ($("saveStatus").textContent = text),
     renderWarnings,

@@ -511,16 +511,17 @@ export function initStrip(context) {
       $("stripAisle").value = crop.aisle_width_cm;
     }
   });
-  $("stripRemoveBtn").addEventListener("click", () => {
-    ctx.removeBed(ctx.selection().target);
+  // 確認の答えを待ってから描き直す
+  $("stripRemoveBtn").addEventListener("click", async () => {
+    await ctx.removeBed(ctx.selection().target);
     ctx.refresh();
   });
-  $("stripDeleteBtn").addEventListener("click", () => {
-    ctx.deleteBed(ctx.selection().target);
+  $("stripDeleteBtn").addEventListener("click", async () => {
+    await ctx.deleteBed(ctx.selection().target);
     ctx.refresh();
   });
-  $("stripRemoveAllBtn").addEventListener("click", () => {
-    ctx.removeBlockBeds(ctx.selection().blockId);
+  $("stripRemoveAllBtn").addEventListener("click", async () => {
+    await ctx.removeBlockBeds(ctx.selection().blockId);
     ctx.refresh();
   });
   $("stripPlaceBtn").addEventListener("click", () => placeBeds(false));
