@@ -2727,8 +2727,9 @@ async function startApp() {
 }
 
 async function main() {
-  if (new URLSearchParams(location.search).has("local")) {
-    state.store = createLocalStore();
+  const params = new URLSearchParams(location.search);
+  if (params.has("local")) {
+    state.store = createLocalStore({ strict: params.has("strict") });
     $("saveStatus").textContent = "このブラウザーの中だけに保存します";
     await startApp();
     return;

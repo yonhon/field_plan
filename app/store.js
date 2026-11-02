@@ -1,5 +1,6 @@
 // データの読み書き。通常は Supabase の field スキーマ。
 // URL に ?local=1 を付けると、DB を使わずにこのブラウザーの中だけに保存する（動作確認用）。
+// さらに &strict=1 を付けると、保存の遅れと外部キーを DB に近づける。
 import { DEFAULT_WORK_TYPES } from "./schedule.js";
 import { uploadWithProgress } from "./upload.js";
 
@@ -14,6 +15,18 @@ const PLAN_TABLES = {
   beds: { order: "seq", children: [["plantings", "bed_id"]] },
   plantings: { order: "seq", children: [["works", "planting_id"]] },
   works: { order: "seq", children: [] },
+};
+
+// strict のローカルの保存。ふつうのローカルの保存はすぐ終わり、行のつながりも確かめないので、保存の順序の誤りが出ない。
+// 親の表ほど保存を遅くし（delay × STRICT_DELAY_MS）、親の保存を待たない書き方が必ず失敗するようにする。
+// parents は [親の表, 親を指す列]。親のない行は、DB と同じ 23503 で断る
+const STRICT_DELAY_MS = 100;
+const STRICT_TABLES = {
+  zones: { delay: 4, parents: [] },
+  blocks: { delay: 3, parents: [["zones", "zone_id"]] },
+  beds: { delay: 2, parents: [["blocks", "block_id"]] },
+  plantings: { delay: 1, parents: [["beds", "bed_id"]] },
+  works: { delay: 0, parents: [["blocks", "block_id"], ["plantings", "planting_id"]] },
 };
 
 // options: { url, anonKey }。画像を、進み具合を知らせながら上げるのに使う
@@ -223,13 +236,27 @@ export function createSupabaseStore(client, options) {
   };
 }
 
-export function createLocalStore() {
+export function createLocalStore({ strict = false } = {}) {
   const read = () => JSON.parse(localStorage.getItem(LOCAL_KEY) || "{}");
   const write = (data) => localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
   const update = (change) => {
     const data = read();
     change(data);
     write(data);
+  };
+  const strictWrite = async (table, rows) => {
+    const rules = STRICT_TABLES[table];
+    if (!strict || !rules || !rows.length) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, rules.delay * STRICT_DELAY_MS));
+    const data = read();
+    for (const [parent, column] of rules.parents) {
+      const known = new Set((data[parent] || []).map((row) => row.id));
+      if (rows.some((row) => row[column] && !known.has(row[column]))) {
+        throw Object.assign(new Error(`${table} の ${column} が指す行が ${parent} にありません（外部キー違反）`), { code: "23503" });
+      }
+    }
   };
   // 圃場を 1 つしか持てなかったころの形を、圃場ごとの形に直す
   update((data) => {
@@ -339,6 +366,7 @@ export function createLocalStore() {
         .sort((a, b) => (a[order] < b[order] ? -1 : a[order] > b[order] ? 1 : 0));
     },
     async upsert(table, rows) {
+      await strictWrite(table, rows);
       const ids = rows.map((row) => row.id);
       update((data) => {
         const kept = (data[table] || []).map((row) => (ids.includes(row.id) ? rows.find((item) => item.id === row.id) : row));

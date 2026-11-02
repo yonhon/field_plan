@@ -47,6 +47,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `sql/field.sql` | `field` スキーマとテーブルの定義、権限 |
 | `app/` | 画面。GitHub Pages に置く |
 | `docs/design-rules.md` | 画面のデザインのきまり（色、リンク）。画面を作るとき、直すときに守る |
+| `docs/implementation-rules.md` | 実装のきまり（待つこと、保存の順序、失敗の知らせ方、確かめ方）。処理を書くとき、直すときに守る |
 | `app/geometry.js` | 面積、辺の長さ、座標の変換、区画の分割、畝の配置 |
 | `app/schedule.js` | 日程の計算（並べ直しと逆算、無理の指摘、収穫完了予定日、今週の作業） |
 | `app/schedule-view.js` | 日程の画面 |
@@ -73,6 +74,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `scripts/import_jma_csv.py` | 気象庁の過去の気象データ（日別の CSV）を DB に入れる。いまは `fetch-weather.mjs` に日付を渡せば日別の表から入れ直せるので、ふだんは使わない |
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
 | `tests/` | 図形、日程、苗数と施肥量の計算、作業の実績の計算、元に戻すと、MCP サーバーのテスト |
+| `tests/e2e/` | 主な操作を、Chrome で通して動かすテスト |
 | `data/` | 下絵の画像など、圃場ごとの資料。**Git の対象外** |
 
 画面のコードは公開されますが、データはログインした本人しか読めません。
@@ -446,10 +448,16 @@ bun x supabase functions deploy field-mcp --project-ref byhthaiwbutqstrqbwwc --n
 python -m http.server 8765 --directory app
 ```
 
-`http://localhost:8765/` を開きます。`http://localhost:8765/?local=1` にすると、ログインも DB も使わず、そのブラウザーの中だけに保存します。
+`http://localhost:8765/` を開きます。`http://localhost:8765/?local=1` にすると、ログインも DB も使わず、そのブラウザーの中だけに保存します。`http://localhost:8765/?local=1&strict=1` にすると、さらに保存を遅らせ、親のない行を DB と同じように断ります。保存の順序の誤りを見つけるのに使います。
 
 テストは次のとおりです。
 
 ```
 node --test "tests/*.test.mjs"
+```
+
+主な操作を Chrome で通して動かすテストは、次のとおりです。`?local=1&strict=1` で動かすので、ログインも DB も使いません。Chrome は、いつもの場所か、環境変数 `CHROME_PATH` の場所から探します。見つからなければ、テストを飛ばします。
+
+```
+node --test "tests/e2e/*.test.mjs"
 ```
