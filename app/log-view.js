@@ -2,6 +2,7 @@
 // 記録は、実際に使うプランの区画・畝・作付・作業につなぐ。計画はスマホでは直せないが、記録はスマホでも入れられる。
 import { WORK_COLORS, WORK_ITEMS, addDays, diffDays, isManagement, localToday, workName } from "./schedule.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
+import { noteChange } from "./history.js";
 import { record } from "./journal.js";
 import { SPEC_FIELDS, formatAmount, inputText, logEnd, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
@@ -211,7 +212,9 @@ export async function moveLogs(logIds, days, matches, rowName) {
       }
     }
     await reload();
-    ctx.setStatus(`実績の日付を ${Math.abs(days)} 日${days > 0 ? "後ろ" : "前"}へ動かしました`);
+    const way = `${Math.abs(days)} 日${days > 0 ? "後ろ" : "前"}へ動かし`;
+    record({ kind: "log.move", target: ["work", null], plan: activePlan(), text: `${rowName}の実績（${typeLabel(logs[0].work_type)}）の日付を、${way}た` });
+    ctx.setStatus(`実績の日付を ${way}ました`);
     return true;
   } catch (error) {
     ctx.setStatus("");
@@ -1490,6 +1493,7 @@ async function reload() {
   state().logs = await state().store.loadLogs(state().field.id);
   renderLogs();
   ctx.onLogsChanged?.();
+  noteChange();
 }
 
 export function initLogs(context) {

@@ -162,6 +162,24 @@ export async function openBrowser() {
     }
   };
 
+  // 要素を、右へ dx ピクセル、本物のマウスの操作でドラッグする
+  const drag = async (selector, dx) => {
+    const target = JSON.stringify(selector);
+    await waitFor(`Boolean(document.querySelector(${target}))`, selector);
+    const point = await run(`(() => {
+      const element = document.querySelector(${target});
+      element.scrollIntoView({ block: "center" });
+      const box = element.getBoundingClientRect();
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    })()`);
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+    await page.send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", buttons: 1, clickCount: 1 });
+    for (let step = 1; step <= 5; step += 1) {
+      await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x + (dx * step) / 5, y: point.y, button: "left", buttons: 1 });
+    }
+    await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x + dx, y: point.y, button: "left", clickCount: 1 });
+  };
+
   const setValue = (selector, value) =>
     run(`(() => {
       const element = document.querySelector(${JSON.stringify(selector)});
@@ -195,6 +213,7 @@ export async function openBrowser() {
     run,
     waitFor,
     click,
+    drag,
     setValue,
     loadApp,
     close,

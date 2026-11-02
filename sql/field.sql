@@ -541,9 +541,11 @@ create table if not exists field.audit_log (
   old_row jsonb,             -- 変える前の行。足したときは空
   new_row jsonb              -- 変えたあとの行。消したときは空
 );
+alter table field.audit_log add column if not exists op_id uuid;  -- 画面の 1 回の操作の ID。ヘッダー x-op-id から。DB に直接つないだ変更などは空
 
 create index if not exists audit_log_at_idx on field.audit_log (at);
 create index if not exists audit_log_row_idx on field.audit_log (table_name, row_id);
+create index if not exists audit_log_op_idx on field.audit_log (op_id) where op_id is not null;
 
 create or replace function field.write_audit_log() returns trigger
 language plpgsql security definer set search_path = ''
@@ -551,17 +553,24 @@ as $$
 declare
   old_row jsonb := case when tg_op <> 'INSERT' then to_jsonb(old) end;
   new_row jsonb := case when tg_op <> 'DELETE' then to_jsonb(new) end;
+  op_id uuid;
 begin
   -- 中身の変わらない上書き（画面が同じ行を保存し直したとき）は残さない
   if tg_op = 'UPDATE' and old_row = new_row then
     return null;
   end if;
-  insert into field.audit_log (user_id, db_role, table_name, op, row_id, old_row, new_row)
+  -- 操作の ID が読めなくても、保存は止めない
+  begin
+    op_id := (nullif(current_setting('request.headers', true), '')::jsonb ->> 'x-op-id')::uuid;
+  exception when others then
+    op_id := null;
+  end;
+  insert into field.audit_log (user_id, db_role, table_name, op, row_id, old_row, new_row, op_id)
   values (
     -- この関数は持ち主の権限で動くので、current_user では見分けられない。画面からは auth.role() が入る
     auth.uid(), coalesce(auth.role(), session_user), tg_table_name, lower(tg_op),
     coalesce(new_row ->> 'id', old_row ->> 'id', new_row ->> 'code', old_row ->> 'code'),
-    old_row, new_row
+    old_row, new_row, op_id
   );
   return null;
 end;

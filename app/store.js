@@ -236,26 +236,66 @@ export function createSupabaseStore(client, options) {
   };
 }
 
-// 行の書き込みを、呼んだ順に 1 つずつ送る。同時に送ると、親の行より先に子の行が届いて断られることがある。
-// 前の書き込みが失敗しても、次の書き込みは送る。writing は、送り終えていない書き込みがあるあいだ true
+// 利用者の 1 回の操作の ID。書き込みに付けて送り、DB の変更の記録（field.audit_log の op_id）に残す。
+// 押す、キーを打つ、の始まりで新しくする
+let operation = crypto.randomUUID();
+let sending = null; // いま送っている書き込みの操作の ID
+
+export const currentOperation = () => operation;
+
+export function startOperation() {
+  operation = crypto.randomUUID();
+}
+
+// call の中で呼んだ書き込みを、id の操作のものとして送る。あとから送る保存（queueSave）に使う
+export function duringOperation(id, call) {
+  const now = operation;
+  operation = id;
+  try {
+    return call();
+  } finally {
+    operation = now;
+  }
+}
+
+// Supabase の fetch。書き込みに操作の ID を付ける。読み取りと認証には付けない
+export function fetchWithOperation(url, options = {}) {
+  if (!sending || !String(url).includes("/rest/v1/") || (options.method || "GET") === "GET") {
+    return fetch(url, options);
+  }
+  const headers = new Headers(options.headers);
+  headers.set("x-op-id", sending);
+  return fetch(url, { ...options, headers });
+}
+
+const QUEUED_WRITES = [
+  "upsert", "remove", "saveField", "saveBackdrop", "saveLog", "deleteLog", "saveWorkType", "saveFieldWeather",
+  "createField", "deleteField", "createPlan", "renamePlan", "deletePlan", "setActivePlan",
+];
+
+// 書き込みを、呼んだ順に 1 つずつ送る。同時に送ると、親の行より先に子の行が届いて断られることがある。
+// 前の書き込みが失敗しても、次の書き込みは送る。writing は、送り終えていない書き込みがあるあいだ true。
+// 操作の ID は、呼んだ時点のものを使う。1 つずつ送るので、送っているあいだ sending で分かる
 export function inOrder(store) {
   let last = Promise.resolve();
   let active = 0;
   const queued = (write) => (...args) => {
+    const id = operation;
     active += 1;
-    const result = last.then(() => write(...args)).finally(() => {
-      active -= 1;
-    });
+    const result = last
+      .then(() => {
+        sending = id;
+        return write(...args);
+      })
+      .finally(() => {
+        sending = null;
+        active -= 1;
+      });
     last = result.catch(() => {});
     return result;
   };
-  return {
-    ...store,
-    upsert: queued(store.upsert),
-    remove: queued(store.remove),
-    saveField: queued(store.saveField),
-    writing: () => active > 0,
-  };
+  const writes = QUEUED_WRITES.filter((name) => store[name]).map((name) => [name, queued(store[name])]);
+  return { ...store, ...Object.fromEntries(writes), writing: () => active > 0 };
 }
 
 export function createLocalStore({ strict = false } = {}) {

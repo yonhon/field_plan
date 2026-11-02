@@ -43,7 +43,7 @@ import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule, selectedRowPreset } from "./schedule-view.js";
-import { createLocalStore, createSupabaseStore, inOrder } from "./store.js";
+import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, inOrder, startOperation } from "./store.js";
 
 const config = window.FIELD_PLAN_CONFIG;
 const $ = (id) => document.getElementById(id);
@@ -885,7 +885,7 @@ function render() {
 
 // ---- 保存 ----
 
-const pendingSaves = new Set();
+const pendingSaves = new Map(); // 保存の予約と、それを予約した操作の ID
 let saveTimer = null;
 
 function scheduleSaves() {
@@ -895,7 +895,7 @@ function scheduleSaves() {
 }
 
 function queueSave(key) {
-  pendingSaves.add(key);
+  pendingSaves.set(key, currentOperation());
   scheduleSaves();
 }
 
@@ -917,6 +917,11 @@ async function sendPendingSaves() {
   }
 }
 
+// 押す、キーを打つ、の始まりが、1 回の操作の区切り
+for (const type of ["pointerdown", "keydown"]) {
+  document.addEventListener(type, startOperation, true);
+}
+
 // 保存が終わらないうちに閉じると、変更が消える。閉じる前に送り、確かめる
 window.addEventListener("beforeunload", (event) => {
   if (pendingSaves.size || state.store?.writing()) {
@@ -926,32 +931,36 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 async function flushSaves() {
-  const keys = [...pendingSaves];
+  const saves = [...pendingSaves];
   pendingSaves.clear();
   try {
     const rows = { zones: [], blocks: [], beds: [] };
-    for (const key of keys) {
+    for (const [key, id] of saves) {
       if (key === "field") {
-        await state.store.saveField(state.field);
+        await duringOperation(id, () => state.store.saveField(state.field));
       } else if (key === "backdrop") {
         const { size, ...row } = state.backdrop;
-        await state.store.saveBackdrop(row);
+        await duringOperation(id, () => state.store.saveBackdrop(row));
       } else {
         // 消したあとに残っていた保存の予約は、相手が見つからないので捨てる
         const found = findShape(key.slice(key.indexOf(":") + 1));
         if (found) {
-          rows[TABLES[found.kind]].push(found.item);
+          rows[TABLES[found.kind]].push({ id, item: found.item });
         }
       }
     }
+    // 予約した操作ごとに分けて送る
     for (const table of ["zones", "blocks", "beds"]) {
-      await state.store.upsert(table, rows[table]);
+      for (const id of new Set(rows[table].map((row) => row.id))) {
+        const items = rows[table].filter((row) => row.id === id).map((row) => row.item);
+        await duringOperation(id, () => state.store.upsert(table, items));
+      }
     }
     if (!pendingSaves.size) {
       $("saveStatus").textContent = "保存しました";
     }
   } catch (error) {
-    keys.forEach((key) => pendingSaves.add(key));
+    saves.filter(([key]) => !pendingSaves.has(key)).forEach(([key, id]) => pendingSaves.set(key, id));
     $("saveStatus").textContent = `保存に失敗しました: ${error.message}`;
     notify(`変更を保存できませんでした。次に保存するときに、もう一度送ります。\n${error.message}`);
   }
@@ -2032,7 +2041,7 @@ async function deletePlan() {
   }
   planTask(async () => {
     clearTimeout(saveTimer);
-    [...pendingSaves].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
+    [...pendingSaves.keys()].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
     record({ kind: "plan.delete", plan: false, target: ["plan", plan.id], text: `プラン「${plan.name}」を削除` });
     await state.store.deletePlan(plan.id);
     state.plans = state.plans.filter((item) => item.id !== plan.id);
@@ -2765,7 +2774,7 @@ async function main() {
     return;
   }
 
-  state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, { db: { schema: "field" } });
+  state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, { db: { schema: "field" }, global: { fetch: fetchWithOperation } });
   state.store = inOrder(createSupabaseStore(state.client, { url: config.supabaseUrl, anonKey: config.supabaseAnonKey }));
 
   $("loginForm").addEventListener("submit", async (event) => {

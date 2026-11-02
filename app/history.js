@@ -1,6 +1,6 @@
 // 元に戻す（Ctrl+Z）と、やり直す（Ctrl+Y）。
 // 操作ごとに逆の手順を書くのではなく、操作の前後で計画のデータの写しを取っておき、戻すときはその写しに合わせる。
-// 対象は、いまのプランの区域・区画・畝・作付・作業と、圃場の外形、品目、肥料、作業の種類の目安。
+// 対象は、いまのプランの区域・区画・畝・作付・作業と、圃場の外形、品目、肥料、作業の種類の目安、圃場の実績。
 // プランの切り替え・作成・削除と、縮尺・向きの合わせ直しは対象外で、行うと履歴が空になる。
 // 戻すと多くの行が消えるときは、先に確かめる。
 import { confirmDelete } from "./dialog.js";
@@ -23,7 +23,7 @@ let timers = [];
 
 function snapshot() {
   const { state } = ctx;
-  const data = { planId: state.plan.id, outline: state.field.outline, viewDirs: state.field.view_dirs ?? null, workTypes: state.workTypes };
+  const data = { planId: state.plan.id, outline: state.field.outline, viewDirs: state.field.view_dirs ?? null, workTypes: state.workTypes, logs: state.logs };
   for (const table of [...PLAN_TABLES, ...SHARED_TABLES]) {
     data[table] = state[table];
   }
@@ -75,6 +75,9 @@ function check() {
   renderButtons();
 }
 
+// 保存を待ってから変わるデータは、変わった時点で確かめる（操作から時間がたつと、次の操作と 1 回ぶんになる）
+export const noteChange = () => check();
+
 function schedule() {
   timers.forEach(clearTimeout);
   timers = [setTimeout(check, SETTLE_MS), setTimeout(check, LATE_MS)];
@@ -102,12 +105,18 @@ async function restore(text) {
   state.field.outline = target.outline;
   state.field.view_dirs = target.viewDirs ?? null;
   state.workTypes = target.workTypes;
+  state.logs = target.logs;
   for (const table of tables) {
     state[table] = target[table];
   }
 
   if (JSON.stringify([before.outline, before.viewDirs]) !== JSON.stringify([target.outline, target.viewDirs ?? null])) {
     await store.saveField(state.field);
+  }
+  // 実績は計画の行を指すので、計画より先に消し、計画より後に入れる
+  const keptLogs = new Set(target.logs.map((log) => log.id));
+  for (const log of before.logs.filter((item) => !keptLogs.has(item.id))) {
+    await store.deleteLog(log.id);
   }
   // 写しにない行を消す。子から先に消す（親を消すと、DB の側で子も消える）
   for (const table of [...tables].reverse()) {
@@ -123,6 +132,12 @@ async function restore(text) {
   for (const type of target.workTypes.filter((item) => types.get(item.code) !== JSON.stringify(item))) {
     await store.saveWorkType(type);
   }
+  const currentLogs = new Map(before.logs.map((log) => [log.id, JSON.stringify(log)]));
+  for (const log of target.logs.filter((item) => currentLogs.get(item.id) !== JSON.stringify(item))) {
+    await store.saveLog(log);
+  }
+  // 保存し直すと変わる列（作った日時）があるので、読み直して DB とそろえる
+  state.logs = await store.loadLogs(state.field.id);
 }
 
 // 写しに合わせたときに消える行の数。表ごとに、消える行のある表だけを返す
@@ -130,7 +145,7 @@ export function removedRows(currentText, targetText) {
   const current = JSON.parse(currentText);
   const target = JSON.parse(targetText);
   const removed = {};
-  for (const table of [...SHARED_TABLES, ...PLAN_TABLES]) {
+  for (const table of [...SHARED_TABLES, ...PLAN_TABLES, "logs"]) {
     const kept = new Set(target[table].map((row) => row.id));
     const count = current[table].filter((row) => !kept.has(row.id)).length;
     if (count) {
@@ -142,8 +157,8 @@ export function removedRows(currentText, targetText) {
 
 // 先に確かめてから消す行。区域・区画・品目・肥料は 1 件でも、畝・作付・作業はふだんの 1 回ぶん
 // （畝 1 本、作付 1 つとその作業）より多いとき
-const CONFIRM_FROM = { zones: 1, blocks: 1, crops: 1, fertilizers: 1, beds: 2, plantings: 2, works: 11 };
-const TABLE_NAMES = { zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", crops: "品目", fertilizers: "肥料" };
+const CONFIRM_FROM = { zones: 1, blocks: 1, crops: 1, fertilizers: 1, beds: 2, plantings: 2, works: 11, logs: 2 };
+const TABLE_NAMES = { zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", crops: "品目", fertilizers: "肥料", logs: "実績" };
 
 export function needsConfirm(removed) {
   return Object.entries(removed).some(([table, count]) => count >= CONFIRM_FROM[table]);

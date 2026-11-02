@@ -1,7 +1,7 @@
 // ローカルの保存（app/store.js）のテスト。実行: node --test "tests/*.test.mjs"
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { createLocalStore, inOrder } from "../app/store.js";
+import { createLocalStore, currentOperation, duringOperation, fetchWithOperation, inOrder, startOperation } from "../app/store.js";
 
 const bed = { id: "bed1", plan_id: "p1", block_id: "b1", seq: 1 };
 const planting = { id: "pl1", plan_id: "p1", bed_id: "bed1", seq: 1 };
@@ -58,6 +58,68 @@ test("inOrder は、前の書き込みが失敗しても次を送り、失敗は
   await next;
   assert.equal((await store.list("beds", "p1")).length, 1);
   assert.equal(store.writing(), false);
+});
+
+// 書き込みの中で送るリクエストの見出しを集める
+async function sentHeaders(run) {
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    sent.push(new Headers(options.headers).get("x-op-id"));
+    return { ok: true };
+  };
+  try {
+    await run();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  return sent;
+}
+
+const REST = "https://example.supabase.co/rest/v1/works";
+const fakeStore = () => ({ upsert: (url) => fetchWithOperation(url, { method: "POST" }) });
+
+test("書き込みには、呼んだ時点の操作の ID が付く。操作が変わっても、待っている書き込みの ID は変わらない", async () => {
+  const store = inOrder(fakeStore());
+  startOperation();
+  const first = currentOperation();
+  const sent = await sentHeaders(async () => {
+    const writes = [store.upsert(REST)];
+    startOperation();
+    writes.push(store.upsert(REST));
+    await Promise.all(writes);
+  });
+  assert.deepEqual(sent, [first, currentOperation()]);
+  assert.notEqual(sent[0], sent[1]);
+});
+
+test("あとから送る保存は、duringOperation で元の操作の ID になる", async () => {
+  const store = inOrder(fakeStore());
+  const sent = await sentHeaders(async () => {
+    await duringOperation("op-old", () => store.upsert(REST));
+    await store.upsert(REST);
+  });
+  assert.equal(sent[0], "op-old");
+  assert.equal(sent[1], currentOperation());
+});
+
+test("読み取り、認証、書き込みの外のリクエストには、操作の ID を付けない", async () => {
+  const store = inOrder({
+    upsert: async () => {
+      await fetchWithOperation(REST);
+      await fetchWithOperation("https://example.supabase.co/auth/v1/token", { method: "POST" });
+    },
+  });
+  const sent = await sentHeaders(async () => {
+    await store.upsert();
+    await fetchWithOperation(REST, { method: "POST" });
+  });
+  assert.deepEqual(sent, [null, null, null]);
+});
+
+test("inOrder は、持っていない書き込みの関数を足さない", () => {
+  const store = inOrder({ upsert: async () => {} });
+  assert.equal(store.saveLog, undefined);
 });
 
 test("strict でも、親を指さない行は入る", async () => {
