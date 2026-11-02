@@ -106,6 +106,9 @@ export async function openBrowser() {
   const page = await connect(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
   await page.send("Page.enable");
   await page.send("Runtime.enable");
+  // 外のサーバーが遅いと、スクリプトが待たされて起動が遅れる。?local=1 では要らないので読まない
+  await page.send("Network.enable");
+  await page.send("Network.setBlockedURLs", { urls: ["*cdn.jsdelivr.net*", "*fonts.googleapis.com*", "*fonts.gstatic.com*"] });
 
   const run = async (expression) => {
     const { result, exceptionDetails } = await page.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
@@ -122,17 +125,36 @@ export async function openBrowser() {
       }
       await sleep(POLL_MS);
     }
-    throw new Error(`待っても変わりませんでした: ${label}`);
+    const screen = await run(`JSON.stringify({
+      url: location.pathname + location.search + location.hash,
+      tab: document.querySelector(".tab-btn.is-active")?.dataset.view,
+      status: document.getElementById("saveStatus")?.textContent,
+      dialog: document.querySelector("dialog[open]")?.textContent.slice(0, 100),
+      strip: document.getElementById("strip")?.innerHTML.length,
+    })`);
+    throw new Error(`待っても変わりませんでした: ${label}\n${screen}\n例外: ${page.errors.join(" / ") || "なし"}`);
   };
 
   // 本物のマウスの操作で押す（確認の窓は、スクリプトの click を受け付けない）
   const click = async (selector) => {
     const target = JSON.stringify(selector);
     await waitFor(`Boolean(document.querySelector(${target}))`, selector);
+    await run(`document.querySelector(${target}).scrollIntoView({ block: "center" })`);
+    // 測ってから押すまでに配置が変わると、別の要素を押してしまう。次の描画でも同じ位置で、その要素が押せることを確かめる
+    await waitFor(
+      `new Promise((resolve) => {
+        const element = document.querySelector(${target});
+        const box = element?.getBoundingClientRect();
+        requestAnimationFrame(() => {
+          const now = element?.getBoundingClientRect();
+          const same = box && now && box.x === now.x && box.y === now.y && now.width > 0;
+          resolve(Boolean(same && element.contains(document.elementFromPoint(now.x + now.width / 2, now.y + now.height / 2))));
+        });
+      })`,
+      `${selector} を押せる`
+    );
     const point = await run(`(() => {
-      const element = document.querySelector(${target});
-      element.scrollIntoView({ block: "center" });
-      const box = element.getBoundingClientRect();
+      const box = document.querySelector(${target}).getBoundingClientRect();
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     })()`);
     for (const type of ["mousePressed", "mouseReleased"]) {
@@ -148,13 +170,15 @@ export async function openBrowser() {
     })()`);
 
   const loadApp = async (data) => {
-    const url = `http://127.0.0.1:${server.address().port}/index.html?local=1&strict=1`;
-    await page.send("Page.navigate", { url });
-    await waitFor(`document.readyState !== "loading"`);
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    // 前のテストの画面に残った保存が、入れるデータを上書きしないよう、先にアプリではない画面へ移る
+    await page.send("Page.navigate", { url: `${origin}/config.js` });
+    await waitFor(`location.pathname === "/config.js" && document.readyState === "complete"`, "アプリから離れる");
     await run(`localStorage.clear(); localStorage.setItem(${JSON.stringify(LOCAL_KEY)}, ${JSON.stringify(JSON.stringify(data))})`);
-    await page.send("Page.reload");
-    await sleep(100);
-    await waitFor(`!document.getElementById("viewTabs")?.hidden`, "アプリの起動");
+    await page.send("Page.navigate", { url: `${origin}/index.html?local=1&strict=1` });
+    await waitFor(`document.getElementById("viewTabs")?.hidden === false`, "アプリの起動");
+    // 起動の途中で styles.css を読み直すので、読み終わるのを待つ（読むあいだは配置が変わる）
+    await waitFor(`Boolean(document.querySelector('link[href^="./styles.css"]')?.sheet)`, "見た目の読み込み");
     page.errors.length = 0;
   };
 
