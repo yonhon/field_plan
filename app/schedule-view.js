@@ -1658,8 +1658,16 @@ export function initSchedule(context) {
       const crop = state().crops.find((item) => item.id === cropId);
       if (crop && beds.length) {
         run(async () => {
-          for (const bed of beds) {
-            await fillPlanting(await newPlanting(bed.id, crop.name, crop.id));
+          await ctx.bedsSaved();
+          ctx.setStatus("保存中…");
+          try {
+            for (const bed of beds) {
+              await fillPlanting(await newPlanting(bed.id, crop.name, crop.id));
+            }
+          } catch (error) {
+            // 保存の状態の文字は、ほかの保存が終わると上書きされるので、窓で知らせる
+            notify(`作付（${crop.name}）を保存できませんでした。再読み込みして、畝と作付を確かめてください。\n${error.message}`);
+            throw error;
           }
           const block = state().blocks.find((item) => item.id === beds[0].block_id);
           record({

@@ -1551,6 +1551,9 @@ function addBedsToBlock(block, options) {
   return created;
 }
 
+// いちばん新しく足した畝の保存。作付は畝を指すので、足した畝の作付は、これを待ってから保存する
+let bedsSaved = Promise.resolve();
+
 // 形の決まった畝を区画に足す。番号は、いまある畝の続き。足した畝を返す
 function createBeds(blockId, shapes) {
   const mine = state.beds.filter((bed) => bed.block_id === blockId);
@@ -1578,7 +1581,7 @@ function createBeds(blockId, shapes) {
     target: ["block", blockId],
     text: `${made.name}に畝を ${beds.length} 本追加（幅 ${Math.round(rectSize(shapes[0]).width * 100)} cm、長さ ${rectSize(shapes[0]).length.toFixed(1)} m）`,
   });
-  persist(() => state.store.upsert("beds", beds));
+  bedsSaved = persist(() => state.store.upsert("beds", beds));
   return beds;
 }
 
@@ -2648,6 +2651,7 @@ async function startApp() {
     plantingOn,
     appendBeds,
     createBeds,
+    bedsSaved: () => bedsSaved,
     renumberBeds,
     removeBed,
     removeBlockBeds,

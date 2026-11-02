@@ -24,7 +24,7 @@ const MIN_WIDTH_M = 0.1;
 const DRAG_TOLERANCE_PX = 3;
 
 // ctx = { state, queueSave, cropColor, plantingOn, selection, open, refresh, flagged,
-//         appendBeds, createBeds, renumberBeds, removeBed, deleteBed }
+//         appendBeds, createBeds, bedsSaved, renumberBeds, removeBed, deleteBed }
 let ctx = null;
 let view = null; // いま描いている図の寸法 { block, v, min, max, scale, strips }
 let drag = null;
