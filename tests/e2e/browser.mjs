@@ -187,13 +187,21 @@ export async function openBrowser() {
       element.dispatchEvent(new Event("change", { bubbles: true }));
     })()`);
 
-  const loadApp = async (data) => {
+  // data は DB の中身。stored は、ほかにブラウザーが覚えている値（{ キー: 文字列 }。開いていた圃場など）。
+  // until に "fatalError" を渡すと、画面ではなく、起動を止めた知らせが出るまで待つ
+  const loadApp = async (data, stored = {}, until = "app") => {
     const origin = `http://127.0.0.1:${server.address().port}`;
     // 前のテストの画面に残った保存が、入れるデータを上書きしないよう、先にアプリではない画面へ移る
     await page.send("Page.navigate", { url: `${origin}/config.js` });
     await waitFor(`location.pathname === "/config.js" && document.readyState === "complete"`, "アプリから離れる");
-    await run(`localStorage.clear(); localStorage.setItem(${JSON.stringify(LOCAL_KEY)}, ${JSON.stringify(JSON.stringify(data))})`);
+    const items = { ...stored, [LOCAL_KEY]: JSON.stringify(data) };
+    await run(`localStorage.clear(); Object.entries(${JSON.stringify(items)}).forEach(([key, value]) => localStorage.setItem(key, value))`);
     await page.send("Page.navigate", { url: `${origin}/index.html?local=1&strict=1` });
+    if (until === "fatalError") {
+      await waitFor(`document.getElementById("fatalError")?.hidden === false`, "起動を止めた知らせ");
+      page.errors.length = 0;
+      return;
+    }
     await waitFor(`document.getElementById("viewTabs")?.hidden === false`, "アプリの起動");
     // 起動の途中で styles.css を読み直すので、読み終わるのを待つ（読むあいだは配置が変わる）
     await waitFor(`Boolean(document.querySelector('link[href^="./styles.css"]')?.sheet)`, "見た目の読み込み");

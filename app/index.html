@@ -33,6 +33,7 @@
         <button id="undoBtn" class="text-btn edit-only" title="元に戻す（Ctrl+Z）" hidden>↶ 元に戻す</button>
         <button id="redoBtn" class="text-btn edit-only" title="やり直す（Ctrl+Y）" hidden>↷ やり直す</button>
         <span id="saveStatus" class="muted" role="status"></span>
+        <button id="updateBtn" class="text-btn" title="アプリの新しい版を取り終えました。読み込み直すと切り替わります" hidden>新しい版にする</button>
         <button id="logoutBtn" class="text-btn" hidden>ログアウト</button>
       </div>
     </header>
@@ -402,8 +403,39 @@
     <script src="./config.js"></script>
     <script type="module">
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
-      // 読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js", "pesticide.js", "weather.js", "weather-view.js", "prefs.js"];
+      // Service Worker（sw.js）が一式をそろえて出しているときは、そのまま読む。
+      // そうでないとき（初めて開いたとき、?local=1）は、読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js", "pesticide.js", "weather.js", "weather-view.js", "prefs.js", "upload.js"];
+      // ?local=1 は動作確認用なので、Service Worker を登録しない（手元のファイルを直したら、すぐ反映させたい）
+      if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("local")) {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+        const checkUpdate = () => navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage("check"));
+        const fatal = document.getElementById("fatalError");
+        // DB が、この版より新しい画面を求めている（app.js の startApp が知らせる）。画面は出ていない
+        let outdated = false;
+        // 新しい版を取り終えたら、ふだんは読み込み直すボタンを出す。版が古くて止まっているときは、すぐ読み込み直す
+        navigator.serviceWorker.addEventListener("message", (event) => {
+          if (event.data === "update-ready") {
+            if (outdated) {
+              location.reload();
+            } else {
+              document.getElementById("updateBtn").hidden = false;
+            }
+          } else if (outdated && event.data === "up-to-date") {
+            fatal.textContent = "この DB を使うには、アプリの新しい版が要ります。新しい版はまだ公開されていません。数分たってから読み込み直してください。";
+          } else if (outdated && event.data === "check-failed") {
+            fatal.textContent = "この DB を使うには、アプリの新しい版が要りますが、読み込めませんでした。回線を確かめて、読み込み直してください。";
+          }
+        });
+        document.getElementById("updateBtn").addEventListener("click", () => location.reload());
+        // 更新の確認は、画面が出てから行う。起動の読み込みと回線を取り合わないように
+        document.addEventListener("app-ready", checkUpdate, { once: true });
+        document.addEventListener("app-outdated", () => {
+          outdated = true;
+          fatal.textContent = "この DB を使うには、アプリの新しい版が要ります。新しい版を読み込んでいます。";
+          checkUpdate();
+        });
+      }
       // 見た目（styles.css）も、古い版が残っていると新しい部品と合わなくなる。更新を確かめ、版の印（更新日時）を付けて読み直す
       async function refreshStyles() {
         const response = await fetch("./styles.css", { cache: "no-cache" });
@@ -414,7 +446,9 @@
         }
       }
       try {
-        await Promise.all([...parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })), refreshStyles().catch(() => {})]);
+        if (!navigator.serviceWorker?.controller) {
+          await Promise.all([...parts.map((part) => fetch(`./${part}`, { cache: "no-cache" })), refreshStyles().catch(() => {})]);
+        }
         await import("./app.js");
       } catch (error) {
         const box = document.getElementById("fatalError");

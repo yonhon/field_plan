@@ -43,7 +43,7 @@ import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule, selectedRowPreset } from "./schedule-view.js";
-import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation } from "./store.js";
+import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 
 const config = window.FIELD_PLAN_CONFIG;
 const $ = (id) => document.getElementById(id);
@@ -73,6 +73,7 @@ const HINTS = {
   blockrect: "有効圃場の中で、対角の 2 点をドラッグ。表示日に畝がない場所を、新しい区画にします。",
 };
 const TABLES = { zone: "zones", block: "blocks", bed: "beds" };
+const PLAN_TABLES = ["zones", "blocks", "beds", "plantings", "works"]; // プランの中身の表
 const CURRENT_PLAN_KEY = "field_plan_current_plan";
 const CURRENT_FIELD_KEY = "field_plan_current_field";
 const VIEW_DATE_KEY = "field_plan_view_date";
@@ -1781,29 +1782,42 @@ function renderFields() {
   $("fieldSelect").value = state.field.id;
 }
 
-// 圃場のプランと下絵を読み、圃場を入れ替える。開くプラン（前に開いていたプランか、先頭）を返す。
-// プランの中身は、続けて loadPlanData で読む
-async function loadFieldData(field) {
-  // DB の往復を待つ回数を減らすため、互いに関係のない読み込みは並べて行う
+// 圃場の中身（下絵・プラン・作業の記録）と、開くプランの中身を読む。state はまだ変えない。
+// 開くのは、前にその圃場で開いていたプラン。覚えていなければ先頭のプラン。
+// DB の往復を待つ回数を減らすため、すべて並べて読む。開くプランを覚えていれば、プランの一覧を待たずに、その中身も読み始める
+async function fetchFieldData(fieldId) {
   const loadBackdrop = async () => {
-    const backdrop = await state.store.loadBackdrop(field.id);
+    const backdrop = await state.store.loadBackdrop(fieldId);
     return { backdrop, backdropUrl: backdrop ? await state.store.imageUrl(backdrop.storage_path) : "" };
   };
-  let [plans, { backdrop, backdropUrl }, logs] = await Promise.all([
-    state.store.loadPlans(field.id),
-    loadBackdrop(),
-    state.store.loadLogs(field.id),
-  ]);
-  if (!plans.length) {
-    plans = [await state.store.createPlan({ field_id: field.id, name: "プラン1" })];
+  const others = Promise.all([loadBackdrop(), state.store.loadLogs(fieldId)]);
+  const savedId = loadPref(fieldId, "plan", CURRENT_PLAN_KEY);
+  const early = savedId ? loadTables(PLAN_TABLES, savedId) : null;
+  // 覚えていたプランが消えていて使わなかったときの失敗で、止めないようにする。使うときは、下で待つので失敗が伝わる
+  early?.catch(() => {});
+  const plans = await state.store.loadPlans(fieldId);
+  const plan = plans.find((item) => item.id === savedId) || plans[0] || null;
+  const loaded = plan && (plan.id === savedId ? early : loadTables(PLAN_TABLES, plan.id));
+  const [[{ backdrop, backdropUrl }, logs], tables] = await Promise.all([others, loaded]);
+  return { plans, plan, tables, backdrop, backdropUrl, logs };
+}
+
+// 圃場を読み、中身とプランを一度に入れ替える。開いたプランを返す。
+// pending は、先に読み始めておいた fetchFieldData（startApp が、圃場の一覧と並べて読む）
+async function loadFieldData(field, pending = fetchFieldData(field.id)) {
+  let { plans, plan, tables, backdrop, backdropUrl, logs } = await pending;
+  if (!plan) {
+    plan = await state.store.createPlan({ field_id: field.id, name: "プラン1" });
+    plans = [plan];
+    tables = await loadTables(PLAN_TABLES, plan.id);
   }
-  // 前にその圃場で開いていたプランと表示日。覚えていなければ、先頭のプランと今日
-  const currentId = loadPref(field.id, "plan", CURRENT_PLAN_KEY);
+  // 表示日は、前にその圃場で見ていた日。覚えていなければ今日
   Object.assign(state, { field, plans, backdrop, backdropUrl, logs, viewDate: savedViewDate(field.id), alignment: null });
+  setPlanData(plan, tables);
   if (backdrop) {
     measureBackdrop(backdrop, backdropUrl);
   }
-  return plans.find((plan) => plan.id === currentId) || plans[0];
+  return plan;
 }
 
 // 下絵の画像の大きさ。外形を描く前の圃場で、図を下絵に合わせるのに使う。
@@ -1832,7 +1846,7 @@ async function openField(field) {
   $("fieldName").value = field.name;
   $("viewDate").value = state.viewDate;
   setMode("select");
-  await openPlan(plan);
+  showPlan(plan);
   fitView();
   render();
   renderWeatherSettings();
@@ -1955,10 +1969,13 @@ async function planTask(action) {
 }
 
 async function loadPlanData(plan) {
-  const loaded = await loadTables(["zones", "blocks", "beds", "plantings", "works"], plan.id);
+  setPlanData(plan, await loadTables(PLAN_TABLES, plan.id));
+}
+
+function setPlanData(plan, tables) {
   // 読み終えてから、プランと中身を一度に入れ替える。読み込みの途中で「元に戻す」の写しを取られると、
   // 新しいプランに前のプランの中身（空のことがある）が付いた写しができ、それに戻すと中身が消える
-  Object.assign(state, { plan }, loaded);
+  Object.assign(state, { plan }, tables);
   // 畝の番号を、決まりどおり（左から順、なくした畝の番号は欠番）に揃える。
   // 番号を詰め直す仕組みを入れる前に削除した畝の跡も、ここで詰まる
   state.blocks.forEach((block) => renumberBlock(block.id));
@@ -1968,6 +1985,11 @@ async function openPlan(plan) {
   clearTimeout(saveTimer);
   await flushSaves();
   await loadPlanData(plan);
+  showPlan(plan);
+}
+
+// 読み終えたプランを開いて、描き直す
+function showPlan(plan) {
   state.selected = null;
   state.selectedVertex = null;
   state.draft = [];
@@ -2681,23 +2703,35 @@ function describeLoadError(error) {
 async function startApp() {
   $("loginView").hidden = true;
   try {
-    const [fields, allWorkTypes, crops, fertilizers] = await Promise.all([
-      state.store.loadFields(),
-      state.store.loadWorkTypes(),
-      state.store.listAll("crops"),
-      state.store.listAll("fertilizers"),
-    ]);
-    Object.assign(state, { fields, allWorkTypes, workTypes: allWorkTypes.filter(isPlannable), crops, fertilizers });
-    if (!state.fields.length) {
-      state.fields = [await state.store.createField({ name: config.defaultFieldName })];
-    }
     let fieldId = null;
     try {
       fieldId = localStorage.getItem(CURRENT_FIELD_KEY);
     } catch {
       // 読めなければ先頭の圃場を開く
     }
-    await loadPlanData(await loadFieldData(state.fields.find((field) => field.id === fieldId) || state.fields[0]));
+    // 前に開いていた圃場の中身は、圃場の一覧を待たずに読み始める。DB の往復を待つ回数が 1 回減る
+    const early = fieldId ? fetchFieldData(fieldId) : null;
+    // 圃場が消えていて使わなかったときの失敗で、止めないようにする。使うときは loadFieldData が待つので失敗が伝わる
+    early?.catch(() => {});
+    const [fields, allWorkTypes, crops, fertilizers, minVersion] = await Promise.all([
+      state.store.loadFields(),
+      state.store.loadWorkTypes(),
+      state.store.listAll("crops"),
+      state.store.listAll("fertilizers"),
+      state.store.minAppVersion(),
+    ]);
+    // DB の形が、この版の画面では正しく書けない形に変わっている。書く前に止め、新しい版を読み込み直す（index.html が受ける）
+    if (APP_VERSION < minVersion) {
+      showFatal("この DB を使うには、アプリの新しい版が要ります。読み込み直してください。");
+      document.dispatchEvent(new Event("app-outdated"));
+      return;
+    }
+    Object.assign(state, { fields, allWorkTypes, workTypes: allWorkTypes.filter(isPlannable), crops, fertilizers });
+    if (!state.fields.length) {
+      state.fields = [await state.store.createField({ name: config.defaultFieldName })];
+    }
+    const field = state.fields.find((item) => item.id === fieldId);
+    await (field ? loadFieldData(field, early) : loadFieldData(state.fields[0]));
   } catch (error) {
     showFatal(
       error.code === "42501" || /row-level security/.test(error.message || "")
@@ -2833,6 +2867,8 @@ async function main() {
   } else {
     $("loginView").hidden = false;
   }
+  // 画面が出たことを index.html に知らせる。アプリの更新の確認は、ここから始める
+  document.dispatchEvent(new Event("app-ready"));
 }
 
 main();

@@ -5,6 +5,9 @@ import { DEFAULT_WORK_TYPES } from "./schedule.js";
 import { uploadWithProgress } from "./upload.js";
 
 const BUCKET = "field-plan";
+// この画面の版。DB の field.app_compat の min_version より古ければ、起動のときに新しい版を読み込み直す。
+// 古い画面では正しく書けない形に DB を変えるときに 1 つ上げ、DB の min_version も同じ値にする（sql/field.sql）
+export const APP_VERSION = 1;
 const LOCAL_KEY = "field_plan_local";
 
 // 下絵の署名付き URL。発行のたびに URL が変わると、ブラウザーのキャッシュが効かず、起動のたびに画像全体を読み直す。
@@ -169,6 +172,10 @@ export function createSupabaseStore(client, options) {
     },
     async loadWorkTypes() {
       return check(await client.from("work_types").select("*").order("sort"));
+    },
+    // この DB を使ってよい画面の版
+    async minAppVersion() {
+      return check(await client.from("app_compat").select("min_version").maybeSingle())?.min_version ?? 0;
     },
     // 変更の記録。開発日誌なので、すべての圃場の分を、新しい順に最近の 1,000 件
     async listChanges() {
@@ -475,6 +482,9 @@ export function createLocalStore({ strict = false } = {}) {
     },
     async remove(table, ids) {
       update((data) => removeRows(data, table, ids));
+    },
+    async minAppVersion() {
+      return read().app_compat?.min_version ?? 0;
     },
     async loadWorkTypes() {
       // 前に保存した種類に、あとから増えた種類（記録だけに使う種類など）を足す

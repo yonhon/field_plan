@@ -347,6 +347,15 @@ create table if not exists field.dev_notes (
   updated_at timestamptz not null default now()
 );
 
+-- この DB を使ってよい画面の版。画面は起動のとき、自分の版（app/store.js の APP_VERSION）がこれより古ければ、
+-- データを出す前に新しい版を読み込み直す。古い画面では正しく書けない形に DB を変えるときは、
+-- 新しい画面を公開してから、同じ SQL の中でここを APP_VERSION と同じ値に上げる。行は 1 つだけ。画面からは読むだけ
+create table if not exists field.app_compat (
+  id boolean primary key default true check (id),
+  min_version int not null default 1
+);
+insert into field.app_compat (id) values (true) on conflict (id) do nothing;
+
 -- 圃場ごとだったころのメモの表。中身を dev_notes に写したあと、2026-10-24 に消した
 drop table if exists field.day_notes;
 
@@ -644,12 +653,12 @@ begin
   end loop;
 end $$;
 
--- FAMIC の表は、画面からは読むだけ。入れ替えは DB に直接つないで行う（scripts/import_famic.py）
+-- FAMIC の表と、画面の版（app_compat）は、画面からは読むだけ。FAMIC の入れ替えは DB に直接つないで行う（scripts/import_famic.py）
 do $$
 declare
   t text;
 begin
-  foreach t in array array['famic_imports', 'famic_products', 'famic_uses'] loop
+  foreach t in array array['famic_imports', 'famic_products', 'famic_uses', 'app_compat'] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists owner_read on field.%I', t);
     execute format('create policy owner_read on field.%I for select to authenticated using (field.is_owner())', t);

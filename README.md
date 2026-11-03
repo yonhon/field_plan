@@ -67,6 +67,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `app/print.js` | PDF 出力（ブラウザーの印刷を使う） |
 | `app/updates.json` | アプリの更新の一覧（「履歴」の画面に出る） |
 | `app/store.js` | データの読み書き |
+| `app/sw.js` | アプリのファイルを一式ブラウザーに取っておき、起動のときはサーバーを待たずに出す（Service Worker）。新しい版は画面が出たあとで取り、「新しい版にする」で切り替える |
 | `supabase/functions/field-mcp/` | 計画と作業の実績を Claude.ai から読むための MCP サーバー（Supabase Edge Function） |
 | `supabase/functions/field-weather/` | 2 週間気温予報を画面に渡す関数（ブラウザーから気象庁のこのデータを読めないため） |
 | `scripts/import_famic.py` | FAMIC の農薬登録情報（CSV）を DB に取り込む。`.github/workflows/famic.yml` が週に 1 回動かす |
@@ -99,7 +100,8 @@ work_types（作業の種類と目安の日数。plannable が false の種類�
 dev_notes（開発日誌のメモ）は、すべての圃場で共通
 
 weather_daily（アメダスの観測所ごとの日ごとの気温と降水量）、
-famic_imports・famic_products・famic_uses（FAMIC の農薬登録情報。画面からは読むだけ）も共通
+famic_imports・famic_products・famic_uses（FAMIC の農薬登録情報。画面からは読むだけ）、
+app_compat（この DB を使ってよい画面の版。画面からは読むだけ）も共通
 ```
 
 圃場はいくつも持てます。外形、下絵、プランは圃場ごとです。
@@ -357,6 +359,10 @@ URL を開いたときに URL に画面が書かれていなければ、PC は�
 
 push のたびに、できるようになったことごとに 1 件ずつ足します。
 このファイルは公開されるので、圃場の場所、面積、実際の品目や時期は書きません。
+
+画面は、アプリのファイルを一式ブラウザーに取っておき（`app/sw.js`）、起動のときはそこから出します。新しい版は画面が出たあとで取り、右上の「新しい版にする」を押すか、次に開いたときに切り替わります。
+
+ただし、DB の形が古い版の画面では正しく書けない形に変わったときは、古い版の画面は起動のときにデータを出す前に止まり、新しい版を取って読み込み直します。新しい版がまだ公開されていなければ、そう知らせて止まったままにします。どの版から使えるかは、DB の `field.app_compat` に持たせます。DB の形を変えるときの手順は `docs/implementation-rules.md` にあります。
 
 ### 元に戻す、やり直す
 
