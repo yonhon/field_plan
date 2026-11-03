@@ -132,7 +132,7 @@ app_compat（この DB を使ってよい画面の版。画面からは読むだ
 5. 2 週間気温予報の関数を配備します（配備済み）。
 
    ```
-   bun x supabase functions deploy field-weather --project-ref byhthaiwbutqstrqbwwc
+   bun x supabase functions deploy field-weather --remote=byhthaiwbutqstrqbwwc
    ```
 
 6. GitHub Actions が気象の値（毎日、`weather.yml`）と FAMIC の農薬登録情報（週に 1 回、`famic.yml`）を入れるために、取り込み係の利用者を作ります（作成済み）。Supabase Auth に利用者を作って `field.importers` に登録し、そのメールアドレスとパスワードを、GitHub のリポジトリの Settings > Secrets and variables > Actions に `FIELD_IMPORTER_EMAIL`、`FIELD_IMPORTER_PASSWORD` として置きます。取り込み係にできるのは、気象の値と FAMIC の入れ替えだけです。DB の接続文字列は GitHub に置きません。
@@ -414,7 +414,7 @@ https://byhthaiwbutqstrqbwwc.supabase.co/functions/v1/field-mcp/<合言葉>
 
 ```powershell
 $t = python -c "import secrets; print(secrets.token_urlsafe(32))"
-bun x supabase secrets set "FIELD_MCP_TOKEN=$t" --project-ref byhthaiwbutqstrqbwwc
+bun x supabase secrets set "FIELD_MCP_TOKEN=$t" --remote=byhthaiwbutqstrqbwwc
 "https://byhthaiwbutqstrqbwwc.supabase.co/functions/v1/field-mcp/$t"
 ```
 
@@ -441,8 +441,10 @@ bun x supabase secrets set "FIELD_MCP_TOKEN=$t" --project-ref byhthaiwbutqstrqbw
 ```powershell
 node scripts/sync-mcp-lib.mjs
 node --test "tests/*.test.mjs"
-bun x supabase functions deploy field-mcp --project-ref byhthaiwbutqstrqbwwc --no-verify-jwt
+bun x supabase functions deploy field-mcp --remote=byhthaiwbutqstrqbwwc --no-verify-jwt
 ```
+
+配備の前に、本番のプロジェクトに配備してよいかを確かめられます（Supabase CLI 3.0 から）。`agri_db (byhthaiwbutqstrqbwwc)` と出ていれば、Yes を選びます。確かめずに配備するときは `--yes` を付けます。
 
 写しが古いままだと、テストが失敗します。
 
