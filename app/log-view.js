@@ -22,6 +22,7 @@ let ctx = null; // { state, setStatus, activePlanData }
 let showAll = false;
 let dialog = null;
 let draft = null; // 窓で入れている記録
+let touched = null; // 窓の中で最後に触った要素（描き直したあと、同じ所を見せるため）
 let data = null; // 実際に使うプランの区画・畝・作付・作業
 
 const state = () => ctx.state;
@@ -397,13 +398,79 @@ function build() {
   dialog.addEventListener("click", onClick);
   dialog.addEventListener("change", onChange);
   dialog.addEventListener("input", onInput);
+  dialog.addEventListener("pointerdown", (event) => (touched = event.target));
+  dialog.addEventListener("focusin", (event) => (touched = event.target));
   // Esc で閉じたときも、入れかけの内容は捨てる（確かめない）。窓の外を押しても閉じない
   dialog.addEventListener("close", () => {
     draft = null;
+    touched = null;
   });
 }
 
+// 描き直したあとの窓で、同じ要素を探すための鍵。data-* の属性か、何番目の資材の行か
+function viewKey(el) {
+  const attrs = [...el.attributes].filter((attr) => attr.name.startsWith("data-"));
+  if (attrs.length) {
+    return { selector: attrs.map((attr) => `[${attr.name}="${CSS.escape(attr.value)}"]`).join("") };
+  }
+  if (el.matches(".log-input")) {
+    return { selector: ".log-input", index: [...el.parentElement.querySelectorAll(":scope > .log-input")].indexOf(el) };
+  }
+  return null;
+}
+
+function findByKey(body, key) {
+  const found = body.querySelectorAll(key.selector);
+  if (key.index !== undefined) {
+    return found[key.index] || null;
+  }
+  return found.length === 1 ? found[0] : null; // 同じ鍵がいくつもあるときは、どれか分からないので使わない
+}
+
+// 窓は丸ごと作り直すので、そのままでは中のいちばん上に戻ってしまう。描き直す前に、触っていた所と、
+// その画面の上での高さを覚えておき、描き直したあと、同じ所を同じ高さに戻す（入れていた欄にも戻る）
+function keepView() {
+  const body = dialog.querySelector(".log-body");
+  if (!body) {
+    return () => {};
+  }
+  const scrollTop = body.scrollTop;
+  // 触った要素から外へたどり、描き直したあとにも残っていそうなものを目印にする（選んだ検索結果は消えるので、その行など）
+  const anchors = [];
+  for (let el = touched?.isConnected ? touched : null; el && el !== body && body.contains(el); el = el.parentElement) {
+    const key = viewKey(el);
+    if (key) {
+      anchors.push({ key, top: el.getBoundingClientRect().top });
+    }
+  }
+  const active = document.activeElement;
+  const focusKey = active && body.contains(active) ? viewKey(active) : null;
+  const selection = active && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
+  return () => {
+    const next = dialog.querySelector(".log-body");
+    if (!next) {
+      return;
+    }
+    next.scrollTop = scrollTop;
+    for (const anchor of anchors) {
+      const el = findByKey(next, anchor.key);
+      if (el) {
+        next.scrollTop += el.getBoundingClientRect().top - anchor.top;
+        break;
+      }
+    }
+    const focused = focusKey && findByKey(next, focusKey);
+    if (focused) {
+      focused.focus({ preventScroll: true });
+      if (selection && typeof focused.selectionStart === "number") {
+        focused.setSelectionRange(...selection);
+      }
+    }
+  };
+}
+
 function renderDialog() {
+  const restoreView = keepView();
   const choices = currentChoices();
   const items = pickedItems(choices);
   const area = items.reduce((sum, item) => sum + (item.area_m2 || 0), 0);
@@ -450,6 +517,7 @@ function renderDialog() {
     box.checked = count === group.items.length;
     box.indeterminate = count > 0 && count < group.items.length;
   });
+  restoreView();
 }
 
 function dialogTitle() {
@@ -932,6 +1000,10 @@ function onClick(event) {
     draft.inputs.push(blankInput(inputKind(draft.work_type)));
     renderDialog();
     updateTotals();
+    // 足した行は下に出るので、そこまで送って、最初の欄に入れるようにする
+    const row = [...dialog.querySelectorAll(".log-input")].at(-1);
+    row?.scrollIntoView({ block: "nearest" });
+    row?.querySelector("input, select")?.focus({ preventScroll: true });
   } else if (act === "removeInput") {
     draft.inputs.splice(Number(button.dataset.i), 1);
     renderDialog();
