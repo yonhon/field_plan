@@ -6,6 +6,7 @@ import {
   addTwoWeek,
   dailyFromRecords,
   distanceKm,
+  fetchDay,
   nearestStations,
   matchEtrnPoint,
   parseEtrnDaily,
@@ -62,6 +63,45 @@ test("日平均気温は毎正時 24 回の平均、降水量は 10 分ごとの
   // 毎正時の値が 20 回に満たなければ、日平均気温は欠測
   assert.equal(dailyFromRecords(records("2026-03-01", "2026-03-02", [1, 2, 3, 4, 5]), "2026-03-01").temp_mean, null);
   assert.equal(dailyFromRecords({}, "2026-03-01").precip, null);
+});
+
+test("1 日分の 9 ファイルを並べて取り、取れたファイルの値から日の値を出す", async () => {
+  // 10 分ごとの値を、気象庁と同じく 3 時間ごとのファイルに分ける。キーは "yyyymmddHHMMSS"
+  const all = records("2026-03-01", "2026-03-02");
+  const server = {};
+  for (const [key, value] of Object.entries(all)) {
+    const file = `${key.slice(0, 8)}_${String(Math.floor(Number(key.slice(8, 10)) / 3) * 3).padStart(2, "0")}`;
+    server[file] = { ...server[file], [key]: value };
+  }
+  let open = 0;
+  let most = 0;
+  const asked = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const file = url.match(/\/(\d{8}_\d{2})\.json$/)[1];
+    asked.push(file);
+    open += 1;
+    most = Math.max(most, open);
+    // 先に頼んだファイルほど遅く返す。返る順が違っても、結果は同じになる
+    await new Promise((resolve) => setTimeout(resolve, 30 - asked.length * 3));
+    open -= 1;
+    return server[file] ? new Response(JSON.stringify(server[file])) : new Response("", { status: 404 });
+  };
+  try {
+    const value = await fetchDay("91107", "2026-03-01");
+    assert.deepEqual(value, { temp_mean: 12.5, temp_max: 24, temp_min: 0, precip: 3 });
+    assert.equal(asked.length, 9);
+    assert.equal(most, 9, "9 ファイルを一度に頼む");
+    assert.deepEqual(asked.slice(-1), ["20260302_00"]);
+    // 取れないファイルがあれば、その分は欠けたまま、残りの値で出す
+    // 次の日の 0 時のファイルがなければ、24 時の値が欠け、1 時〜23 時の平均になる
+    delete server["20260302_00"];
+    const missing = await fetchDay("91107", "2026-03-01");
+    assert.equal(missing.temp_mean, 12);
+    assert.equal(missing.temp_max, 23);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 test("積算は欠測の日を足さず、日付を返す", () => {

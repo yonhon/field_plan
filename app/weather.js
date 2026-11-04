@@ -83,18 +83,18 @@ export function dailyFromRecords(records, date) {
   };
 }
 
-// 観測所の、date の日の値を、気象庁から取る。3 時間ごとのファイルを 8 つと、次の日の 0 時のファイルを読む
+// 観測所の、date の日の値を、気象庁から取る。3 時間ごとのファイルを 8 つと、次の日の 0 時のファイルを読む。
+// 9 つを 1 つずつ待つと、回線の往復を 9 回待つことになるので、並べて読む（ファイルごとに時刻が違うので、読み終わる順は問わない）
 export async function fetchDay(station, date) {
   const files = [0, 3, 6, 9, 12, 15, 18, 21].map((hour) => `${compact(date)}_${String(hour).padStart(2, "0")}`);
   files.push(`${compact(addDays(date, 1))}_00`);
-  const records = {};
-  for (const file of files) {
-    const response = await fetch(`${AMEDAS}/data/point/${station}/${file}.json`);
-    if (response.ok) {
-      Object.assign(records, await response.json());
-    }
-  }
-  return dailyFromRecords(records, date);
+  const parts = await Promise.all(
+    files.map(async (file) => {
+      const response = await fetch(`${AMEDAS}/data/point/${station}/${file}.json`);
+      return response.ok ? response.json() : {};
+    })
+  );
+  return dailyFromRecords(Object.assign({}, ...parts), date);
 }
 
 // DB の行を、気象庁から取り直さなくてよいか。昨日の分は、あとから直されることがあるので取り直す。
