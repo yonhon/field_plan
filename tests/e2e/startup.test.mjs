@@ -94,3 +94,19 @@ test("起動: DB がこの版より新しい画面を求めていれば、画面
   assert.deepEqual((await page.saved()).fields, [], "圃場がなくても、作らない");
   assert.deepEqual(page.errors, []);
 });
+
+test("再読み込み: 品目の画面で読み込み直しても、品目と肥料が出る", options, async () => {
+  const data = {
+    ...seed(),
+    crops: [{ id: "c1", name: "試験菜", bed_width_cm: 100, aisle_width_cm: 60 }],
+    fertilizers: [{ id: "fe1", name: "試験の肥料", n_pct: 10, p_pct: 10, k_pct: 10 }],
+  };
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="crops"]');
+  const rows = () => page.run(`[...document.querySelectorAll("#cropTable tbody tr, #fertilizerTable tbody tr")].map((row) => row.dataset.id)`);
+  assert.deepEqual(await rows(), ["c1", "fe1"]);
+  await page.run("location.reload()");
+  await page.waitFor(`location.hash === "#crops" && document.getElementById("viewTabs")?.hidden === false && document.querySelectorAll("#cropTable tbody tr").length > 0`, "品目の画面で読み込み直す");
+  assert.deepEqual(await rows(), ["c1", "fe1"]);
+  assert.deepEqual(page.errors, []);
+});

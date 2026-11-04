@@ -226,4 +226,6 @@ export function initCrops(context) {
       record({ kind: "fertilizers.add", target: ["fertilizer", fertilizer.id], plan: false, text: `肥料「${fertilizer.name}」を追加` });
     });
   });
+  // 品目の画面で再読み込みすると、この準備の前に画面を開く（そのときは描けない）ので、ここで描く
+  renderCrops();
 }
