@@ -69,6 +69,9 @@ test("防除の入力: 農薬・作物名・使い方を選んでも、窓の中
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="schedule"]');
   await page.click("#logAddBtn");
+  // 窓は計画で開く。計画、実績の順に並ぶ
+  assert.deepEqual(await page.run(`[...document.querySelectorAll('dialog.log-dialog [data-act="kind"]')].map((el) => el.textContent + (el.classList.contains("is-on") ? "*" : ""))`), ["計画*", "実績"]);
+  await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
   await page.click('dialog.log-dialog [data-act="type"][data-code="spray"]');
   await page.click('dialog.log-dialog [data-act="group"]');
   // 2 剤目を足すと、足した行まで送られ、その名前の欄に入れられる

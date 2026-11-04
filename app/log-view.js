@@ -250,8 +250,8 @@ export async function openLogEditor(log = null, preset = {}) {
   const type = log?.work_type || source?.work_type || "";
   draft = {
     id: log?.id || null,
-    // plan は管理作業の計画、actual は実績。「入力する」のボタンから開いたときだけ、窓の上で切り替えられる
-    kind: planWork || preset.plan ? "plan" : "actual",
+    // plan は管理作業の計画、actual は実績。「入力する」のボタンから開いたときだけ、窓の上で切り替えられる（初めは計画）
+    kind: planWork || (!log && !presetWorks.length) ? "plan" : "actual",
     switchable: !log && !planWork && !presetWorks.length,
     planWork,
     planWorks,
@@ -481,8 +481,8 @@ function renderDialog() {
     `<div class="log-body">` +
     (draft.switchable
       ? `<div class="log-kinds" role="group" aria-label="入力するもの">` +
-        `<button type="button" class="chip-btn${draft.kind === "actual" ? " is-on" : ""}" data-act="kind" data-kind="actual" aria-pressed="${draft.kind === "actual"}">実績</button>` +
-        `<button type="button" class="chip-btn${draft.kind === "plan" ? " is-on" : ""}" data-act="kind" data-kind="plan" aria-pressed="${draft.kind === "plan"}">計画</button></div>`
+        `<button type="button" class="chip-btn${draft.kind === "plan" ? " is-on" : ""}" data-act="kind" data-kind="plan" aria-pressed="${draft.kind === "plan"}">計画</button>` +
+        `<button type="button" class="chip-btn${draft.kind === "actual" ? " is-on" : ""}" data-act="kind" data-kind="actual" aria-pressed="${draft.kind === "actual"}">実績</button></div>`
       : "") +
     `<p class="muted">${draft.kind === "plan" ? "管理作業（防除、追肥、除草、灌水、株の手入れ、その他）の計画を、" : ""}プラン「${escapeHtml(plan?.name || "")}」の畝${draft.kind === "plan" ? "に入れます。工程の作業の計画は、日程の画面の「作業の計画」で入れます。" : "につなぎます。"}</p>` +
     planScopeSection() +
