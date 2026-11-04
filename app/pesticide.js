@@ -159,7 +159,7 @@ export function cropsOf(input) {
   return [...new Set((input._uses?.rows || []).map((row) => row.crop))].sort((a, b) => a.localeCompare(b, "ja"));
 }
 
-// 作物名の行にある、使い方・適用病害虫の組み合わせ
+// 作物名の行にある、使い方・適用病害虫の組み合わせ。適用病害虫が空の登録（展着剤の「添加」など）は、指定なしと書く
 export function useKeys(input, crop) {
   const seen = new Map();
   for (const row of input._uses?.rows || []) {
@@ -168,7 +168,8 @@ export function useKeys(input, crop) {
     }
     const key = `${row.target}|${row.method}`;
     if (!seen.has(key)) {
-      seen.set(key, { key, label: `${row.target}／${row.method}`, method: row.method });
+      const label = row.target ? `${row.target}／${row.method}` : `${row.method}（適用病害虫の指定なし）`;
+      seen.set(key, { key, label, method: row.method });
     }
   }
   return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label, "ja"));

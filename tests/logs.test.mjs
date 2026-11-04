@@ -32,6 +32,7 @@ import {
   targetSummary,
   workActuals,
 } from "../app/logs.js";
+import { useKeys } from "../app/pesticide.js";
 
 const near = (actual, expected, digits = 6) => assert.ok(Math.abs(actual - expected) < 10 ** -digits, `${actual} != ${expected}`);
 const rect = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
@@ -316,6 +317,12 @@ test("作物名と使い方の選択: 写しから読む、前回の選択を入
   const old = { target: "ネキリムシ類", method: "土壌混和", rows: [{ crop_name: "リーフレタス", crop: "レタス" }] };
   assert.deepEqual(standardChoice(old, { cropName: "リーフレタス" }), { crop: "レタス", use_key: "ネキリムシ類|土壌混和" });
   assert.equal(standardChoice(null, { cropName: "リーフレタス" }), null);
+  // 適用病害虫が空の登録（展着剤の「添加」など）は、空のまま選んだものとして読む
+  const adjuvant = { rows: [{ crop_name: "大根", group: "大根（マルチ）", crop: "野菜類", target: "", method: "添加" }] };
+  assert.deepEqual(standardChoice(adjuvant, { cropName: "大根" }), { crop: "野菜類", use_key: "|添加" });
+  // 適用病害虫を写していない写しは、選んでいないものとして読む
+  const noTarget = { rows: [{ crop_name: "大根", crop: "野菜類", method: "添加" }] };
+  assert.deepEqual(standardChoice(noTarget, { cropName: "大根" }), { crop: "野菜類", use_key: "" });
 
   // この農薬（100）の使用基準の行
   const rows = [
@@ -342,6 +349,26 @@ test("作物名と使い方の選択: 写しから読む、前回の選択を入
   // この農薬にない作物名や、ほかの品目の選択は使わない
   assert.equal(previousChoice([log("e", "2026-10-12", [input(300, "だいこん", "アブラムシ類")])], where, rows), null);
   assert.equal(previousChoice(logs, { regNo: 100, cropName: "キャベツ" }, rows), null);
+  // 適用病害虫が空の登録も、前回の選択を入れる
+  const adjuvantRows = [{ crop: "野菜類", target: "", method: "添加" }];
+  const adjuvantLog = log("f", "2026-11-04", [{ kind: "pesticide", reg_no: 400, standard: { rows: [{ crop_name: "リーフレタス", crop: "野菜類", target: "", method: "添加" }] } }]);
+  assert.deepEqual(previousChoice([adjuvantLog], { regNo: 400, cropName: "リーフレタス" }, adjuvantRows), { crop: "野菜類", use_key: "|添加" });
+});
+
+test("使い方・適用病害虫の選択肢: 適用病害虫が空の登録は、指定なしと書く", () => {
+  const input = {
+    _uses: {
+      rows: [
+        { crop: "野菜類", target: "", method: "添加" },
+        { crop: "野菜類", target: "アブラムシ類", method: "散布" },
+        { crop: "だいこん", target: "アブラムシ類", method: "散布" },
+      ],
+    },
+  };
+  assert.deepEqual(useKeys(input, "野菜類"), [
+    { key: "アブラムシ類|散布", label: "アブラムシ類／散布", method: "散布" },
+    { key: "|添加", label: "添加（適用病害虫の指定なし）", method: "添加" },
+  ]);
 });
 
 test("面積あたりの使用量（粒剤など）を読み、基準と比べる", () => {

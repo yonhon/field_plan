@@ -548,7 +548,8 @@ export function usageWarnings({ amount, unit, groups }) {
 
 // 記録の使用基準の写しから、品目のまとまりで選んだ作物名と使い方（use_key は「適用病害虫|使用方法」）。
 // 品目で選んだ記録は品目の名前（crop_name）で、区画で選んだ記録はまとまりの名前（group）で探す。
-// 使い方を写しの一番上に持つ形（品目ごとに選ぶ前の記録）も読む
+// 使い方を写しの一番上に持つ形（品目ごとに選ぶ前の記録）も読む。
+// 適用病害虫が空の登録（展着剤の「添加」など）は、空のまま選んだものとして読む
 export function standardChoice(standard, { cropName = "", groupName = "" }) {
   const row = (standard?.rows || []).find((item) => (cropName ? item.crop_name === cropName : item.group === groupName));
   if (!row?.crop) {
@@ -556,7 +557,7 @@ export function standardChoice(standard, { cropName = "", groupName = "" }) {
   }
   const target = row.target ?? standard.target;
   const method = row.method ?? standard.method;
-  return { crop: row.crop, use_key: target && method ? `${target}|${method}` : "" };
+  return { crop: row.crop, use_key: target != null && method ? `${target}|${method}` : "" };
 }
 
 // 防除の記録を入れるときの、品目のまとまりの初めの選択。前回の選択を入れる。
