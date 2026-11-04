@@ -6,6 +6,7 @@ import { bedAngle, edgeAngles, rectSize, viewAxes } from "./geometry.js";
 import { record } from "./journal.js";
 import { workActuals } from "./logs.js";
 import { WORK_COLORS, existsOn, harvestEnd, workName } from "./schedule.js";
+import { draw } from "./draw.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -132,16 +133,18 @@ export function renderStrip() {
   const block = state.blocks.find((item) => item.id === sel.blockId);
   $("stripDate").value = state.viewDate;
   const chosen = $("stripCrop").value;
-  $("stripCrop").innerHTML =
+  draw(
+    $("stripCrop"),
     '<option value="">品目を決めずに足す</option>' +
-    state.crops.map((crop) => `<option value="${crop.id}">${escapeHtml(cropLabel(crop))}</option>`).join("");
+    state.crops.map((crop) => `<option value="${crop.id}">${escapeHtml(cropLabel(crop))}</option>`).join("")
+  );
   $("stripCrop").value = state.crops.some((crop) => crop.id === chosen) ? chosen : "";
   // なくす、消すは、畝を選んでいるときだけ
   const onBed = sel.target !== "block" && state.beds.some((bed) => bed.id === sel.target);
   $("stripRemoveBtn").disabled = !onBed;
   $("stripDeleteBtn").disabled = !onBed;
   if (!block) {
-    root().innerHTML = "";
+    draw(root(), "");
     return;
   }
   const beds = state.beds.filter((bed) => bed.block_id === block.id && existsOn(bed.start_date, bed.removed_on, state.viewDate));
@@ -230,7 +233,8 @@ export function renderStrip() {
   dim(view.strips.length ? view.strips.at(-1).max : view.min, view.max, null);
   insertButton(view.strips.length ? view.strips.at(-1).max : view.min, view.max, view.strips.length);
 
-  root().innerHTML =
+  draw(
+    root(),
     left +
     `<div class="strip-field" style="width:${span * view.scale}px">` +
     `<div class="strip-frame" style="top:0;height:${BOX_TOP * 2 + BOX_HEIGHT}px;left:${x(view.min)}px;width:${(view.max - view.min) * view.scale}px"></div>` +
@@ -240,7 +244,8 @@ export function renderStrip() {
     // 作業の列は、1 つのマスに重ねて置く。図の高さは、いちばん長い列に合わせてブラウザーが決める
     `<div class="strip-columns" style="padding-top:${COLUMN_TOP}px">${columns.join("")}</div>` +
     (beds.length ? "" : `<p class="strip-empty strip-none" style="top:${COLUMN_TOP}px">この日に畝はありません。圃場図で区画を選び、畝を並べてください。</p>`) +
-    `</div>`;
+    `</div>`
+  );
 }
 
 // ---- 位置と幅の変更 ----

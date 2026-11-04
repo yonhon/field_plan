@@ -1,5 +1,6 @@
 // PDF 出力。ブラウザーの印刷を開き、出力先で「PDF に保存」を選んでもらう。
 // 画面とは別の、印刷だけに出る枠（printArea）に中身を入れて、ほかを隠す
+import { draw } from "./draw.js";
 
 const escapeHtml = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
@@ -15,7 +16,7 @@ function clear() {
     pageTitle = null;
   }
   document.body.classList.remove("is-printing");
-  document.getElementById("printArea").innerHTML = "";
+  draw(document.getElementById("printArea"), "");
 }
 
 // name は保存するときのファイル名（拡張子なし）、title は紙の上に出す見出し、
@@ -31,7 +32,7 @@ export function printPage({ name, title, body, landscape }) {
     document.head.append(style);
   }
   document.getElementById("printPageStyle").textContent = `@page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 10mm; }`;
-  area.innerHTML = `<h1 class="print-title">${escapeHtml(title)}</h1>${body}`;
+  draw(area, `<h1 class="print-title">${escapeHtml(title)}</h1>${body}`);
   document.body.classList.add("is-printing");
   // ブラウザーは、画面の題名を、保存するファイル名の初めの値にする
   pageTitle ??= document.title;

@@ -6,6 +6,7 @@ import { noteChange } from "./history.js";
 import { record } from "./journal.js";
 import { SPEC_FIELDS, formatAmount, inputText, logEnd, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
+import { draw } from "./draw.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -22,7 +23,6 @@ let ctx = null; // { state, setStatus, activePlanData }
 let showAll = false;
 let dialog = null;
 let draft = null; // 窓で入れている記録
-let touched = null; // 窓の中で最後に触った要素（描き直したあと、同じ所を見せるため）
 let data = null; // 実際に使うプランの区画・畝・作付・作業
 
 const state = () => ctx.state;
@@ -63,19 +63,22 @@ export function renderLogs() {
       : "";
   $("logNote").textContent = note;
   $("logNote").hidden = !note;
-  $("logList").innerHTML = shown.length
-    ? shown
-        .map((log) => {
-          const details = [targetSummary(log.targets || []), ...(log.inputs || []).map(inputText), log.note].filter(Boolean).join(" / ");
-          return (
-            `<li data-log="${log.id}"><span class="week-date">${logDays(log)}</span>` +
-            `<span class="week-work"><span class="swatch" style="background:${WORK_COLORS[log.work_type] || "#888"}"></span>` +
-            `${escapeHtml(workName(typeLabel(log.work_type), log.spec))}${log.finishes ? '<span class="log-done">完了</span>' : ""}</span>` +
-            `<span class="muted">${escapeHtml(details)}</span></li>`
-          );
-        })
-        .join("")
-    : '<li class="muted">まだ実績はありません</li>';
+  draw(
+    $("logList"),
+    shown.length
+      ? shown
+          .map((log) => {
+            const details = [targetSummary(log.targets || []), ...(log.inputs || []).map(inputText), log.note].filter(Boolean).join(" / ");
+            return (
+              `<li data-log="${log.id}"><span class="week-date">${logDays(log)}</span>` +
+              `<span class="week-work"><span class="swatch" style="background:${WORK_COLORS[log.work_type] || "#888"}"></span>` +
+              `${escapeHtml(workName(typeLabel(log.work_type), log.spec))}${log.finishes ? '<span class="log-done">完了</span>' : ""}</span>` +
+              `<span class="muted">${escapeHtml(details)}</span></li>`
+            );
+          })
+          .join("")
+      : '<li class="muted">まだ実績はありません</li>'
+  );
 }
 
 // ---- 記録を入れる窓 ----
@@ -158,10 +161,12 @@ export async function completeWorks(works) {
 function chooseScope(rowName, others) {
   const box = document.createElement("dialog");
   box.className = "notice";
-  box.innerHTML =
+  draw(
+    box,
     '<p class="notice-text"></p><div class="row">' +
     '<button class="primary-btn" data-scope="one"></button><button class="chip-btn" data-scope="all"></button>' +
-    '<button class="text-btn" data-scope="">キャンセル</button></div>';
+    '<button class="text-btn" data-scope="">キャンセル</button></div>'
+  );
   box.querySelector(".notice-text").textContent = `この実績は、ほかの ${others} か所の畝（区画）にも付いています。どこまで日付を動かしますか。`;
   box.querySelector('[data-scope="one"]').textContent = `${rowName}だけ動かす`;
   box.querySelector('[data-scope="all"]').textContent = `実績ごと動かす（${others + 1} か所）`;
@@ -398,84 +403,21 @@ function build() {
   dialog.addEventListener("click", onClick);
   dialog.addEventListener("change", onChange);
   dialog.addEventListener("input", onInput);
-  dialog.addEventListener("pointerdown", (event) => (touched = event.target));
-  dialog.addEventListener("focusin", (event) => (touched = event.target));
   // Esc で閉じたときも、入れかけの内容は捨てる（確かめない）。窓の外を押しても閉じない
   dialog.addEventListener("close", () => {
     draft = null;
-    touched = null;
+    // 次に開いたとき、前に開いていたときの位置へ戻さないよう、中身を空にする
+    dialog.replaceChildren();
   });
 }
 
-// 描き直したあとの窓で、同じ要素を探すための鍵。data-* の属性か、何番目の資材の行か
-function viewKey(el) {
-  const attrs = [...el.attributes].filter((attr) => attr.name.startsWith("data-"));
-  if (attrs.length) {
-    return { selector: attrs.map((attr) => `[${attr.name}="${CSS.escape(attr.value)}"]`).join("") };
-  }
-  if (el.matches(".log-input")) {
-    return { selector: ".log-input", index: [...el.parentElement.querySelectorAll(":scope > .log-input")].indexOf(el) };
-  }
-  return null;
-}
-
-function findByKey(body, key) {
-  const found = body.querySelectorAll(key.selector);
-  if (key.index !== undefined) {
-    return found[key.index] || null;
-  }
-  return found.length === 1 ? found[0] : null; // 同じ鍵がいくつもあるときは、どれか分からないので使わない
-}
-
-// 窓は丸ごと作り直すので、そのままでは中のいちばん上に戻ってしまう。描き直す前に、触っていた所と、
-// その画面の上での高さを覚えておき、描き直したあと、同じ所を同じ高さに戻す（入れていた欄にも戻る）
-function keepView() {
-  const body = dialog.querySelector(".log-body");
-  if (!body) {
-    return () => {};
-  }
-  const scrollTop = body.scrollTop;
-  // 触った要素から外へたどり、描き直したあとにも残っていそうなものを目印にする（選んだ検索結果は消えるので、その行など）
-  const anchors = [];
-  for (let el = touched?.isConnected ? touched : null; el && el !== body && body.contains(el); el = el.parentElement) {
-    const key = viewKey(el);
-    if (key) {
-      anchors.push({ key, top: el.getBoundingClientRect().top });
-    }
-  }
-  const active = document.activeElement;
-  const focusKey = active && body.contains(active) ? viewKey(active) : null;
-  const selection = active && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
-  return () => {
-    const next = dialog.querySelector(".log-body");
-    if (!next) {
-      return;
-    }
-    next.scrollTop = scrollTop;
-    for (const anchor of anchors) {
-      const el = findByKey(next, anchor.key);
-      if (el) {
-        next.scrollTop += el.getBoundingClientRect().top - anchor.top;
-        break;
-      }
-    }
-    const focused = focusKey && findByKey(next, focusKey);
-    if (focused) {
-      focused.focus({ preventScroll: true });
-      if (selection && typeof focused.selectionStart === "number") {
-        focused.setSelectionRange(...selection);
-      }
-    }
-  };
-}
-
 function renderDialog() {
-  const restoreView = keepView();
   const choices = currentChoices();
   const items = pickedItems(choices);
   const area = items.reduce((sum, item) => sum + (item.area_m2 || 0), 0);
   const plan = activePlan();
-  dialog.innerHTML =
+  draw(
+    dialog,
     `<div class="log-head"><h2 id="logDialogTitle">${dialogTitle()}</h2>` +
     `<button type="button" class="text-btn" data-act="close" aria-label="閉じる">閉じる</button></div>` +
     `<div class="log-body">` +
@@ -509,7 +451,8 @@ function renderDialog() {
     `${draft.planWorks.length ? '<button type="button" class="text-btn danger" data-act="deletePlan">この計画を消す</button>' : ""}` +
     `${!draft.id && draft.cancellable.length ? '<button type="button" class="text-btn danger" data-act="cancelWork">この作業を取りやめる</button>' : ""}` +
     `<span class="log-spacer"></span><button type="button" class="text-btn" data-act="close">キャンセル</button>` +
-    `<button type="button" class="primary-btn" data-act="save">入力する</button></div>`;
+    `<button type="button" class="primary-btn" data-act="save">入力する</button></div>`
+  );
   // 品目の一部の畝だけを選んでいるときは、品目のチェックを「一部」の表示にする
   dialog.querySelectorAll('[data-act="group"]').forEach((box) => {
     const group = choices.crops.find((item) => item.key === box.dataset.key);
@@ -517,7 +460,6 @@ function renderDialog() {
     box.checked = count === group.items.length;
     box.indeterminate = count > 0 && count < group.items.length;
   });
-  restoreView();
 }
 
 function dialogTitle() {
@@ -899,7 +841,7 @@ function updateTotals() {
   const box = dialog.querySelector("#logWarnings");
   if (box) {
     box.hidden = !list.length;
-    box.innerHTML = list.map((text) => `<li>${escapeHtml(text)}</li>`).join("");
+    draw(box, list.map((text) => `<li>${escapeHtml(text)}</li>`).join(""));
   }
 }
 
@@ -1182,7 +1124,7 @@ function onInput(event) {
     const group = sprayGroups().find((item) => item.key === el.dataset.g);
     const list = el.closest(".famic-choice")?.querySelector(".famic-crop-list");
     if (group && list) {
-      list.innerHTML = famic.cropListHtml(input, i, group);
+      draw(list, famic.cropListHtml(input, i, group));
     }
     return;
   }

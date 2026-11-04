@@ -28,6 +28,7 @@ import { lateWorks, layoutBars, logEnd, plantingOnDate, withActualDates, workAct
 import { loadPref, savePref } from "./prefs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
+import { draw } from "./draw.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -246,12 +247,15 @@ function renderWeek() {
   const late = isActivePlan() ? lateWorks(live, actuals, today) : [];
   $("lateBox").hidden = !late.length;
   $("lateTitle").textContent = `遅れている作業（${weekLines(late).length}）`;
-  $("lateList").innerHTML = weekLines(late)
-    .map((line) => weekItem(line, actuals, true))
-    .join("");
+  draw(
+    $("lateList"),
+    weekLines(late)
+      .map((line) => weekItem(line, actuals, true))
+      .join("")
+  );
   const items = weekLines(due.length ? due : upcoming).map((line) => weekItem(line, actuals, false));
   $("weekTitle").textContent = due.length || !upcoming.length ? "今週やること" : "次の作業（今週の予定はありません）";
-  $("weekList").innerHTML = items.length ? items.join("") : '<li class="muted">予定はありません</li>';
+  draw($("weekList"), items.length ? items.join("") : '<li class="muted">予定はありません</li>');
 }
 
 // 今週やることの「完了」「修正」
@@ -330,14 +334,17 @@ function renderProblems() {
   $("problemCount").textContent = `${problems.length} 件`;
   $("scheduleBadge").hidden = problems.length === 0;
   $("scheduleBadge").textContent = `⚠${problems.length}`;
-  $("problemList").innerHTML = [...groups.values()]
-    .map(({ text, items }) => {
-      const first = items[0];
-      const where = items.length > 1 ? `${ownerName(first)} ほか ${items.length - 1} か所` : ownerName(first);
-      const target = first.block_id ? `data-kind="block" data-id="${first.block_id}"` : `data-kind="planting" data-id="${first.planting_id}"`;
-      return `<li ${target}><strong>${escapeHtml(where)}</strong>${escapeHtml(text)}</li>`;
-    })
-    .join("");
+  draw(
+    $("problemList"),
+    [...groups.values()]
+      .map(({ text, items }) => {
+        const first = items[0];
+        const where = items.length > 1 ? `${ownerName(first)} ほか ${items.length - 1} か所` : ownerName(first);
+        const target = first.block_id ? `data-kind="block" data-id="${first.block_id}"` : `data-kind="planting" data-id="${first.planting_id}"`;
+        return `<li ${target}><strong>${escapeHtml(where)}</strong>${escapeHtml(text)}</li>`;
+      })
+      .join("")
+  );
 }
 
 // 工程表の表示。plan（計画）、act（実績）、both（計画と実績）。工程表と作付の詳細で共有し、ブラウザーが圃場ごとに覚える
@@ -414,8 +421,8 @@ export const bedTarget = (bed, plantingIds) => (target) => target.bed_id === bed
 function renderGantt(fit = null) {
   const mode = ganttMode();
   $("ganttModes").hidden = !isActivePlan();
-  $("ganttModes").innerHTML = modeButtons(mode);
-  $("ganttRanges").innerHTML = rangeButtons(ganttRange());
+  draw($("ganttModes"), modeButtons(mode));
+  draw($("ganttRanges"), rangeButtons(ganttRange()));
   $("ganttModeNote").textContent = isActivePlan()
     ? mode === "both"
       ? "計画は太い帯、実績は計画の帯の下側に重ねた細い帯です。実績のある計画は薄く出します。"
@@ -445,7 +452,7 @@ function renderGantt(fit = null) {
   }
   const allSpans = [...spansOf.values()].flat();
   if (!dated.length && !allSpans.length) {
-    $("gantt").innerHTML = '<p class="muted">日付の入った作業がまだありません。</p>';
+    draw($("gantt"), '<p class="muted">日付の入った作業がまだありません。</p>');
     renderPickTools();
     return;
   }
@@ -586,11 +593,13 @@ function renderGantt(fit = null) {
   const scrollKey = `${range}|${state().plan.id}|${fit || ""}`;
   const keep = scroller && ganttScrollKey === scrollKey ? scroller.scrollLeft : null;
   ganttScrollKey = scrollKey;
-  $("gantt").innerHTML =
+  draw(
+    $("gantt"),
     `<div class="gantt-scroll"><div class="gantt-inner" style="width:${NAME_W + width}px">` +
     `<div class="gantt-axis"><div class="gantt-name"></div><div class="gantt-track" style="width:${width}px">${ticks.join("")}</div></div>` +
     `${rows.join("")}${mark}` +
-    `</div></div><div class="gantt-legend">${legend}${overlay}<span><span class="swatch is-flagged"></span>白い対角線: 確認が必要</span></div>`;
+    `</div></div><div class="gantt-legend">${legend}${overlay}<span><span class="swatch is-flagged"></span>白い対角線: 確認が必要</span></div>`
+  );
   $("gantt").querySelector(".gantt-scroll").scrollLeft = keep ?? Math.max(x(view.from), 0);
   $("gantt").dataset.dayPx = dayPx; // 1 日の幅（確かめるときに読む）
   renderPickTools();
@@ -640,15 +649,18 @@ function renderSummary() {
   const summary = summarize(state());
   $("summaryPanel").hidden = summary.crops.length === 0;
   const number = (value, digits = 0) => value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-  $("cropSummary").innerHTML = summary.crops
-    .map(
-      (row) =>
-        `<tr><td>${escapeHtml(row.name)}${row.registered ? "" : '<span class="muted">（未登録）</span>'}</td>` +
-        `<td class="num">${row.count}</td><td class="num">${number(row.area, 1)}</td>` +
-        `<td class="num">${row.seedlings ? number(row.seedlings) : "-"}</td>` +
-        `<td>${row.fertilizerKg ? `${escapeHtml(row.fertilizer)} ${number(row.fertilizerKg, 2)} kg` : "-"}</td></tr>`
-    )
-    .join("");
+  draw(
+    $("cropSummary"),
+    summary.crops
+      .map(
+        (row) =>
+          `<tr><td>${escapeHtml(row.name)}${row.registered ? "" : '<span class="muted">（未登録）</span>'}</td>` +
+          `<td class="num">${row.count}</td><td class="num">${number(row.area, 1)}</td>` +
+          `<td class="num">${row.seedlings ? number(row.seedlings) : "-"}</td>` +
+          `<td>${row.fertilizerKg ? `${escapeHtml(row.fertilizer)} ${number(row.fertilizerKg, 2)} kg` : "-"}</td></tr>`
+      )
+      .join("")
+  );
   $("fertilizerSummary").textContent = summary.fertilizers.length
     ? `肥料の合計: ${summary.fertilizers.map((row) => `${row.name} ${number(row.kg, 2)} kg`).join("、")}`
     : "";
@@ -792,16 +804,18 @@ function blockSection(block) {
 function renderEditor() {
   const blocks = state().blocks;
   const beds = blockBeds(sel.blockId);
-  $("scheduleBlock").innerHTML = blocks.map((block) => `<option value="${block.id}">${escapeHtml(block.name)}</option>`).join("");
+  draw($("scheduleBlock"), blocks.map((block) => `<option value="${block.id}">${escapeHtml(block.name)}</option>`).join(""));
   $("scheduleBlock").value = sel.blockId;
-  $("scheduleTarget").innerHTML =
+  draw(
+    $("scheduleTarget"),
     `<option value="block">区画の作業（畝立ての前まで）</option>` +
     beds
       .map((bed) => {
         const crops = bedPlantings(bed.id).map((planting) => planting.crop_name).filter(Boolean).join(" → ");
         return `<option value="${bed.id}">畝${bed.seq}${crops ? `（${escapeHtml(crops)}）` : ""}</option>`;
       })
-      .join("");
+      .join("")
+  );
   $("scheduleTarget").value = sel.target;
 
   const onBed = sel.target !== "block";
@@ -810,7 +824,7 @@ function renderEditor() {
   if (onBed) {
     // 追加する作付の品目。選んだままにしておく（同じ品目を続けて足せるように）
     const choice = $("newCropSelect").value;
-    $("newCropSelect").innerHTML = cropOptions(state().crops.some((item) => item.id === choice) ? choice : "");
+    draw($("newCropSelect"), cropOptions(state().crops.some((item) => item.id === choice) ? choice : ""));
     // 日付の初期値は、畝、作付の数、品目、基準が変わったときに入れ直す（手で直した日は、それまで保つ）
     const adding = [sel.target, plantings.length, plantings.at(-1)?.id, $("newCropSelect").value, $("newPlantingMode").value, state().works.length].join("|");
     if (addingFor !== adding) {
@@ -819,10 +833,13 @@ function renderEditor() {
     }
   }
   // 畝では、作付を上から順に並べる。足すたびに下へ伸びる
-  $("editorSections").innerHTML = onBed
-    ? plantings.map(plantingSection).join("") ||
-      '<p class="muted">この畝には作付がまだありません。下で品目と日を決めて「作付を追加」を押すと、畝立てから残渣処理までの作業が入った作付ができます。</p>'
-    : blockSection(blocks.find((block) => block.id === sel.blockId));
+  draw(
+    $("editorSections"),
+    onBed
+      ? plantings.map(plantingSection).join("") ||
+        '<p class="muted">この畝には作付がまだありません。下で品目と日を決めて「作付を追加」を押すと、畝立てから残渣処理までの作業が入った作付ができます。</p>'
+      : blockSection(blocks.find((block) => block.id === sel.blockId))
+  );
 }
 
 // 並べ直しの基準にする日の初期値
@@ -873,14 +890,17 @@ function arrange(owner, mode, date) {
 }
 
 function renderTypes() {
-  $("typeRows").innerHTML = state()
-    .workTypes.map(
-      (type) =>
-        `<tr data-code="${type.code}"><td><span class="swatch" style="background:${TYPE_COLORS[type.code] || "#888"}"></span>${escapeHtml(type.label)}</td>` +
-        `<td><input type="number" min="1" data-field="default_days" value="${type.default_days}" /></td>` +
-        `<td><input type="number" min="0" data-field="min_gap_days" value="${type.min_gap_days}" /></td></tr>`
-    )
-    .join("");
+  draw(
+    $("typeRows"),
+    state()
+      .workTypes.map(
+        (type) =>
+          `<tr data-code="${type.code}"><td><span class="swatch" style="background:${TYPE_COLORS[type.code] || "#888"}"></span>${escapeHtml(type.label)}</td>` +
+          `<td><input type="number" min="1" data-field="default_days" value="${type.default_days}" /></td>` +
+          `<td><input type="number" min="0" data-field="min_gap_days" value="${type.min_gap_days}" /></td></tr>`
+      )
+      .join("")
+  );
 }
 
 // ---- 操作 ----
@@ -1457,9 +1477,11 @@ function initGanttEditing() {
     // 動かした先の日付と、移す先を出す
     const work = state().works.find((item) => item.id === barDrag.id);
     const where = barDrag.target ? `<br>→ ${escapeHtml(barDrag.target.querySelector(".gantt-name").textContent)}${event.ctrlKey ? " へコピー" : " へ移動"}` : "";
-    tip.innerHTML =
+    draw(
+      tip,
       `<strong>${escapeHtml(typeLabel(work.work_type))}</strong>` +
-      `${fullDay(addDays(work.plan_start, barDrag.days))} 〜 ${fullDay(addDays(work.plan_end, barDrag.days))}${where}`;
+      `${fullDay(addDays(work.plan_start, barDrag.days))} 〜 ${fullDay(addDays(work.plan_end, barDrag.days))}${where}`
+    );
     tip.hidden = false;
     tip.style.left = `${Math.max(8, Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8))}px`;
     tip.style.top = `${event.clientY + 18}px`;
@@ -1545,7 +1567,7 @@ function initGanttEditing() {
     actualDrag.parts.forEach((part) => (part.style.transform = `translateX(${actualDrag.days * dayPx}px)`));
     const { start, end, type } = actualDrag.bar.dataset;
     const moved = (iso) => fullDay(addDays(iso, actualDrag.days));
-    tip.innerHTML = `<strong>${escapeHtml(anyTypeLabel(type))}の実績</strong>${start === end ? moved(start) : `${moved(start)} 〜 ${moved(end)}`}`;
+    draw(tip, `<strong>${escapeHtml(anyTypeLabel(type))}の実績</strong>${start === end ? moved(start) : `${moved(start)} 〜 ${moved(end)}`}`);
     tip.hidden = false;
     tip.style.left = `${Math.max(8, Math.min(event.clientX + 14, window.innerWidth - tip.offsetWidth - 8))}px`;
     tip.style.top = `${event.clientY + 18}px`;
@@ -1706,7 +1728,7 @@ export function initSchedule(context) {
     const bar = event.target.closest(".gantt-bar, .gantt-actual-bar");
     tip.hidden = !bar;
     if (bar) {
-      tip.innerHTML = bar.dataset.tip;
+      draw(tip, bar.dataset.tip);
       const width = tip.offsetWidth;
       tip.style.left = `${Math.max(8, Math.min(event.clientX + 14, window.innerWidth - width - 8))}px`;
       tip.style.top = `${event.clientY + 18}px`;

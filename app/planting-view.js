@@ -20,6 +20,7 @@ import {
   modeButtons,
   setGanttMode,
 } from "./schedule-view.js";
+import { draw } from "./draw.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -133,9 +134,11 @@ export function renderPlantingDetail() {
   }
   const c = context();
   if (!c) {
-    $("plantingBody").innerHTML =
+    draw(
+      $("plantingBody"),
       '<div class="detail-head"><button type="button" class="text-btn" data-act="back">← 工程表に戻る</button></div>' +
-      '<p class="muted">この作付（区画）は、いま開いているプランにはありません。</p>';
+      '<p class="muted">この作付（区画）は、いま開いているプランにはありません。</p>'
+    );
     return;
   }
   const mode = ganttMode();
@@ -143,7 +146,8 @@ export function renderPlantingDetail() {
   const actuals = currentActuals();
   const logs = active ? (state().logs || []).filter((log) => log.targets.some(c.matches)) : [];
   wx = weatherView(c, actuals, active);
-  $("plantingBody").innerHTML =
+  draw(
+    $("plantingBody"),
     headHtml(c, active) +
     `<div class="row detail-modes">${active ? `<div class="log-modes" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}` +
     `${active ? "" : '<span class="muted">実績は、実際に使うプランを開くと出せます。</span>'}</div>` +
@@ -151,7 +155,8 @@ export function renderPlantingDetail() {
     `<section class="panel">${timelineHtml(c, mode, actuals)}</section>` +
     (mode === "both" ? diffHtml(c, actuals, logs) : "") +
     `<section class="panel"><div class="panel-heading"><h2>作業</h2>${tableNote(mode) ? `<span class="muted">${tableNote(mode)}</span>` : ""}</div>${tableHtml(c, mode, actuals, logs)}</section>` +
-    `</div><aside class="detail-aside">${asideHtml(c, active)}</aside></div>`;
+    `</div><aside class="detail-aside">${asideHtml(c, active)}</aside></div>`
+  );
 }
 
 // ---- 気象 ----
@@ -656,14 +661,16 @@ function openWorkPlanEditor(work) {
   const name = workName(anyTypeLabel(work.work_type), work.detail?.spec);
   const box = document.createElement("dialog");
   box.className = "notice plan-edit";
-  box.innerHTML =
+  draw(
+    box,
     `<h3>計画を直す</h3><p class="muted">${escapeHtml(place)}の${escapeHtml(name)}</p>` +
     `<div class="form-grid"><label>開始日<input type="date" data-k="start" value="${work.plan_start || ""}" /></label>` +
     `<label>終了日<input type="date" data-k="end" value="${work.plan_end || ""}" /></label></div>` +
     `<label>メモ<textarea data-k="note" rows="2">${escapeHtml(work.note || "")}</textarea></label>` +
     `<p class="muted">開始日を変えると、日数を保って終了日も動きます。</p>` +
     '<p class="error" data-k="error"></p>' +
-    '<div class="row"><button type="button" class="text-btn" data-action="cancel">キャンセル</button><button type="button" class="primary-btn" data-action="save">直す</button></div>';
+    '<div class="row"><button type="button" class="text-btn" data-action="cancel">キャンセル</button><button type="button" class="primary-btn" data-action="save">直す</button></div>'
+  );
   document.body.append(box);
   const field = (key) => box.querySelector(`[data-k="${key}"]`);
   // 開始日を変えたら、日数を保って終了日も動かす（日程の画面の表と同じ）

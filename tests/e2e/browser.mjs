@@ -180,6 +180,14 @@ export async function openBrowser() {
     await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x + dx, y: point.y, button: "left", clickCount: 1 });
   };
 
+  // キーを押して離す（Tab など）。文字を入れるときは type を使う
+  const press = async (key, code = key, keyCode = { Tab: 9, Enter: 13 }[key]) => {
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode });
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
+  };
+  // カーソルのある欄に、文字を打ち込む
+  const type = (text) => page.send("Input.insertText", { text });
+
   const setValue = (selector, value) =>
     run(`(() => {
       const element = document.querySelector(${JSON.stringify(selector)});
@@ -211,9 +219,11 @@ export async function openBrowser() {
   const close = async () => {
     await page.send("Browser.close").catch(() => {});
     page.close();
+    // Chrome が終わるまで待ってから、一時のフォルダーを消す（Windows では、終わる前はファイルをつかんでいて消せない）
+    const exited = chrome.exitCode !== null ? Promise.resolve() : new Promise((resolve) => chrome.once("exit", resolve));
     chrome.kill();
     await new Promise((resolve) => server.close(resolve));
-    await sleep(200);
+    await Promise.race([exited, sleep(5000)]);
     rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   };
 
@@ -222,6 +232,8 @@ export async function openBrowser() {
     waitFor,
     click,
     drag,
+    press,
+    type,
     setValue,
     loadApp,
     close,

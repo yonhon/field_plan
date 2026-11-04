@@ -1,6 +1,7 @@
 // 「品目」の画面。品目ごとの設定値と、肥料の銘柄を登録する。どちらもすべてのプランで共通。
 import { confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { record } from "./journal.js";
+import { draw } from "./draw.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -75,8 +76,8 @@ export function renderCrops() {
   if (!ctx) {
     return;
   }
-  $("cropTable").innerHTML = table(CROP_FIELDS, ctx.state.crops, "品目がまだありません。「品目を追加」で登録してください。");
-  $("fertilizerTable").innerHTML = table(FERTILIZER_FIELDS, ctx.state.fertilizers, "肥料がまだありません。");
+  draw($("cropTable"), table(CROP_FIELDS, ctx.state.crops, "品目がまだありません。「品目を追加」で登録してください。"));
+  draw($("fertilizerTable"), table(FERTILIZER_FIELDS, ctx.state.fertilizers, "肥料がまだありません。"));
 }
 
 // 入力欄の値を、列に入れる値にする。数の欄が空なら null

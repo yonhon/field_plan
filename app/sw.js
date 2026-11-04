@@ -18,6 +18,7 @@ const FILES = [
   "crops.js",
   "crops-view.js",
   "dialog.js",
+  "draw.js",
   "journal.js",
   "history.js",
   "print.js",

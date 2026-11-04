@@ -3,6 +3,7 @@
 // DB を使わないモードでは使わない（防除の記録は、名前と量を文字と数で入れるだけになる）。
 // 農薬の情報の扱いには責任が伴うので、ほかの人に使ってもらうときは、ここを外すこと。
 import { defaultDilution, formatAmount, parseUsage, pesticideCounts, previousChoice, sprayWarnings, standardChoice, usageRange, usageWarnings } from "./logs.js";
+import { draw } from "./draw.js";
 
 const escapeHtml = (text) =>
   String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -48,17 +49,17 @@ export function search(input, query, box) {
   const key = searchKey(query);
   if (key.length < 2 && !/^\d+$/.test(key)) {
     input._results = [];
-    box.innerHTML = "";
+    draw(box, "");
     return;
   }
   timer = setTimeout(async () => {
     try {
       input._results = groupProducts(await state().store.searchPesticides(key)).slice(0, 20);
     } catch (error) {
-      box.innerHTML = `<li class="muted">探せませんでした: ${escapeHtml(error.message)}</li>`;
+      draw(box, `<li class="muted">探せませんでした: ${escapeHtml(error.message)}</li>`);
       return;
     }
-    box.innerHTML = resultsHtml(input);
+    draw(box, resultsHtml(input));
   }, SEARCH_DELAY_MS);
 }
 

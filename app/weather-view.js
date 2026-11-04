@@ -6,6 +6,7 @@ import { notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { addDays, localToday } from "./schedule.js";
 import { FETCH_DAYS, fetchAreas, fetchDay, fetchForecast, fetchStations, nearestStations, weatherSettled } from "./weather.js";
+import { draw } from "./draw.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -54,21 +55,23 @@ export async function renderWeatherSettings() {
         [...(current ? [current] : []), ...near].map((item) => option(item.code, `${item.name}${item.km !== undefined ? `（${item.km.toFixed(1)} km）` : ""}`, selected)).join("")
       );
     };
-    $("tempStation").innerHTML = list("temp", settings.temp_station);
-    $("rainStation").innerHTML = list("rain", settings.rain_station);
+    draw($("tempStation"), list("temp", settings.temp_station));
+    draw($("rainStation"), list("rain", settings.rain_station));
   } catch (error) {
     $("weatherStatus").textContent = `観測所の一覧を読めませんでした: ${error.message}`;
   }
   try {
     const areas = await fetchAreas();
-    $("forecastOffice").innerHTML =
+    draw(
+      $("forecastOffice"),
       option("", "選んでください", settings.office || "") +
       Object.entries(areas.offices)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([code, item]) => option(code, item.name, settings.office))
-        .join("");
+        .join("")
+    );
     const children = settings.office ? areas.offices[settings.office]?.children || [] : [];
-    $("forecastArea").innerHTML = option("", children.length ? "選んでください" : "先に府県予報区を選んでください", settings.area || "") + children.map((code) => option(code, areas.class10s[code]?.name || code, settings.area)).join("");
+    draw($("forecastArea"), option("", children.length ? "選んでください" : "先に府県予報区を選んでください", settings.area || "") + children.map((code) => option(code, areas.class10s[code]?.name || code, settings.area)).join(""));
   } catch (error) {
     $("weatherStatus").textContent = `予報区の一覧を読めませんでした: ${error.message}`;
   }
@@ -92,7 +95,7 @@ export async function renderWeatherSettings() {
       // 予報を読めなければ、地点は選べない
     }
   }
-  $("forecastPoint").innerHTML = option("", points.length ? "選んでください" : "先に府県予報区を選んでください", settings.point || "") + points.map(([code, name]) => option(code, name, settings.point)).join("");
+  draw($("forecastPoint"), option("", points.length ? "選んでください" : "先に府県予報区を選んでください", settings.point || "") + points.map(([code, name]) => option(code, name, settings.point)).join(""));
   if (!twoWeekList) {
     // 気象庁の一覧は、県庁所在地などが先にまとまっている（那覇がほかの沖縄の地点から離れている）。
     // 地域の番号（fuk。北から南へ）でまとめ直す。同じ地域の中は、気象庁の順のまま
@@ -103,9 +106,11 @@ export async function renderWeatherSettings() {
       .sort((a, b) => a.item.fuk - b.item.fuk || a.index - b.index)
       .map(({ item }) => item);
   }
-  $("twoweekStation").innerHTML =
+  draw(
+    $("twoweekStation"),
     option("", (twoWeekList || []).length ? "選んでください" : "地点の一覧を読めませんでした", String(settings.twoweek || "")) +
-    (twoWeekList || []).map((item) => option(String(item.no), item.name, String(settings.twoweek || ""))).join("");
+    (twoWeekList || []).map((item) => option(String(item.no), item.name, String(settings.twoweek || ""))).join("")
+  );
   renderStatus();
 }
 

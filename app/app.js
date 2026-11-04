@@ -44,6 +44,7 @@ import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { initSchedule, openInSchedule, renderSchedule, selectedRowPreset } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
+import { draw } from "./draw.js";
 
 const config = window.FIELD_PLAN_CONFIG;
 const $ = (id) => document.getElementById(id);
@@ -646,7 +647,7 @@ function renderMap(scale) {
     }
   }
 
-  map.innerHTML = parts.join("") + lengthLabels.join("");
+  draw(map, parts.join("") + lengthLabels.join(""));
   renderScaleBar(z);
 }
 
@@ -680,7 +681,7 @@ function mapWarnings(outside = findOutside()) {
 function renderWarnings(outside = findOutside()) {
   const warnings = mapWarnings(outside);
   $("warnings").hidden = warnings.length === 0;
-  $("warnings").innerHTML = warnings.map(([id, text]) => `<li data-shape="${id}">${escapeHtml(text)}</li>`).join("");
+  draw($("warnings"), warnings.map(([id, text]) => `<li data-shape="${id}">${escapeHtml(text)}</li>`).join(""));
   $("mapBadge").hidden = warnings.length === 0;
   $("mapBadge").textContent = `⚠${warnings.length}`;
 }
@@ -750,7 +751,7 @@ function renderTree(rows) {
       li.className = row.className;
     }
     if (li.dataset.html !== row.html) {
-      li.innerHTML = row.html;
+      draw(li, row.html);
       li.dataset.html = row.html;
     }
     wanted.push(li);
@@ -849,7 +850,7 @@ function renderSelection() {
       if (edge < 0) {
         options.unshift(`<option value="">${compassOf(viewDirs()[k] + 180)}側から（辺を選んでいません）</option>`);
       }
-      $(`viewEdge${k + 1}`).innerHTML = options.join("");
+      draw($(`viewEdge${k + 1}`), options.join(""));
       $(`viewEdge${k + 1}`).value = edge < 0 ? "" : String(edge);
     });
     const square = turnGap(viewDirs()[0], viewDirs()[1]);
@@ -877,23 +878,29 @@ function renderSelection() {
     $("selectionTitle").textContent = `選択中: ${blockOf(item).name} 畝${item.seq}`;
     $("shapeInfo").textContent = `幅 ${Math.round(size.width * 100)} cm × 長さ ${size.length.toFixed(1)} m（${polygonArea(item.shape).toFixed(1)} ㎡）`;
     const plantings = bedPlantings(item);
-    $("bedPlantings").innerHTML = plantings.length
-      ? plantings
-          .map((planting) => {
-            const range = worksRange(plantingWorks(planting));
-            const end = harvestEnd(plantingWorks(planting));
-            return (
-              `<li><span>作付 ${planting.seq}${planting.crop_name ? `: ${escapeHtml(planting.crop_name)}` : ""}</span>` +
-              `<span>${range ? `${formatDate(range.start)}〜${end ? formatDate(end) : "収穫完了は未定"}` : "日付なし"}</span></li>`
-            );
-          })
-          .join("")
-      : '<li class="empty">作付はまだありません（日程で入れます）</li>';
+    draw(
+      $("bedPlantings"),
+      plantings.length
+        ? plantings
+            .map((planting) => {
+              const range = worksRange(plantingWorks(planting));
+              const end = harvestEnd(plantingWorks(planting));
+              return (
+                `<li><span>作付 ${planting.seq}${planting.crop_name ? `: ${escapeHtml(planting.crop_name)}` : ""}</span>` +
+                `<span>${range ? `${formatDate(range.start)}〜${end ? formatDate(end) : "収穫完了は未定"}` : "日付なし"}</span></li>`
+              );
+            })
+            .join("")
+        : '<li class="empty">作付はまだありません（日程で入れます）</li>'
+    );
   }
   if (kind !== "bed") {
-    $("edgeRows").innerHTML = edgeLengths(points)
-      .map((length, i) => `<tr><td>${i + 1} → ${((i + 1) % points.length) + 1}（${edgeSide(points, i)}）</td><td>${formatLength(length)}</td></tr>`)
-      .join("");
+    draw(
+      $("edgeRows"),
+      edgeLengths(points)
+        .map((length, i) => `<tr><td>${i + 1} → ${((i + 1) % points.length) + 1}（${edgeSide(points, i)}）</td><td>${formatLength(length)}</td></tr>`)
+        .join("")
+    );
     $("deleteVertexBtn").disabled = state.selectedVertex === null || points.length <= 3;
   }
 }
@@ -1776,9 +1783,12 @@ async function removeBlockBeds(blockId) {
 // 圃場の中では、外形と下絵はすべてのプランで共通で、区域・区画・畝と日程をプランごとに持つ
 
 function renderFields() {
-  $("fieldSelect").innerHTML = state.fields
-    .map((field) => `<option value="${field.id}">${escapeHtml(field.name || "（名前なし）")}</option>`)
-    .join("");
+  draw(
+    $("fieldSelect"),
+    state.fields
+      .map((field) => `<option value="${field.id}">${escapeHtml(field.name || "（名前なし）")}</option>`)
+      .join("")
+  );
   $("fieldSelect").value = state.field.id;
 }
 
@@ -1897,9 +1907,12 @@ async function deleteField() {
 function renderPlans() {
   const activeId = state.field.active_plan_id;
   $("schedulePlanName").textContent = state.plan.name;
-  $("planSelect").innerHTML = state.plans
-    .map((plan) => `<option value="${plan.id}">${escapeHtml(plan.name)}${plan.id === activeId ? "（実際に使う）" : ""}</option>`)
-    .join("");
+  draw(
+    $("planSelect"),
+    state.plans
+      .map((plan) => `<option value="${plan.id}">${escapeHtml(plan.name)}${plan.id === activeId ? "（実際に使う）" : ""}</option>`)
+      .join("")
+  );
   $("planSelect").value = state.plan.id;
   const active = state.plans.find((plan) => plan.id === activeId);
   $("activePlanInfo").textContent = active

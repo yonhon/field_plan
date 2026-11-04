@@ -1,16 +1,19 @@
 // お知らせの窓。ブラウザー標準の alert は文を選んでコピーできないので、ページの中の窓で出す。
 // 文はマウスで選べて、「文をコピー」でもコピーできる。入力は、標準の窓のまま。
 // 消す操作の確認も、ページの中の窓で出す（confirmDelete）。
+import { draw } from "./draw.js";
 
 let box = null;
 
 function build() {
   box = document.createElement("dialog");
   box.className = "notice";
-  box.innerHTML =
+  draw(
+    box,
     '<p class="notice-text"></p>' +
     '<div class="row"><button class="primary-btn" data-action="close">OK</button>' +
-    '<button class="text-btn" data-action="copy">文をコピー</button></div>';
+    '<button class="text-btn" data-action="copy">文をコピー</button></div>'
+  );
   box.addEventListener("click", async (event) => {
     const action = event.target.dataset.action;
     if (action === "close") {
@@ -62,10 +65,12 @@ export function confirmDelete(message, name) {
 export function confirmAction({ message, name = "", action, cancel = "キャンセル" }) {
   const dialog = document.createElement("dialog");
   dialog.className = "notice";
-  dialog.innerHTML =
+  draw(
+    dialog,
     '<p class="notice-text"></p><p class="notice-target"></p>' +
     '<div class="row"><button class="text-btn" data-action="cancel"></button>' +
-    '<button class="danger-btn" data-action="delete"></button></div>';
+    '<button class="danger-btn" data-action="delete"></button></div>'
+  );
   dialog.querySelector(".notice-text").textContent = message;
   dialog.querySelector(".notice-target").textContent = name;
   dialog.querySelector(".notice-target").hidden = !name;

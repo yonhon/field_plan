@@ -3,6 +3,7 @@
 // 画面には、すべての圃場の記録を並べる。日ごとに、なぜそうしたかを書くメモを 1 つ持てる（すべての圃場で共通）。
 // アプリそのものの更新（updates.json）も、同じ日の欄に並べる。こちらの番号は A12 のように A を付ける。
 import { localToday } from "./schedule.js";
+import { draw } from "./draw.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -155,47 +156,50 @@ export function renderJournal() {
     .sort()
     .reverse();
   const numbers = new Set([...state.changes.map((entry) => String(entry.no)), ...updates.map((update) => `A${update.no}`)]);
-  $("journalDays").innerHTML = days
-    .map((day) => {
-      const entries = state.changes.filter((entry) => entry.day === day);
-      const body = notes.get(day) || "";
-      const links = references(body)
-        .map((no) => `<button class="chip-btn ref-btn" data-ref="${no}"${numbers.has(no) ? "" : " disabled"}>${no.startsWith("A") ? no : `#${no}`}</button>`)
-        .join("");
-      const rows = entries.length
-        ? entries
-            .map(
-              (entry) =>
-                `<li id="change-${entry.no ?? entry.id}" data-id="${entry.id}">` +
-                `<span class="change-no">${entry.no === null ? "#…" : `#${entry.no}`}</span>` +
-                `<span class="change-time">${clock(entry.at)}</span>` +
-                `<span class="change-plan">${escapeHtml(where(entry))}</span>` +
-                `<span class="change-text">${escapeHtml(changeText(entry))}</span></li>`
-            )
-            .join("")
-        : '<li class="muted">計画の変更はありません</li>';
-      // アプリの更新は、時刻が分からないので、その日の欄の下にまとめて出す
-      const released = updates
-        .filter((update) => update.date === day)
-        .sort((a, b) => b.no - a.no)
-        .map(
-          (update) =>
-            `<li id="change-A${update.no}" class="update-row"><span class="change-no">A${update.no}</span>` +
-            `<span class="change-plan is-app">アプリ</span><span class="change-text"><strong>${escapeHtml(update.title)}</strong>` +
-            `<span class="update-body">${escapeHtml(update.body)}</span>` +
-            `${update.reason ? `<span class="update-body">きっかけ: ${escapeHtml(update.reason)}</span>` : ""}</span></li>`
-        )
-        .join("");
-      return (
-        `<section class="panel journal-day" data-day="${day}"><h2>${dayTitle(day)}</h2>` +
-        `<label>メモ（なぜそうしたか。変更の番号は #41 のように書くと、その行へ飛べます）` +
-        `<textarea data-note="${day}" rows="${Math.min(Math.max(body.split("\n").length, 2), 10)}">${escapeHtml(body)}</textarea></label>` +
-        `${links ? `<div class="row journal-refs"><span class="muted">メモが触れている変更:</span>${links}</div>` : ""}` +
-        `<ul class="change-list">${rows}</ul>` +
-        `${released ? `<h3>アプリの更新</h3><ul class="change-list">${released}</ul>` : ""}</section>`
-      );
-    })
-    .join("");
+  draw(
+    $("journalDays"),
+    days
+      .map((day) => {
+        const entries = state.changes.filter((entry) => entry.day === day);
+        const body = notes.get(day) || "";
+        const links = references(body)
+          .map((no) => `<button class="chip-btn ref-btn" data-ref="${no}"${numbers.has(no) ? "" : " disabled"}>${no.startsWith("A") ? no : `#${no}`}</button>`)
+          .join("");
+        const rows = entries.length
+          ? entries
+              .map(
+                (entry) =>
+                  `<li id="change-${entry.no ?? entry.id}" data-id="${entry.id}">` +
+                  `<span class="change-no">${entry.no === null ? "#…" : `#${entry.no}`}</span>` +
+                  `<span class="change-time">${clock(entry.at)}</span>` +
+                  `<span class="change-plan">${escapeHtml(where(entry))}</span>` +
+                  `<span class="change-text">${escapeHtml(changeText(entry))}</span></li>`
+              )
+              .join("")
+          : '<li class="muted">計画の変更はありません</li>';
+        // アプリの更新は、時刻が分からないので、その日の欄の下にまとめて出す
+        const released = updates
+          .filter((update) => update.date === day)
+          .sort((a, b) => b.no - a.no)
+          .map(
+            (update) =>
+              `<li id="change-A${update.no}" class="update-row"><span class="change-no">A${update.no}</span>` +
+              `<span class="change-plan is-app">アプリ</span><span class="change-text"><strong>${escapeHtml(update.title)}</strong>` +
+              `<span class="update-body">${escapeHtml(update.body)}</span>` +
+              `${update.reason ? `<span class="update-body">きっかけ: ${escapeHtml(update.reason)}</span>` : ""}</span></li>`
+          )
+          .join("");
+        return (
+          `<section class="panel journal-day" data-day="${day}"><h2>${dayTitle(day)}</h2>` +
+          `<label>メモ（なぜそうしたか。変更の番号は #41 のように書くと、その行へ飛べます）` +
+          `<textarea data-note="${day}" rows="${Math.min(Math.max(body.split("\n").length, 2), 10)}">${escapeHtml(body)}</textarea></label>` +
+          `${links ? `<div class="row journal-refs"><span class="muted">メモが触れている変更:</span>${links}</div>` : ""}` +
+          `<ul class="change-list">${rows}</ul>` +
+          `${released ? `<h3>アプリの更新</h3><ul class="change-list">${released}</ul>` : ""}</section>`
+        );
+      })
+      .join("")
+  );
 }
 
 export async function initJournal(context) {
