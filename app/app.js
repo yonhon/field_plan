@@ -36,7 +36,7 @@ import { initCrops, renderCrops } from "./crops-view.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
-import { initLogs, renderLogs } from "./log-view.js";
+import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
@@ -2631,8 +2631,9 @@ document.querySelectorAll(".tab-btn").forEach((button) => {
 });
 
 // ブラウザーの戻る・進み。URL の画面を出す（アプリを開く前の画面では何もしない）
+// 実績・計画の入力の窓が開いているときは、窓だけを閉じる
 window.addEventListener("popstate", () => {
-  if ($("viewTabs").hidden) {
+  if (handleLogDialogPop() || $("viewTabs").hidden) {
     return;
   }
   openRoute(routeFromHash() || { view: "map" }, "none");

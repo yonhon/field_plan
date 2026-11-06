@@ -1617,6 +1617,7 @@ body.plan-busy #scheduleView {
 
 .log-head h2 {
   margin: 0;
+  outline: none; /* 開いたときに入力の位置を置くだけ。枠は出さない */
   font-family: "Zen Maru Gothic", "Zen Kaku Gothic New", sans-serif;
   font-size: 17px;
 }

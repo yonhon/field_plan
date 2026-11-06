@@ -187,3 +187,37 @@ test("農薬名の後ろのアイコン: 実績の一覧、検索の結果、選
   await page.waitFor(`Boolean(document.querySelector(${JSON.stringify(PICKED)}))`, "選んだ農薬のアイコン");
   assert.deepEqual(page.errors, []);
 });
+
+// iPad の Chrome で、戻るを押すとページを離れ（新しいタブへ戻る）、画面を切り替えたあとでは窓が出たままになっていた。
+// 窓を開いたら履歴を 1 つ積み、戻るでは窓だけを閉じる。ボタンで閉じたら、積んだ履歴を取り消す
+test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴が元に戻る", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="schedule"]');
+  const length = await page.run("history.length");
+  const isOpen = 'Boolean(document.querySelector("dialog.log-dialog[open]"))';
+
+  // 開いたら、入力の位置は見出し（閉じるボタンではない）
+  await page.click("#logAddBtn");
+  await page.waitFor(isOpen, "窓が開く");
+  assert.equal(await page.run("document.activeElement.id"), "logDialogTitle");
+  assert.equal(await page.run("history.length"), length + 1);
+
+  // 戻る: 窓が閉じ、画面は日程のまま
+  await page.run("history.back()");
+  await page.waitFor(`!${isOpen}`, "戻るで窓が閉じる");
+  await page.run("new Promise((resolve) => setTimeout(resolve, 200))");
+  assert.equal(await page.run("location.hash"), "#schedule");
+  assert.equal(await page.run('document.querySelector(".tab-btn.is-active").dataset.view'), "schedule");
+
+  // もう一度開いて、閉じるボタンで閉じる: 積んだ履歴を取り消し、そのあとの戻るは前の画面（圃場図）へ
+  await page.click("#logAddBtn");
+  await page.waitFor(isOpen, "窓がもう一度開く");
+  await page.click('dialog.log-dialog .log-head [data-act="close"]');
+  await page.waitFor(`!${isOpen}`, "閉じるで窓が閉じる");
+  await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
+  await page.run("new Promise((resolve) => setTimeout(resolve, 200))");
+  assert.equal(await page.run('document.querySelector(".tab-btn.is-active").dataset.view'), "schedule");
+  await page.run("history.back()");
+  await page.waitFor(`document.querySelector(".tab-btn.is-active").dataset.view === "map"`, "戻るで圃場図へ");
+  assert.deepEqual(page.errors, []);
+});

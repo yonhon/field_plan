@@ -24,6 +24,10 @@ let showAll = false;
 let dialog = null;
 let draft = null; // 窓で入れている記録
 let data = null; // 実際に使うプランの区画・畝・作付・作業
+// 窓を開くと、ブラウザーの履歴に窓のぶんを 1 つ積む。戻るを押すと、ページを離れたり裏の画面が変わったりせず、窓だけが閉じる。
+// inHistory: 積んだ履歴がまだ残っているか。skipPop: 窓を閉じて自分で戻した分の popstate を、画面の切り替えに渡さない
+let inHistory = false;
+let skipPop = false;
 
 const state = () => ctx.state;
 const allTypes = () => state().allWorkTypes || state().workTypes;
@@ -339,6 +343,12 @@ export async function openLogEditor(log = null, preset = {}) {
   }
   renderDialog();
   dialog.showModal();
+  // 開くと、ブラウザーは最初のボタン（閉じる）に入力の位置を置き、iPad の Chrome ではそこに枠が出る。見出しに置き直す
+  dialog.querySelector("#logDialogTitle")?.focus({ preventScroll: true });
+  if (!inHistory) {
+    history.pushState({ ...history.state, fieldPlanDialog: true }, "", location.href);
+    inHistory = true;
+  }
   updateTotals();
   refreshUses(); // 直す記録の農薬は、使用基準を読み込んでから、使い方と指摘を出す
 }
@@ -409,7 +419,28 @@ function build() {
     draft = null;
     // 次に開いたとき、前に開いていたときの位置へ戻さないよう、中身を空にする
     dialog.replaceChildren();
+    // ボタンや Esc で閉じたときは、開いたときに積んだ履歴を取り消す（戻るで閉じたときは、もう取り消されている）
+    if (inHistory) {
+      inHistory = false;
+      skipPop = true;
+      history.back();
+    }
   });
+}
+
+// ブラウザーの戻る・進む（popstate）を、窓で受け持ったら true。true のときは、画面を切り替えない。
+// 窓を開いているときに戻ると、窓を閉じる。入れかけの内容は、Esc で閉じたときと同じく、確かめずに捨てる
+export function handleLogDialogPop() {
+  if (skipPop) {
+    skipPop = false;
+    return true;
+  }
+  if (inHistory) {
+    inHistory = false;
+    dialog?.close();
+    return true;
+  }
+  return false;
 }
 
 function renderDialog() {
@@ -419,7 +450,7 @@ function renderDialog() {
   const plan = activePlan();
   draw(
     dialog,
-    `<div class="log-head"><h2 id="logDialogTitle">${dialogTitle()}</h2>` +
+    `<div class="log-head"><h2 id="logDialogTitle" tabindex="-1">${dialogTitle()}</h2>` +
     `<button type="button" class="text-btn" data-act="close" aria-label="閉じる">閉じる</button></div>` +
     `<div class="log-body">` +
     (draft.switchable
