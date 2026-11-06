@@ -2294,6 +2294,54 @@ body.plan-busy #scheduleView {
   flex: none;
 }
 
+.rac-icons .rac-icon {
+  cursor: help;
+}
+
+/* アイコンの説明（app/pesticide.js）。Popover でいちばん手前に出し、位置はアイコンに合わせて JS で決める */
+.rac-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 20px rgba(19, 38, 42, 0.18);
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+  white-space: normal;
+}
+
+.rac-popover p {
+  margin: 4px 0 0;
+}
+
+.rac-pop-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.rac-pop-head .rac-icon {
+  height: 1.8em;
+}
+
+.rac-pop-kind,
+.rac-pop-label,
+.rac-pop-ingredients {
+  color: var(--muted);
+}
+
+.rac-pop-kind {
+  font-size: 12px;
+}
+
 /* 品目（区画）ごとの、作物名と使い方の選択 */
 .famic-choices {
   display: grid;

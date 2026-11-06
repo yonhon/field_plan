@@ -4,7 +4,7 @@
 // 農薬の情報の扱いには責任が伴うので、ほかの人に使ってもらうときは、ここを外すこと。
 import { defaultDilution, formatAmount, inputText, parseUsage, pesticideCounts, previousChoice, sprayWarnings, standardChoice, usageRange, usageWarnings } from "./logs.js";
 import { draw } from "./draw.js";
-import { UNKNOWN_PRODUCT, codesText, iconsHtml, productCodes } from "./rac.js";
+import { UNKNOWN_PRODUCT, codesText, describeHtml, iconsHtml, productCodes } from "./rac.js";
 
 const escapeHtml = (text) =>
   String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -547,6 +547,140 @@ export function warnings({ inputs, groups, date, sprayOf, logs, excludeLogId, ha
   return out;
 }
 
+// ---- アイコンの説明 ----
+// アイコンを指すと説明を出し、離れると消す。クリック（スマホではタップ）すると出したままにし、外をクリックすると消す。
+// アイコンは、検索の結果のボタンや、実績の一覧の行の中にある。アイコンのクリックは、画面全体で先に受け、
+// ボタンや行の処理（農薬を選ぶ、実績の窓を開く）には渡さない。
+// 説明の箱は 1 つだけで、描き直す一覧の外に置く。入力の窓（モーダル）を開いているときは、窓の外が操作できなくなるので、
+// 窓の中に移してから出す。Popover の仕組みで、いちばん手前に出す
+
+const ICON = "svg.rac-icon[data-rac]";
+let pop = null; // { el, icon, pinned }
+
+function iconOf(target) {
+  const icon = target instanceof Element ? target.closest(ICON) : null;
+  // 説明の箱の中の見出しのアイコンは除く
+  return icon && !icon.closest(".rac-popover") ? icon : null;
+}
+
+function popoverBox() {
+  if (!pop) {
+    const el = document.createElement("div");
+    el.className = "rac-popover";
+    el.id = "racPopover";
+    el.setAttribute("popover", "manual");
+    el.setAttribute("role", "tooltip");
+    document.body.append(el);
+    pop = { el, icon: null, pinned: false };
+  }
+  return pop;
+}
+
+function hidePopover() {
+  if (pop?.el.matches(":popover-open")) {
+    pop.el.hidePopover();
+  }
+  if (pop) {
+    pop.icon = null;
+    pop.pinned = false;
+  }
+}
+
+// アイコンの下に出す。下に入らなければ上に出す。左右は画面からはみ出さないようにする
+function place(el, icon) {
+  const rect = icon.getBoundingClientRect();
+  const box = el.getBoundingClientRect();
+  const gap = 6;
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - box.width - 8));
+  const below = rect.bottom + gap;
+  const top = below + box.height <= window.innerHeight - 8 ? below : Math.max(8, rect.top - gap - box.height);
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+}
+
+function showPopover(icon, pinned) {
+  const box = popoverBox();
+  const [committee, code] = icon.dataset.rac.split(":");
+  const ingredients = icon.dataset.ingredients ? icon.dataset.ingredients.split("・") : [];
+  const host = icon.closest("dialog[open]") || document.body;
+  if (box.el.parentElement !== host) {
+    hidePopover();
+    host.append(box.el);
+  }
+  draw(box.el, describeHtml(committee, code, ingredients));
+  if (!box.el.matches(":popover-open")) {
+    box.el.showPopover();
+  }
+  place(box.el, icon);
+  Object.assign(box, { icon, pinned });
+}
+
+let popoverReady = false;
+
+function initRacPopover() {
+  if (popoverReady || typeof document === "undefined") {
+    return;
+  }
+  popoverReady = true;
+  document.addEventListener("pointerover", (event) => {
+    const icon = event.pointerType === "mouse" && iconOf(event.target);
+    if (icon && !pop?.pinned) {
+      showPopover(icon, false);
+    }
+  });
+  document.addEventListener("pointerout", (event) => {
+    const icon = event.pointerType === "mouse" && iconOf(event.target);
+    if (icon && pop?.icon === icon && !pop.pinned && !icon.contains(event.relatedTarget)) {
+      hidePopover();
+    }
+  });
+  // 先に受ける（capture）。アイコンなら、下のボタンや行には渡さない
+  document.addEventListener(
+    "click",
+    (event) => {
+      const icon = iconOf(event.target);
+      if (icon) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (pop?.pinned && pop.icon === icon) {
+          hidePopover();
+        } else {
+          showPopover(icon, true);
+        }
+      } else if (pop?.icon && !pop.el.contains(event.target)) {
+        hidePopover();
+      }
+    },
+    true
+  );
+  // Esc は説明だけを閉じる。入力の窓（モーダル）には渡さない（窓が閉じて、入れかけの内容が消えるため）
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key === "Escape" && pop?.icon && pop.el.matches(":popover-open")) {
+        event.preventDefault();
+        event.stopPropagation();
+        hidePopover();
+      }
+    },
+    true
+  );
+  // スクロールしたら、出したままのものはアイコンに付いていく。アイコンが描き直しで消えていれば閉じる
+  const follow = () => {
+    if (!pop?.icon) {
+      return;
+    }
+    if (!pop.pinned || !pop.icon.isConnected) {
+      hidePopover();
+    } else {
+      place(pop.el, pop.icon);
+    }
+  };
+  document.addEventListener("scroll", follow, true);
+  window.addEventListener("resize", follow);
+}
+
 export function initPesticide(context) {
   ctx = context;
+  initRacPopover();
 }

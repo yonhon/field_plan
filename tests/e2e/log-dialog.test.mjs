@@ -135,6 +135,28 @@ test("農薬名の後ろのアイコン: 実績の一覧、検索の結果、選
   assert.match(await page.run(`document.querySelector(${JSON.stringify(LOGGED)}).closest(".pesticide-name").textContent`), /^試験乳剤/);
   assert.equal(await page.run(`document.querySelectorAll('#logList svg[data-rac="IRAC:-"]').length`), 1);
 
+  // 指すと説明が出て、離れると消える
+  const POP = "#racPopover";
+  const OPEN = `document.querySelector("${POP}")?.matches(":popover-open")`;
+  const pointer = (type, selector) =>
+    page.run(`document.querySelector(${JSON.stringify(selector)}).dispatchEvent(new PointerEvent("${type}", { pointerType: "mouse", bubbles: true }))`);
+  await pointer("pointerover", LOGGED);
+  await page.waitFor(OPEN, "指したときの説明");
+  const text = await page.run(`document.querySelector("${POP}").textContent`);
+  assert.match(text, /IRAC 4A/);
+  assert.match(text, /主要グループと一次作用部位：ニコチン性アセチルコリン受容体（nAChR）競合的モジュレーター（神経作用）/);
+  assert.match(text, /有効成分：試験成分/);
+  await pointer("pointerout", LOGGED);
+  await page.waitFor(`!(${OPEN})`, "離れたら消える");
+  // クリックすると出したままになり、実績の窓は開かない。外をクリックすると消える
+  await page.click(LOGGED);
+  await page.waitFor(OPEN, "クリックしたときの説明");
+  await pointer("pointerout", LOGGED);
+  assert.equal(await page.run(OPEN), true, "クリックしたものは、離れても消えない");
+  assert.equal(await page.run(`Boolean(document.querySelector("dialog.log-dialog[open]"))`), false, "実績の窓は開かない");
+  await page.click("#logTitle");
+  await page.waitFor(`!(${OPEN})`, "外をクリックすると消える");
+
   await page.click("#logAddBtn");
   await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
   await page.click('dialog.log-dialog [data-act="type"][data-code="spray"]');
@@ -149,7 +171,16 @@ test("農薬名の後ろのアイコン: 実績の一覧、検索の結果、選
   const RESULT = 'dialog.log-dialog [data-results="0"] [data-act="famic-pick"]';
   const ICON = `${RESULT} svg[data-rac="IRAC:4A"]`;
   await page.waitFor(`Boolean(document.querySelector(${JSON.stringify(ICON)}))`, "検索の結果のアイコン");
-  assert.match(await page.run(`document.querySelector(${JSON.stringify(`${ICON} title`)}).textContent`), /IRAC 4A（試験成分）/);
+  assert.match(await page.run(`document.querySelector(${JSON.stringify(ICON)}).getAttribute("aria-label")`), /IRAC 4A（試験成分）/);
+  // 窓の中でアイコンを押すと、説明が窓の中に出る。農薬は選ばない
+  await page.click(ICON);
+  await page.waitFor(OPEN, "窓の中の説明");
+  assert.equal(await page.run(`Boolean(document.querySelector("dialog.log-dialog #racPopover"))`), true);
+  assert.equal(await page.run(`Boolean(document.querySelector(".famic-picked"))`), false);
+  // Esc は説明だけを閉じ、入力の窓は閉じない（入れかけの内容を捨てない）
+  await page.press("Escape", "Escape", 27);
+  await page.waitFor(`!(${OPEN})`, "Esc で説明を閉じる");
+  assert.equal(await page.run(`Boolean(document.querySelector("dialog.log-dialog[open]"))`), true, "入力の窓は開いたまま");
   // 選んだ農薬の行
   await page.click(RESULT);
   const PICKED = 'dialog.log-dialog .famic-picked svg[data-rac="IRAC:4A"]';
