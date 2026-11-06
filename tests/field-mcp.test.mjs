@@ -366,6 +366,25 @@ test("get_pesticide_usage: 作付ごとの使用回数と上限", async () => {
   assert.match((await call("get_pesticide_usage", { field: "別の圃場" })).text, /実際に使うプランが決まっていません/);
 });
 
+test("農薬の作用機構分類（RAC コード）: 記録の農薬と、使用回数の本剤と成分", async () => {
+  const data = {
+    ...DATA,
+    rac: {
+      codes: [{ ingredient: "成分A", committee: "IRAC", code: "4A" }, { ingredient: "成分B", committee: "FRAC", code: "3" }],
+      products: [{ reg_no: 12345, ord: 2, ingredient: "成分B", use_type: "殺虫殺菌剤" }, { reg_no: 12345, ord: 1, ingredient: "成分A", use_type: "殺虫殺菌剤" }],
+    },
+  };
+  const { inField } = setup({ data });
+  const spray = (await inField("get_records", { work: "防除" })).data.records[0];
+  assert.deepEqual(spray.inputs[0].rac, ["IRAC 4A", "FRAC 3"]);
+  const negi = (await inField("get_pesticide_usage")).data.plantings[0];
+  assert.deepEqual(negi.products[0].rac, ["IRAC 4A", "FRAC 3"]);
+  assert.deepEqual(negi.ingredients[0].rac, ["IRAC 4A"]);
+  assert.match((await inField("get_pesticide_usage")).data.note, /rac は作用機構分類/);
+  // FAMIC の部分を外したとき（data.rac がない）は返さない
+  assert.equal((await setup().inField("get_records", { work: "防除" })).data.records[0].inputs[0].rac, undefined);
+});
+
 test("道具の名前が違う、読み込みに失敗した", async () => {
   const { post } = setup();
   const unknown = await (await post({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "nope", arguments: {} } })).json();

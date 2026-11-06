@@ -245,6 +245,10 @@ export function createSupabaseStore(client, options) {
       const rows = check(await client.from("famic_imports").select("*").order("id", { ascending: false }).limit(1));
       return rows[0] || null;
     },
+    // 農薬の作用機構分類（RAC コード）。有効成分ごとの行（500 行あまり）
+    async loadRacCodes() {
+      return allRows(() => client.from("rac_codes").select("ingredient, committee, code").order("ingredient").order("committee"));
+    },
     // ---- 気象 ----
     async saveFieldWeather(fieldId, { base_lat, base_lng, weather }) {
       check(await client.from("fields").update({ base_lat, base_lng, weather }).eq("id", fieldId));
@@ -571,6 +575,10 @@ export function createLocalStore({ strict = false } = {}) {
     async loadUses(regNo) {
       const { uses = [] } = read().famic || {};
       return uses.filter((row) => row.reg_no === Number(regNo));
+    },
+    async loadRacCodes() {
+      const { rac = [] } = read().famic || {};
+      return rac;
     },
     async saveFieldWeather(fieldId, { base_lat, base_lng, weather }) {
       update((data) => {

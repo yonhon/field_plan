@@ -43,6 +43,7 @@ const seed = () => ({
       timing_text: "収穫7日前まで",
       times_text: "3回以内",
     })),
+    rac: [{ ingredient: "試験成分", committee: "IRAC", code: "4A" }],
   },
 });
 
@@ -112,5 +113,46 @@ test("防除の入力: 農薬・作物名・使い方を選んでも、窓の中
   await page.waitFor(`document.querySelector(${JSON.stringify(USE)}).value === "アブラムシ類|散布"`, "使い方を選んだ");
   near(await topOf(USE), useTop, "使い方を選んだあとの高さ");
   assert.equal(await page.run(`document.activeElement === document.querySelector(${JSON.stringify(USE)})`), true);
+  assert.deepEqual(page.errors, []);
+});
+
+// 農薬名の後ろには、作用機構分類（RAC コード）のアイコンを付ける
+test("農薬名の後ろのアイコン: 実績の一覧、検索の結果、選んだ農薬", options, async () => {
+  const data = seed();
+  data.workLogs = [{
+    id: "log1", field_id: "f1", date: "2026-01-05", end_date: null, work_type: "spray", finishes: false, spec: {}, note: "", created_at: AT,
+    inputs: [
+      { id: "i1", log_id: "log1", seq: 0, kind: "pesticide", name: "試験乳剤", reg_no: "90001", dilution: 1000, method: "散布", amount: null, unit: "mL" },
+      { id: "i2", log_id: "log1", seq: 1, kind: "pesticide", name: "手で入れた農薬", reg_no: null, dilution: null, method: "散布", amount: null, unit: "mL" },
+    ],
+    targets: [{ id: "t1", log_id: "log1", planting_id: "pl1", bed_id: "bed1", block_id: null, work_id: null, label: "", crop_name: "試験菜", area_m2: null, spray_l: null }],
+  }];
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="schedule"]');
+  // 実績の一覧: 登録番号のある農薬は、その分類。名前だけで入れた農薬は「−」
+  const LOGGED = '#logList svg[data-rac="IRAC:4A"]';
+  await page.waitFor(`Boolean(document.querySelector(${JSON.stringify(LOGGED)}))`, "実績の一覧のアイコン");
+  assert.match(await page.run(`document.querySelector(${JSON.stringify(LOGGED)}).closest(".pesticide-name").textContent`), /^試験乳剤/);
+  assert.equal(await page.run(`document.querySelectorAll('#logList svg[data-rac="IRAC:-"]').length`), 1);
+
+  await page.click("#logAddBtn");
+  await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
+  await page.click('dialog.log-dialog [data-act="type"][data-code="spray"]');
+  await page.click('dialog.log-dialog [data-act="group"]');
+  const NAME = 'dialog.log-dialog [data-in="0"][data-k="name"]';
+  await page.run(`(() => {
+    const el = document.querySelector(${JSON.stringify(NAME)});
+    el.value = "試験";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  // 検索の結果
+  const RESULT = 'dialog.log-dialog [data-results="0"] [data-act="famic-pick"]';
+  const ICON = `${RESULT} svg[data-rac="IRAC:4A"]`;
+  await page.waitFor(`Boolean(document.querySelector(${JSON.stringify(ICON)}))`, "検索の結果のアイコン");
+  assert.match(await page.run(`document.querySelector(${JSON.stringify(`${ICON} title`)}).textContent`), /IRAC 4A（試験成分）/);
+  // 選んだ農薬の行
+  await page.click(RESULT);
+  const PICKED = 'dialog.log-dialog .famic-picked svg[data-rac="IRAC:4A"]';
+  await page.waitFor(`Boolean(document.querySelector(${JSON.stringify(PICKED)}))`, "選んだ農薬のアイコン");
   assert.deepEqual(page.errors, []);
 });

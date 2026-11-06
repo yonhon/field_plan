@@ -516,6 +516,65 @@ begin
 end;
 $$;
 
+-- ---- 農薬の作用機構分類（RAC コード） ----
+-- 有効成分ごとの IRAC（殺虫剤）、FRAC（殺菌剤）、HRAC（除草剤）のコード。農薬名の後ろのアイコンに使う。
+-- クロップライフジャパンの「RACコード検索表」から、scripts/import_rac.py が丸ごと入れ替える。
+-- 有効成分の名前は famic_products.ingredient と同じ形（NFKC）で、名前で結ぶ。FAMIC の部分（4.7）と一緒に切り離す
+
+-- 取り込んだ版
+create table if not exists field.rac_imports (
+  id bigint generated always as identity primary key,
+  edition text not null,               -- 表の版（例: 2025年6月版）
+  sha256 text not null,                -- 取ってきたファイルと、手で足した分のハッシュ。同じなら取り込み直さない
+  imported_at timestamptz not null default now(),
+  codes int not null
+);
+
+-- 有効成分ごとのコード。1 つの成分が、殺虫と殺菌のように複数の委員会のコードを持つことがある。
+-- committee が空なのは、どの委員会の分類か決まらない成分（植物成長調整剤など。code は '-'）
+create table if not exists field.rac_codes (
+  ingredient text not null,
+  committee text not null check (committee in ('IRAC', 'FRAC', 'HRAC', '')),
+  code text not null,                  -- '4A'、'M5' など。'-' は分類の対象外（天敵、展着剤など）
+  source text not null check (source in ('jcpa', 'manual')),  -- manual は、表にない成分を IRAC などの原表で確かめて足したもの
+  primary key (ingredient, committee)
+);
+
+-- コードの表を入れ替える（取り込み係）。codes は [{ ingredient, committee, code, source }]
+create or replace function field.rac_replace(edition text, sha256 text, codes jsonb) returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if not field.is_importer() then
+    raise exception '取り込み係だけが呼べます';
+  end if;
+  truncate field.rac_codes;
+  insert into field.rac_codes (ingredient, committee, code, source)
+  select x.ingredient, x.committee, x.code, x.source
+  from jsonb_to_recordset(codes) as x (ingredient text, committee text, code text, source text);
+  insert into field.rac_imports (edition, sha256, codes) values (edition, sha256, jsonb_array_length(codes));
+end;
+$$;
+
+-- FAMIC の有効成分のうち、コードの表にないもの。取り込みのたびに知らせ、原表で確かめて足す。
+-- 用途が「その他」の製品にしか入っていない成分（展着剤、フェロモン剤など）は、表が対象にしていないので除く
+create or replace function field.rac_unmatched() returns table (ingredient text, use_types text, products int)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not (field.is_importer() or field.is_owner()) then
+    raise exception '読めません';
+  end if;
+  return query
+  select p.ingredient, string_agg(distinct p.use_type, '・'), count(distinct p.reg_no)::int
+  from field.famic_products p
+  where not exists (select 1 from field.rac_codes r where r.ingredient = p.ingredient)
+  group by p.ingredient
+  having bool_or(p.use_type <> 'その他')
+  order by p.ingredient;
+end;
+$$;
+
 -- ---- 気象 ----
 
 -- 圃場の気象の設定。{ temp_station, rain_station（アメダスの観測所の番号）, office（府県予報区）, area（一次細分区域）,
@@ -631,6 +690,10 @@ revoke all on function field.famic_begin() from public, anon;
 grant execute on function field.famic_begin() to authenticated;
 revoke all on function field.famic_finish(text[], int, int) from public, anon;
 grant execute on function field.famic_finish(text[], int, int) to authenticated;
+revoke all on function field.rac_replace(text, text, jsonb) from public, anon;
+grant execute on function field.rac_replace(text, text, jsonb) to authenticated;
+revoke all on function field.rac_unmatched() from public, anon;
+grant execute on function field.rac_unmatched() to authenticated;
 
 alter table field.owners enable row level security;
 alter table field.mcp_access_log enable row level security;
@@ -658,7 +721,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['famic_imports', 'famic_products', 'famic_uses', 'app_compat'] loop
+  foreach t in array array['famic_imports', 'famic_products', 'famic_uses', 'rac_imports', 'rac_codes', 'app_compat'] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists owner_read on field.%I', t);
     execute format('create policy owner_read on field.%I for select to authenticated using (field.is_owner())', t);
@@ -670,6 +733,8 @@ end $$;
 -- 気象の値は読み書きできる
 drop policy if exists importer_read on field.famic_imports;
 create policy importer_read on field.famic_imports for select to authenticated using (field.is_importer());
+drop policy if exists importer_read on field.rac_imports;
+create policy importer_read on field.rac_imports for select to authenticated using (field.is_importer());
 
 do $$
 declare

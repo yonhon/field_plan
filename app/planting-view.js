@@ -4,8 +4,8 @@ import { plantingNumbers } from "./crops.js";
 import { confirmAction, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { openLogEditor, openPlanEditor, uncancelWork } from "./log-view.js";
-import { bedAreas, compressedAxis, dayGap, firstHarvestDay, inputText, logEnd, plantingStart, shiftAfterActual, specDiff, specText, usageTable } from "./logs.js";
-import { NOTICE_URL, famicEnabled } from "./pesticide.js";
+import { bedAreas, compressedAxis, dayGap, firstHarvestDay, logEnd, plantingStart, shiftAfterActual, specDiff, specText, usageTable } from "./logs.js";
+import { NOTICE_URL, famicEnabled, ingredientIconsHtml, inputHtml, nameHtml } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, isManagement, localToday, workName } from "./schedule.js";
 import { ICON_LABELS, accumulate, addTwoWeek, fetchAreas, fetchStations, parseForecast, weatherIcon } from "./weather.js";
 import { officeForecast, weatherSettings } from "./weather-view.js";
@@ -262,11 +262,11 @@ function usageHtml(c) {
   const rows = [
     ...table.ingredients.map(
       (item) =>
-        `<tr><td>${escapeHtml(item.name)}</td><td class="num${over(item) ? " usage-over" : ""}">${item.count}</td><td class="num">${item.max ?? "-"}</td></tr>`
+        `<tr><td>${escapeHtml(item.name)}${ingredientIconsHtml(item.name)}</td><td class="num${over(item) ? " usage-over" : ""}">${item.count}</td><td class="num">${item.max ?? "-"}</td></tr>`
     ),
     ...table.products.map(
       (item) =>
-        `<tr class="usage-product"><td>本剤 ${escapeHtml(item.name)}</td><td class="num${over(item) ? " usage-over" : ""}">${item.count}</td><td class="num">${item.max ?? "-"}</td></tr>`
+        `<tr class="usage-product"><td>本剤 ${nameHtml(item.name, item.reg_no)}</td><td class="num${over(item) ? " usage-over" : ""}">${item.count}</td><td class="num">${item.max ?? "-"}</td></tr>`
     ),
   ].join("");
   const notes = [
@@ -596,8 +596,9 @@ function tableHtml(c, mode, actuals, logs) {
 const typeCell = (type, tag, spec) =>
   `<td><span class="swatch" style="background:${WORK_COLORS[type] || "#888"}"></span><strong>${escapeHtml(workName(anyTypeLabel(type), spec))}</strong>${tag ? `<br><span class="muted">${escapeHtml(tag)}</span>` : ""}</td>`;
 
+// 実績の中身の行（HTML）。農薬は名前の後ろにアイコンを付ける
 function logLines(log) {
-  return [specText(log.work_type, log.spec), ...(log.inputs || []).map(inputText), log.note].filter(Boolean);
+  return [escapeHtml(specText(log.work_type, log.spec)), ...(log.inputs || []).map(inputHtml), escapeHtml(log.note)].filter(Boolean);
 }
 
 function logLink(log) {
@@ -625,7 +626,7 @@ function workRow(c, { work, linked, actual }, mode, today) {
       actualCell =
         "<td>" +
         linked
-          .map((log) => `${logLink(log)}${logLines(log).map((line) => `<br><span class="detail-line">${escapeHtml(line)}</span>`).join("")}`)
+          .map((log) => `${logLink(log)}${logLines(log).map((line) => `<br><span class="detail-line">${line}</span>`).join("")}`)
           .join("<br>") +
         (actual && !actual.end ? '<br><span class="log-going">作業中</span>' : "") +
         "</td>";
@@ -642,7 +643,7 @@ function workRow(c, { work, linked, actual }, mode, today) {
 function logRow(log, mode) {
   const showPlan = mode !== "act";
   const lines = logLines(log)
-    .map((line) => `<br><span class="detail-line">${escapeHtml(line)}</span>`)
+    .map((line) => `<br><span class="detail-line">${line}</span>`)
     .join("");
   return `<tr>${typeCell(log.work_type, "計画にない実績", log.spec)}${showPlan ? '<td class="muted">－</td>' : ""}<td>${logLink(log)}${lines}</td>${mode === "both" ? "<td></td>" : ""}</tr>`;
 }

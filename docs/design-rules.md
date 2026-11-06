@@ -13,6 +13,12 @@
 | `--line` | #c8d8d7 | 枠と区切りの線 |
 | `--bg` / `--surface` | #f7f6f1 / #ffffff | 画面の地と、欄（パネル）の地 |
 
+## 農薬名
+
+- **農薬名を出すところでは、名前の後ろに必ず作用機構分類（RAC コード）のアイコンを付ける。** `app/pesticide.js` の `nameHtml`（実績の資材の行は `inputHtml`）を通して出す。名前を `escapeHtml` だけで出さない。`tests/rac.test.mjs` が確かめる。
+- 文字しか出せない所（確認の窓など）は、`nameText` で「（IRAC 4A）」と書き添える。
+- 形と色は `app/rac.js` にまとめてある（`docs/actuals-plan.md` の 4.9）。
+
 ## リンク
 
 - **下線は付けない。**

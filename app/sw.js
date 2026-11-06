@@ -26,6 +26,7 @@ const FILES = [
   "log-view.js",
   "planting-view.js",
   "pesticide.js",
+  "rac.js",
   "weather.js",
   "weather-view.js",
   "prefs.js",

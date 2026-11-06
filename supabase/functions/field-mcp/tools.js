@@ -4,6 +4,7 @@
 import { plantingNumbers, summarize, cropLabel } from "./lib/crops.js";
 import { polygonArea, rectSize } from "./lib/geometry.js";
 import { firstHarvestDay, inputText, logEnd, specText, usageTable } from "./lib/logs.js";
+import { productCodes } from "./lib/rac.js";
 import { harvestEnd, isManagement, planProblems, workName, worksRange } from "./lib/schedule.js";
 
 class ToolInputError extends Error {}
@@ -83,6 +84,36 @@ function inField(data, name) {
     plans: data.plans.filter((plan) => plan.field_id === field.id),
     changes: data.changes.filter((entry) => entry.field_id === field.id),
     workLogs: (data.workLogs || []).filter((log) => log.field_id === field.id),
+  };
+}
+
+// 農薬の作用機構分類（RAC コード）。data.rac = { codes: [{ ingredient, committee, code }], products: [{ reg_no, ord, ingredient, use_type }] }。
+// 画面のアイコンと同じ部品（lib/rac.js）で決める。FAMIC の部分を外したときは data.rac がなく、何も返さない
+function racOf(data) {
+  if (!data.rac) {
+    return { product: () => null, ingredient: () => null };
+  }
+  const codes = new Map();
+  for (const row of data.rac.codes) {
+    codes.set(row.ingredient, [...(codes.get(row.ingredient) || []), { committee: row.committee, code: row.code }]);
+  }
+  const products = new Map();
+  for (const row of [...data.rac.products].sort((a, b) => a.ord - b.ord)) {
+    const item = products.get(String(row.reg_no)) || { names: [], use_type: row.use_type };
+    item.names.push(row.ingredient);
+    products.set(String(row.reg_no), item);
+  }
+  const labels = (list) => list.map((item) => (item.code === "-" ? "分類なし" : item.code === "?" ? "分類不明" : `${item.committee} ${item.code}`));
+  return {
+    // 登録番号のない農薬（名前だけで入れたもの）は null
+    product: (regNo) => {
+      if (!regNo) {
+        return null;
+      }
+      const item = products.get(String(regNo));
+      return item ? labels(productCodes(item.names, item.use_type, codes)) : ["分類不明"];
+    },
+    ingredient: (name) => labels(productCodes([name], "", codes)),
   };
 }
 
@@ -415,6 +446,7 @@ export const TOOLS = [
       const active = activePlanOf(data);
       const part = active ? scope(data, active) : null;
       const typeLabel = (code) => data.workTypes.find((type) => type.code === code)?.label || code;
+      const rac = racOf(all);
       const records = data.workLogs
         // 期間にかかる記録（何日かにわたる記録は、終えた日が from 以降で、始めた日が to 以前）
         .filter((log) => (!from || logEnd(log) >= from) && (!to || log.date <= to) && matchText(workName(typeLabel(log.work_type), log.spec), args.work))
@@ -470,6 +502,7 @@ export const TOOLS = [
                   inputs: inputs.map((input) => ({
                     kind: INPUT_KINDS[input.kind] || input.kind,
                     text: inputText(input),
+                    ...(input.kind === "pesticide" && rac.product(input.reg_no) ? { rac: rac.product(input.reg_no) } : {}),
                     ...(input.amount != null ? { amount: Number(input.amount), unit: input.unit } : {}),
                   })),
                 }
@@ -508,6 +541,7 @@ export const TOOLS = [
       }
       const part = scope(data, active);
       const logs = data.workLogs;
+      const rac = racOf(all);
       const spraysOf = (planting) =>
         logs.filter((log) => (log.inputs || []).some((input) => input.kind === "pesticide") && (log.targets || []).some((target) => target.planting_id === planting.id));
       const plantings = part.plantings
@@ -528,17 +562,24 @@ export const TOOLS = [
               .map((log) => ({ date: log.date, ...(logEnd(log) > log.date ? { end_date: logEnd(log) } : {}), products: (log.inputs || []).filter((input) => input.kind === "pesticide").map(inputText) })),
             ingredients: table.ingredients.map((item) => ({
               name: item.name,
+              ...(rac.ingredient(item.name) ? { rac: rac.ingredient(item.name) } : {}),
               count: item.count,
               max: item.max,
               ...(item.max && item.count >= item.max ? { reached_limit: true } : {}),
               ...(item.condition ? { condition: item.condition } : {}),
             })),
-            products: table.products.map((item) => ({ name: item.name, reg_no: item.reg_no, count: item.count, max: item.max })),
+            products: table.products.map((item) => ({
+              name: item.name,
+              reg_no: item.reg_no,
+              ...(rac.product(item.reg_no) ? { rac: rac.product(item.reg_no) } : {}),
+              count: item.count,
+              max: item.max,
+            })),
             ...(harvestFrom ? { harvest_ok_from: harvestFrom } : {}),
           };
         }),
         note:
-          "回数は、このアプリの防除の記録から数えた回数で、1 件の記録で 1 回です。max は使用基準の上限（記録した時点の写し）で、空は写しがないものです。condition は、上限に条件があるときの基準の文です。harvest_ok_from は、最後の防除と使用時期（収穫の何日前まで）から求めた、基準を満たす最初の収穫日です。登録内容は変わることがあるので、使う前に農薬のラベルで確かめてください。",
+          "回数は、このアプリの防除の記録から数えた回数で、1 件の記録で 1 回です。max は使用基準の上限（記録した時点の写し）で、空は写しがないものです。condition は、上限に条件があるときの基準の文です。rac は作用機構分類（IRAC は殺虫剤、FRAC は殺菌剤、HRAC は除草剤のコード）で、同じコードの農薬を続けて使わない（ローテーション）目安です。「分類なし」は天敵や展着剤など分類の対象外、「分類不明」は分類の表にない成分です。harvest_ok_from は、最後の防除と使用時期（収穫の何日前まで）から求めた、基準を満たす最初の収穫日です。登録内容は変わることがあるので、使う前に農薬のラベルで確かめてください。",
       };
     },
   },

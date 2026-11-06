@@ -2279,6 +2279,21 @@ body.plan-busy #scheduleView {
   margin: 2px 0 6px;
 }
 
+/* 農薬名の後ろの、作用機構分類（RAC コード）のアイコン（app/rac.js）。文字の高さに合わせる */
+.rac-icons {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 0.3em;
+  vertical-align: -0.3em;
+}
+
+.rac-icon {
+  display: block;
+  height: 1.35em;
+  width: auto;
+  flex: none;
+}
+
 /* 品目（区画）ごとの、作物名と使い方の選択 */
 .famic-choices {
   display: grid;

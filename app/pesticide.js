@@ -2,15 +2,16 @@
 // この部分は切り離せるように、1 つのファイルにまとめている。config.js の famic を false にするか、
 // DB を使わないモードでは使わない（防除の記録は、名前と量を文字と数で入れるだけになる）。
 // 農薬の情報の扱いには責任が伴うので、ほかの人に使ってもらうときは、ここを外すこと。
-import { defaultDilution, formatAmount, parseUsage, pesticideCounts, previousChoice, sprayWarnings, standardChoice, usageRange, usageWarnings } from "./logs.js";
+import { defaultDilution, formatAmount, inputText, parseUsage, pesticideCounts, previousChoice, sprayWarnings, standardChoice, usageRange, usageWarnings } from "./logs.js";
 import { draw } from "./draw.js";
+import { UNKNOWN_PRODUCT, codesText, iconsHtml, productCodes } from "./rac.js";
 
 const escapeHtml = (text) =>
   String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const SEARCH_DELAY_MS = 300;
 export const NOTICE_URL = "https://www.acis.famic.go.jp/ddata/soukaisuu.pdf";
 
-let ctx = null; // { state, refresh, draftId }
+let ctx = null; // { state, refresh, redraw, notify, draftId }
 let timer = null;
 
 const state = () => ctx.state;
@@ -41,6 +42,110 @@ export function groupProducts(rows) {
   return [...products.values()].map((product) => ({ ...product, ingredients: Array.from(product.ingredients, (name) => name || "") }));
 }
 
+// ---- 作用機構分類（RAC コード）のアイコン ----
+// 農薬名を出すところでは、名前の後ろに必ずアイコンを付ける（nameHtml）。文字しか出せない所は nameText。
+// コードの表（有効成分 → コード）は 1 回だけ読む。製品の有効成分と用途は、検索や使用基準で読んだものを覚え、
+// 実績に出てくる登録番号で、まだ読んでいないものはまとめて読む。読み終えたら、画面を描き直す
+
+let racCodes = null; // 成分 → [{ committee, code }]
+const products = new Map(); // 登録番号 → { names, use_type }。最新の登録情報にないものは { missing: true }
+const asked = new Set(); // 読みに行った登録番号（失敗しても、何度も読みに行かない）
+let racLoading = null;
+
+function remember(product) {
+  products.set(String(product.reg_no), { names: product.names, use_type: product.use_type });
+}
+
+// コードの表と、regNos のうち、まだ読んでいない農薬を読む。新しく読めたら、画面を描き直す
+export function primeRac(regNos = []) {
+  if (!famicEnabled()) {
+    return Promise.resolve();
+  }
+  const wanted = [...new Set(regNos.filter(Boolean).map(String))].filter((reg) => !products.has(reg) && !asked.has(reg));
+  if ((racCodes || racLoading) && !wanted.length) {
+    return racLoading || Promise.resolve();
+  }
+  wanted.forEach((reg) => asked.add(reg));
+  const loading = (racLoading || Promise.resolve())
+    .then(async () => {
+      let changed = false;
+      if (!racCodes) {
+        const map = new Map();
+        for (const row of await state().store.loadRacCodes()) {
+          if (!map.has(row.ingredient)) {
+            map.set(row.ingredient, []);
+          }
+          map.get(row.ingredient).push({ committee: row.committee, code: row.code });
+        }
+        racCodes = map;
+        changed = true;
+      }
+      if (wanted.length) {
+        groupProducts(await state().store.loadProducts(wanted)).forEach(remember);
+        wanted.filter((reg) => !products.has(reg)).forEach((reg) => products.set(reg, { missing: true }));
+        changed = true;
+      }
+      if (changed) {
+        ctx.redraw?.();
+      }
+    })
+    .catch((error) => ctx.notify?.(`農薬の作用機構分類を読めませんでした: ${error.message}`))
+    .finally(() => {
+      if (racLoading === loading) {
+        racLoading = null;
+      }
+    });
+  racLoading = loading;
+  return loading;
+}
+
+// 製品のアイコンに出すコード。まだ読んでいなければ null（読み始める）
+function codesFor(regNo, product) {
+  if (!regNo) {
+    return UNKNOWN_PRODUCT;
+  }
+  const info = product?.names ? product : products.get(String(regNo));
+  if (!racCodes || !info) {
+    primeRac([regNo]);
+    return null;
+  }
+  return info.missing ? [{ committee: "IRAC", code: "?", ingredients: [] }] : productCodes(info.names, info.use_type, racCodes);
+}
+
+// 農薬名と、その後ろのアイコン（HTML）。product は検索の結果のように、有効成分と用途を持つもの（なければ登録番号で探す）
+export function nameHtml(name, regNo, product = null) {
+  const text = escapeHtml(name);
+  if (!famicEnabled()) {
+    return text;
+  }
+  const list = codesFor(regNo, product);
+  // 読み終えるまでは、空のアイコンの入れ物を置く（読み終えたら描き直す）
+  return `<span class="pesticide-name">${text}${list ? iconsHtml(list) : '<span class="rac-icons"></span>'}</span>`;
+}
+
+// 文字しか出せない所の農薬名。「アルバリン顆粒水溶剤（IRAC 4A）」
+export function nameText(name, regNo) {
+  const list = famicEnabled() ? codesFor(regNo) : null;
+  return list ? `${name}（${codesText(list)}）` : name;
+}
+
+// 実績の一覧などの、資材 1 つの行（HTML）。農薬は名前の後ろにアイコンを付ける
+export function inputHtml(input) {
+  if (input.kind !== "pesticide" || !famicEnabled()) {
+    return escapeHtml(inputText(input));
+  }
+  const rest = inputText({ ...input, name: "-" }).replace(/^-\s*/, "");
+  return `${nameHtml(input.name || "農薬", input.reg_no)}${rest ? ` ${escapeHtml(rest)}` : ""}`;
+}
+
+// 有効成分 1 つのアイコン（使用回数の表の成分の行）。表になければ「?」
+export function ingredientIconsHtml(name) {
+  if (!famicEnabled() || !racCodes) {
+    return "";
+  }
+  return iconsHtml(productCodes([name], "", racCodes));
+}
+
 // ---- 検索 ----
 
 // 農薬の名前の欄に打った文字で探す。少し待ってから探し、結果は results の欄だけを描き直す
@@ -55,6 +160,8 @@ export function search(input, query, box) {
   timer = setTimeout(async () => {
     try {
       input._results = groupProducts(await state().store.searchPesticides(key)).slice(0, 20);
+      input._results.forEach(remember);
+      await primeRac();
     } catch (error) {
       draw(box, `<li class="muted">探せませんでした: ${escapeHtml(error.message)}</li>`);
       return;
@@ -71,7 +178,7 @@ export function resultsHtml(input) {
   return results
     .map(
       (product) =>
-        `<li><button type="button" class="famic-result" data-act="famic-pick" data-reg="${product.reg_no}">${escapeHtml(product.name)}` +
+        `<li><button type="button" class="famic-result" data-act="famic-pick" data-reg="${product.reg_no}">${nameHtml(product.name, product.reg_no, product)}` +
         `<small>登録番号 ${product.reg_no}・${escapeHtml(product.use_type)}・${escapeHtml(product.formulation)}</small></button></li>`
     )
     .join("");
@@ -107,10 +214,13 @@ export async function ensureUses(input, groups) {
   input._filters ||= {};
   let changed = false;
   if (!input._product) {
-    const products = await state().store.loadProducts([input.reg_no]);
-    input._product = groupProducts(products)[0] || { reg_no: Number(input.reg_no), name: input.name, ingredients: input.standard?.ingredients || [] };
+    const rows = await state().store.loadProducts([input.reg_no]);
+    input._product = groupProducts(rows)[0] || { reg_no: Number(input.reg_no), name: input.name, ingredients: input.standard?.ingredients || [] };
     // 最新の登録情報にない登録番号は、失効している可能性がある
-    input._product.missing = !products.length;
+    input._product.missing = !rows.length;
+    if (rows.length) {
+      remember(input._product);
+    }
     changed = true;
   }
   if (!input._uses) {
@@ -328,7 +438,7 @@ function choiceHtml(input, i, group) {
 // 農薬の行の、検索の結果・選んだ農薬・まとまりごとの作物名と使い方
 export function pickerHtml(input, i, groups) {
   const picked = input.reg_no
-    ? `<p class="muted famic-picked">登録番号 ${escapeHtml(input.reg_no)}${input._product?.missing ? '・<strong class="famic-warn">最新の登録情報にありません（失効している可能性があります）</strong>' : ""}` +
+    ? `<p class="muted famic-picked">${nameHtml(input._product?.name || input.name, input.reg_no, input._product?.names ? input._product : null)}・登録番号 ${escapeHtml(input.reg_no)}${input._product?.missing ? '・<strong class="famic-warn">最新の登録情報にありません（失効している可能性があります）</strong>' : ""}` +
       ` <button type="button" class="text-btn" data-act="famic-unpick" data-i="${i}">選び直す</button></p>`
     : '<p class="muted">名前の一部か登録番号を入れると、農薬登録情報から探せます。一覧にない農薬は、名前だけでも入れられます。</p>';
   let choices = "";
@@ -354,7 +464,7 @@ export function standardsHtml(inputs, groups, logs, excludeLogId) {
       const lines = pesticides.map((input) => {
         const row = rowFor(input, group);
         if (!row) {
-          return `<span class="muted">${escapeHtml(input.name)}: 作物名と使い方・適用病害虫を選ぶと、基準が出ます</span>`;
+          return `<span class="muted">${nameHtml(input.name, input.reg_no)}: 作物名と使い方・適用病害虫を選ぶと、基準が出ます</span>`;
         }
         const counts = group.plantingIds.map((id) => pesticideCounts(logs, id, excludeLogId));
         const product = Math.max(0, ...counts.map((item) => item.products.get(String(input.reg_no)) || 0)) + 1;
@@ -377,7 +487,7 @@ export function standardsHtml(inputs, groups, logs, excludeLogId) {
               ? `この面積の基準使用量 ${escapeHtml(row.dilution_text)} × ${group.area.toFixed(1)} ㎡ → <b>${span(usage.min * group.area, usage.max * group.area, usage.unit)}</b>`
               : "";
         return (
-          `<span>${escapeHtml(input.name)}（${escapeHtml(row.crop)}）: ${escapeHtml([row.dilution_text, row.liquid_text, row.timing_text].filter((text) => text && text !== "-").join("・"))}</span>` +
+          `<span>${nameHtml(input.name, input.reg_no)}（${escapeHtml(row.crop)}）: ${escapeHtml([row.dilution_text, row.liquid_text, row.timing_text].filter((text) => text && text !== "-").join("・"))}</span>` +
           `<span class="muted">本剤 ${product} 回目（${escapeHtml(row.times_text)}）${ingredients.length ? `・${escapeHtml(ingredients.join("・"))}` : ""}</span>` +
           (liquid ? `<span>${liquid}</span>` : "")
         );
@@ -406,7 +516,7 @@ export function baselineLiters(inputs, groups) {
   return groups.length ? { low, high } : null;
 }
 
-// 防除の指摘（4.6）。農薬ごとに、品目のまとまりで選んだ作物名の基準と照らす
+// 防除の指摘（4.6）。農薬ごとに、品目のまとまりで選んだ作物名の基準と照らす。HTML の文の一覧（農薬名にアイコンを付ける）
 export function warnings({ inputs, groups, date, sprayOf, logs, excludeLogId, harvestStartOf }) {
   const out = [];
   for (const input of inputs) {
@@ -414,7 +524,7 @@ export function warnings({ inputs, groups, date, sprayOf, logs, excludeLogId, ha
       continue;
     }
     if (input._product?.missing) {
-      out.push(`${input.name}: 登録番号 ${input.reg_no} は最新の農薬登録情報にありません（失効している可能性があります）`);
+      out.push(`${nameHtml(input.name, input.reg_no)}: 登録番号 ${escapeHtml(input.reg_no)} は最新の農薬登録情報にありません（失効している可能性があります）`);
     }
     const list = sprayWarnings({
       date,
@@ -432,7 +542,7 @@ export function warnings({ inputs, groups, date, sprayOf, logs, excludeLogId, ha
     });
     // 面積あたりの使用量の農薬（粒剤など）は、製品の量を、選んだ品目の面積の基準の合計と比べる
     list.push(...usageWarnings({ amount: input.amount, unit: input.unit, groups: groups.map((group) => ({ area: group.area, row: rowFor(input, group) })) }));
-    out.push(...list.map((text) => (inputs.filter((item) => item.kind === "pesticide").length > 1 ? `${input.name}・${text}` : text)));
+    out.push(...list.map((text) => (inputs.filter((item) => item.kind === "pesticide").length > 1 ? `${nameHtml(input.name, input.reg_no)}・${escapeHtml(text)}` : escapeHtml(text))));
   }
   return out;
 }

@@ -4,7 +4,7 @@ import { WORK_COLORS, WORK_ITEMS, addDays, diffDays, isManagement, localToday, w
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { noteChange } from "./history.js";
 import { record } from "./journal.js";
-import { SPEC_FIELDS, formatAmount, inputText, logEnd, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
+import { SPEC_FIELDS, formatAmount, logEnd, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
 import { draw } from "./draw.js";
 
@@ -52,6 +52,7 @@ export function renderLogs() {
   }
   const logs = state().logs || [];
   const shown = showAll ? logs : logs.slice(0, RECENT);
+  famic.primeRac(logs.flatMap((log) => (log.inputs || []).map((input) => input.reg_no)));
   $("logTitle").textContent = showAll ? `実績（${logs.length} 件）` : "最近の実績";
   $("logToggle").hidden = logs.length <= RECENT;
   $("logToggle").textContent = showAll ? "最近だけ" : "すべて";
@@ -68,12 +69,12 @@ export function renderLogs() {
     shown.length
       ? shown
           .map((log) => {
-            const details = [targetSummary(log.targets || []), ...(log.inputs || []).map(inputText), log.note].filter(Boolean).join(" / ");
+            const details = [escapeHtml(targetSummary(log.targets || [])), ...(log.inputs || []).map(famic.inputHtml), escapeHtml(log.note)].filter(Boolean).join(" / ");
             return (
               `<li data-log="${log.id}"><span class="week-date">${logDays(log)}</span>` +
               `<span class="week-work"><span class="swatch" style="background:${WORK_COLORS[log.work_type] || "#888"}"></span>` +
               `${escapeHtml(workName(typeLabel(log.work_type), log.spec))}${log.finishes ? '<span class="log-done">完了</span>' : ""}</span>` +
-              `<span class="muted">${escapeHtml(details)}</span></li>`
+              `<span class="muted">${details}</span></li>`
             );
           })
           .join("")
@@ -689,7 +690,7 @@ function spraySection(items) {
     const boxes = famic.standardsHtml(draft.inputs, list, state().logs || [], draft.id);
     const notes = draft.inputs
       .filter((input) => input.kind === "pesticide" && input._dilutionBy)
-      .map((input) => `<p class="muted">${escapeHtml(input.name)}の希釈倍率は、いちばん厳しい${escapeHtml(input._dilutionBy)}の基準（${input._dilutionValue} 倍）に合わせました。直せます。</p>`)
+      .map((input) => `<p class="muted">${famic.nameHtml(input.name, input.reg_no)}の希釈倍率は、いちばん厳しい${escapeHtml(input._dilutionBy)}の基準（${input._dilutionValue} 倍）に合わせました。直せます。</p>`)
       .join("");
     standards =
       (boxes ? `<div class="log-section"><h3>${draft.mode === "blocks" ? "区画" : "品目"}ごとの使用基準</h3>${boxes}${notes}<p class="muted" id="logBaseline"></p>` +
@@ -825,9 +826,12 @@ function updateTotals() {
     const first = draft.inputs.find((input) => input.kind === "pesticide" && num(input.dilution));
     const low = baseline && first ? productAmount(baseline.low, num(first.dilution)) : null;
     const high = baseline && first ? productAmount(baseline.high, num(first.dilution)) : null;
-    baselineBox.textContent = baseline
-      ? `基準散布量の合計 ${fmt(baseline.low, 1)}〜${fmt(baseline.high, 1)} L${low !== null ? ` → ${first.name || "製品"} ${fmt(low, 1)}〜${fmt(high, 1)} ${first.unit || "mL"}` : ""}`
-      : "";
+    draw(
+      baselineBox,
+      baseline
+        ? `基準散布量の合計 ${fmt(baseline.low, 1)}〜${fmt(baseline.high, 1)} L${low !== null ? ` → ${first.name ? famic.nameHtml(first.name, first.reg_no) : "製品"} ${fmt(low, 1)}〜${fmt(high, 1)} ${escapeHtml(first.unit || "mL")}` : ""}`
+        : ""
+    );
   }
   const list = famic.warnings({
     inputs: draft.inputs.map((input) => ({ ...input, dilution: num(input.dilution) })),
@@ -841,7 +845,7 @@ function updateTotals() {
   const box = dialog.querySelector("#logWarnings");
   if (box) {
     box.hidden = !list.length;
-    draw(box, list.map((text) => `<li>${escapeHtml(text)}</li>`).join(""));
+    draw(box, list.map((html) => `<li>${html}</li>`).join(""));
   }
 }
 
@@ -1274,8 +1278,8 @@ async function save() {
       const first = missing[0];
       showError(
         first.input._uses
-          ? `${first.input.name}: ${first.group.name}の作物名と使い方・適用病害虫を選んでください。登録されている作物名に当てはまるものがなければ、この農薬は使えません。`
-          : `${first.input.name}: 使用基準を読み込んでいます。少し待ってから保存してください。`
+          ? `${famic.nameText(first.input.name, first.input.reg_no)}: ${first.group.name}の作物名と使い方・適用病害虫を選んでください。登録されている作物名に当てはまるものがなければ、この農薬は使えません。`
+          : `${famic.nameText(first.input.name, first.input.reg_no)}: 使用基準を読み込んでいます。少し待ってから保存してください。`
       );
       return;
     }
@@ -1522,6 +1526,18 @@ export function initLogs(context) {
         updateTotals();
       }
     },
+    // 農薬の作用機構分類を読み終えたら、農薬名を出している所をすべて描き直す。
+    // 窓は、文字の欄を触っているあいだは描き直さない（日本語の変換が切れるため。次に描くときにアイコンが出る）
+    redraw: () => {
+      renderLogs();
+      ctx.onLogsChanged?.();
+      const typing = dialog?.contains(document.activeElement) && document.activeElement.matches('input[type="text"], textarea');
+      if (draft && dialog?.open && !typing) {
+        renderDialog();
+        updateTotals();
+      }
+    },
+    notify: (text) => ctx.setStatus(text),
   });
   $("logToggle").addEventListener("click", () => {
     showAll = !showAll;

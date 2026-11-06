@@ -3,7 +3,7 @@
 // 接続先: https://<project-ref>.supabase.co/functions/v1/field-mcp/<FIELD_MCP_TOKEN>
 // SUPABASE_DB_URL は Edge Functions の実行環境に自動で設定される。
 // 画面と同じ計算をするために、lib/ に app/ の部品の写しを置いている（scripts/sync-mcp-lib.mjs で写す）。
-// FIELD_FAMIC を false にすると、農薬の使用基準（FAMIC）を使う道具（get_pesticide_usage）を外す。
+// FIELD_FAMIC を false にすると、農薬の使用基準（FAMIC）を使う道具（get_pesticide_usage）と、農薬の作用機構分類を外す。
 import postgres from "npm:postgres@3.4.5";
 import { createDataSource, loadUpdates } from "./data.js";
 import { createMcpHandler } from "./mcp.js";
@@ -33,6 +33,17 @@ const workLogs = async (): Promise<any[]> => {
   return logs.map((log) => ({ ...log, targets: targetsOf.get(log.id) ?? [], inputs: inputsOf.get(log.id) ?? [] }));
 };
 
+const famic = Deno.env.get("FIELD_FAMIC") !== "false";
+
+// 農薬の作用機構分類（RAC コード）と、記録に出てくる農薬の有効成分と用途
+const rac = async () => ({
+  codes: (await sql`select ingredient, committee, code from field.rac_codes`).map((r) => ({ ...r })),
+  products: (
+    await sql`select reg_no, ord, ingredient, use_type from field.famic_products
+              where reg_no::text in (select reg_no from field.work_log_inputs where kind = 'pesticide' and reg_no is not null)`
+  ).map((r) => ({ ...r })),
+});
+
 const source = createDataSource({
   query: async () => {
     return {
@@ -50,6 +61,7 @@ const source = createDataSource({
       notes: await rows("dev_notes", "day desc"),
       workLogs: await workLogs(),
       updates: await loadUpdates({ url: UPDATES_URL, bundled: updates }),
+      ...(famic ? { rac: await rac() } : {}),
     };
   },
 });
@@ -69,7 +81,7 @@ const handle = createMcpHandler({
   getData: () => source.getData(),
   token: Deno.env.get("FIELD_MCP_TOKEN") ?? "",
   logAccess,
-  famic: Deno.env.get("FIELD_FAMIC") !== "false",
+  famic,
 });
 
 Deno.serve(handle);

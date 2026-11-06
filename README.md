@@ -59,7 +59,8 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `app/logs.js` | 作業の実績の計算（畝＋通路の面積、実績の対象、つながる計画の作業、実績の日） |
 | `app/log-view.js` | 作業の入力の画面（最近の実績、計画と実績を入力する窓、管理作業の計画、完了と取りやめ） |
 | `app/planting-view.js` | 作付の詳細の画面（計画と実績、計画との差、気温・降水量、農薬の使用回数、予報） |
-| `app/pesticide.js` | 防除の記録で使う、農薬の使用基準（FAMIC）。この部分は切り離せる（`app/config.js` の `famic`） |
+| `app/pesticide.js` | 防除の記録で使う、農薬の使用基準（FAMIC）と、農薬名の後ろの作用機構分類のアイコン。この部分は切り離せる（`app/config.js` の `famic`） |
+| `app/rac.js` | 農薬の作用機構分類（IRAC・FRAC・HRAC の RAC コード）のアイコンの形と色、製品に出すコードの決め方。`app/pesticide.js` と一緒に切り離す |
 | `app/weather.js` | 気象の計算と、気象庁のデータの読み取り（観測所、日ごとの観測値、予報） |
 | `app/weather-view.js` | 圃場図の「気象」の欄と、直近の観測値の取得 |
 | `app/prefs.js` | ブラウザーが圃場ごとに覚える表示の設定（表示日、開いていたプラン、工程表の表示と表示期間） |
@@ -71,6 +72,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `supabase/functions/field-mcp/` | 計画と作業の実績を Claude.ai から読むための MCP サーバー（Supabase Edge Function） |
 | `supabase/functions/field-weather/` | 2 週間気温予報を画面に渡す関数（ブラウザーから気象庁のこのデータを読めないため） |
 | `scripts/import_famic.py` | FAMIC の農薬登録情報（CSV）を DB に取り込む。`.github/workflows/famic.yml` が週に 1 回動かす |
+| `scripts/import_rac.py` | 農薬の作用機構分類（RAC コード）の表を DB に取り込む。`famic.yml` が FAMIC の取り込みに続けて動かし、表にない有効成分を警告として出す |
 | `scripts/fetch-weather.mjs` | 気象の値（アメダスの観測所の日ごとの観測値）を、気象庁の過去の気象データの日別の表（正式な値）から取って DB に入れる。`.github/workflows/weather.yml` が毎日動かす |
 | `scripts/import_jma_csv.py` | 気象庁の過去の気象データ（日別の CSV）を DB に入れる。いまは `fetch-weather.mjs` に日付を渡せば日別の表から入れ直せるので、ふだんは使わない |
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
@@ -101,6 +103,7 @@ dev_notes（開発日誌のメモ）は、すべての圃場で共通
 
 weather_daily（アメダスの観測所ごとの日ごとの気温と降水量）、
 famic_imports・famic_products・famic_uses（FAMIC の農薬登録情報。画面からは読むだけ）、
+rac_imports・rac_codes（有効成分ごとの RAC コード。画面からは読むだけ）、
 app_compat（この DB を使ってよい画面の版。画面からは読むだけ）も共通
 ```
 
@@ -394,7 +397,7 @@ push のたびに、できるようになったことごとに 1 件ずつ足し
 | `get_changes` | 日ごとの、計画の変更（# の番号）、メモ、アプリの更新（A の番号） |
 | `get_crops` | 品目の設定値と、肥料の銘柄 |
 | `get_records` | 作業の実績（作業をした日と、何日かかかった作業の終えた日、対象の畝、仕様、資材、メモ、つながる計画の作業）と、取りやめた計画の作業。期間、品目、作業、場所で絞れる |
-| `get_pesticide_usage` | 実際に使うプランの作付ごとの、農薬の使用回数（本剤ごと、有効成分ごと）と上限、使用時期の基準を満たす最初の収穫日。農薬の使用基準（FAMIC）を使う部分で、Supabase の秘密の値 `FIELD_FAMIC` を `false` にすると外れる |
+| `get_pesticide_usage` | 実際に使うプランの作付ごとの、農薬の使用回数（本剤ごと、有効成分ごと）と上限、使用時期の基準を満たす最初の収穫日、作用機構分類（`rac`）。農薬の使用基準（FAMIC）を使う部分で、Supabase の秘密の値 `FIELD_FAMIC` を `false` にすると外れる。`get_records` の農薬に付く `rac` も、このとき外れる |
 
 `list_fields` と `get_crops` のほかは、毎回 `field` で圃場を選びます（名前の一部でもよい）。
 品目と肥料、日ごとのメモ、アプリの更新は、すべての圃場で共通です。

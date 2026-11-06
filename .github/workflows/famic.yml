@@ -1,6 +1,7 @@
 name: Import FAMIC pesticide data
 
 # FAMIC の農薬登録情報の配布ページを週に 1 回確かめ、ZIP が替わっていれば DB に取り込む（scripts/import_famic.py）。
+# 続けて、農薬の作用機構分類（RAC コード）の表も確かめて取り込み、表にない有効成分を警告として出す（scripts/import_rac.py）。
 # 取り込み係の利用者でログインして入れる。秘密の値 FIELD_IMPORTER_EMAIL と FIELD_IMPORTER_PASSWORD が要る
 # （DB の接続文字列は置かない。取り込み係にできるのは、気象の値と FAMIC の入れ替えだけ）
 
@@ -30,3 +31,8 @@ jobs:
           FIELD_IMPORTER_EMAIL: ${{ secrets.FIELD_IMPORTER_EMAIL }}
           FIELD_IMPORTER_PASSWORD: ${{ secrets.FIELD_IMPORTER_PASSWORD }}
         run: python scripts/import_famic.py ${{ inputs.force && '--force' || '' }}
+      - name: Import RAC codes
+        env:
+          FIELD_IMPORTER_EMAIL: ${{ secrets.FIELD_IMPORTER_EMAIL }}
+          FIELD_IMPORTER_PASSWORD: ${{ secrets.FIELD_IMPORTER_PASSWORD }}
+        run: python scripts/import_rac.py ${{ inputs.force && '--force' || '' }}
