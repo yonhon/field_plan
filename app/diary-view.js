@@ -288,7 +288,7 @@ function dayHtml(day, { single }) {
     return heading + renderMarkdown(chunk.text, photoHtml, { headingBase: 4 }) + (section ? tagsHtml(day, section, key) : "");
   });
   const title = `${single ? "" : `<a href="#diary" data-action="open-day" data-date="${day.date}">${dateLabel(day.date)}</a> `}${escapeHtml(day.title)}`;
-  const editButton = (extra) => `<button type="button" class="chip-btn${extra}" data-action="edit" data-date="${day.date}">編集</button>`;
+  const editButton = (extra) => `<button type="button" class="chip-btn${extra}" data-action="edit" data-date="${day.date}">修正</button>`;
   // 日の表示で題がないときは、題の行を作らない。「編集」は右に寄せ、本文はその横から始める
   const head = single && !day.title.trim()
     ? editButton(" diary-edit-float")
@@ -330,24 +330,30 @@ function resultsHtml() {
 
 function editorHtml() {
   const e = view.editing;
+  // 「見出し」と「写真を入れる」は、編集のタブのときだけ、タブと同じ行の右に出す
   const tools = e.preview
     ? ""
-    : `<div class="row diary-tools">` +
+    : `<div class="diary-tools">` +
       `<button type="button" class="chip-btn" data-action="heading">見出し</button>` +
-      `<label class="chip-btn diary-photo-btn">写真を入れる<input id="diaryPhotoInput" type="file" accept="image/*" multiple /></label>` +
-      `<span id="diaryUploadStatus" class="muted" role="status">${escapeHtml(view.uploading)}</span></div>`;
+      `<label class="chip-btn diary-photo-btn">写真を入れる<input id="diaryPhotoInput" type="file" accept="image/*" multiple /></label></div>`;
+  // 編集とプレビューは、入力欄の真上につなげたタブ。選んでいるタブは、下の入力欄とつながって見える
+  const tab = (action, label, on) =>
+    `<button type="button" role="tab" aria-selected="${on}" class="diary-tab${on ? " is-on" : ""}" data-action="${action}">${label}</button>`;
+  const bar =
+    `<div class="diary-editor-bar"><div class="diary-tabs" role="tablist" aria-label="編集とプレビュー">` +
+    tab("edit-mode", "編集", !e.preview) +
+    tab("preview-mode", "プレビュー", e.preview) +
+    `</div>${tools}</div>`;
   const content = e.preview
     ? `<div class="diary-preview">${e.body.trim() ? renderMarkdown(e.body, photoHtml, { headingBase: 3 }) : '<p class="muted">まだ何も書いていません。</p>'}</div>`
     : `<textarea id="diaryBody" data-field="body" rows="16" placeholder="作業の内容を書きます。「見出し」で作物や作業ごとに見出しを付けると、あとで探しやすくなります。">${escapeHtml(e.body)}</textarea>`;
   return (
-    `<div class="panel-heading"><h2>${escapeHtml(dateLabel(e.date))}の日記</h2>` +
-    `<div class="log-modes" role="group" aria-label="編集と表示">` +
-    `<button type="button" class="chip-btn${e.preview ? "" : " is-on"}" data-action="edit-mode">編集</button>` +
-    `<button type="button" class="chip-btn${e.preview ? " is-on" : ""}" data-action="preview-mode">表示</button></div></div>` +
+    `<h2>${escapeHtml(dateLabel(e.date))}の日記</h2>` +
     (e.note ? `<p class="diary-note">${escapeHtml(e.note)}</p>` : "") +
     `<label>題<input id="diaryTitle" type="text" data-field="title" value="${escapeHtml(e.title)}" placeholder="なくてもかまいません" /></label>` +
-    tools +
+    bar +
     content +
+    `<p id="diaryUploadStatus" class="muted" role="status">${escapeHtml(view.uploading)}</p>` +
     `<p class="muted">写真は、スマホのカメラのアプリで撮ってから、「写真を入れる」でアルバムから選んでください（ここから直接撮ると、Google フォトに残らないことがあります）。短辺 1080 px に縮めて保存します。</p>` +
     `<div class="row"><button type="button" class="primary-btn" data-action="save">保存</button>` +
     `<button type="button" class="text-btn" data-action="cancel">やめる</button></div>`
