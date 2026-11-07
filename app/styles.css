@@ -2798,6 +2798,12 @@ h4.diary-heading {
   color: var(--text);
 }
 
+/* 書く画面を開くとカーソルを入れるので、ブラウザーの太い枠（フォーカスの印）は出さない。入力中はカーソルの点滅で分かる */
+#diaryBody:focus,
+#diaryBody:focus-visible {
+  outline: none;
+}
+
 #diaryTitle {
   font-size: 14px;
 }
