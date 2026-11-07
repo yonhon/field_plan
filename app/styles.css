@@ -2461,6 +2461,378 @@ body.plan-busy #scheduleView {
   display: none;
 }
 
+/* ---- 農作業日記 ---- */
+
+.diary-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.diary-search {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 220px;
+  max-width: 360px;
+}
+
+.diary-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.diary-month {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.diary-month .text-btn {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.diary-month .chip-btn {
+  margin-left: auto;
+}
+
+.diary-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.diary-weekday {
+  padding: 2px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diary-weekday.is-sunday {
+  color: var(--danger);
+}
+
+.diary-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1px;
+  min-height: 44px;
+  padding: 4px 0;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.diary-cell.is-other {
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.diary-cell.is-picked {
+  background: #e3f0ef;
+}
+
+.diary-cell.is-today .diary-cell-day {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.diary-cell-mark {
+  color: var(--accent);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.diary-cell-mark small {
+  margin-left: 1px;
+  font-size: 10px;
+}
+
+.diary-period {
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.panel .diary-period h2 {
+  margin: 0;
+  text-align: center;
+}
+
+.diary-day {
+  padding: 10px 0 14px;
+  border-top: 1px solid var(--line);
+  line-height: 1.7;
+}
+
+.diary-day-title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.diary-day p,
+.diary-preview p {
+  margin: 6px 0;
+}
+
+.diary-day ul,
+.diary-day ol,
+.diary-preview ul,
+.diary-preview ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+
+.diary-depth-1 {
+  margin-left: 18px;
+}
+
+.diary-depth-2 {
+  margin-left: 36px;
+}
+
+.diary-depth-3,
+.diary-depth-4 {
+  margin-left: 54px;
+}
+
+.diary-heading {
+  margin: 14px 0 4px;
+  font-size: 14px;
+}
+
+h4.diary-heading {
+  font-size: 13.5px;
+}
+
+.diary-table {
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.diary-table table {
+  border-collapse: collapse;
+}
+
+.diary-table td {
+  padding: 2px;
+  vertical-align: top;
+  font-size: 12px;
+}
+
+.diary-photo {
+  display: block;
+  padding: 0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.diary-photo img {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+}
+
+.diary-table .diary-photo img {
+  width: auto;
+  max-width: none;
+  height: 150px;
+}
+
+.diary-photo.is-loading {
+  width: 120px;
+  height: 90px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.diary-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 8px;
+}
+
+.diary-tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #e3f0ef;
+  font-size: 12px;
+}
+
+.diary-tag.is-work {
+  background: #f1ece0;
+}
+
+.diary-tags .text-btn {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.diary-tag-edit {
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.diary-tag-edit .muted {
+  margin: 6px 0 4px;
+}
+
+.diary-tag-edit .row {
+  margin-top: 10px;
+}
+
+.diary-tools {
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.diary-photo-btn {
+  display: inline-flex;
+  flex-direction: row;
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.diary-photo-btn input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+#diaryBody {
+  width: 100%;
+  min-height: 50vh;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+#diaryTitle {
+  font-size: 14px;
+}
+
+.diary-main label {
+  margin-bottom: 10px;
+}
+
+.diary-preview {
+  min-height: 30vh;
+  padding: 4px 0;
+  line-height: 1.7;
+}
+
+.diary-note {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fbf3e2;
+  font-size: 13px;
+}
+
+.diary-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.diary-results li {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.diary-snippet {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.diary-snippet mark {
+  padding: 0 1px;
+  background: #fde9a8;
+  color: var(--text);
+}
+
+.diary-viewer {
+  max-width: min(960px, 96vw);
+}
+
+.diary-viewer img {
+  display: block;
+  max-width: 100%;
+  max-height: 72vh;
+  margin: 0 auto 10px;
+}
+
+/* PC は、カレンダーを左に置き、日記を右に並べる */
+@media (min-width: 801px) {
+  .diary {
+    display: grid;
+    grid-template-columns: 360px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .diary-nav {
+    position: sticky;
+    top: 12px;
+  }
+
+  .diary-top .diary-search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .diary-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .diary-search {
+    flex: none;
+    max-width: none;
+  }
+
+  /* 書いているあいだは、カレンダーを隠して書く欄を上に出す */
+  .diary.is-editing .diary-nav {
+    display: none;
+  }
+
+  .diary-table .diary-photo img {
+    height: 110px;
+  }
+
+  .diary-period .text-btn {
+    padding: 6px 2px;
+    font-size: 12px;
+  }
+}
+
 @media print {
   html,
   body.is-printing {

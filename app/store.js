@@ -3,8 +3,24 @@
 // さらに &strict=1 を付けると、保存の遅れと外部キーを DB に近づける。
 import { DEFAULT_WORK_TYPES } from "./schedule.js";
 import { uploadWithProgress } from "./upload.js";
+import { pathKey, photoNames, sectionTags } from "./diary.js";
 
 const BUCKET = "field-plan";
+// 農作業日記の写真の置き場（inoo_farm と共用。非公開）
+const DIARY_BUCKET = "diary-photos";
+// DB を使わないモードの、作物と作業の種類を見分ける語（動作確認用の見本）
+const LOCAL_TAG_WORDS = {
+  crops: [
+    { name: "オクラ", words: ["オクラ"] },
+    { name: "トマト", words: ["トマト", "ミニトマト"] },
+    { name: "大根", words: ["大根", "ダイコン"] },
+  ],
+  work: [
+    { name: "定植", words: ["定植"] },
+    { name: "収穫", words: ["収穫"] },
+    { name: "農薬散布", words: ["防除", "散布"] },
+  ],
+};
 // この画面の版。DB の field.app_compat の min_version より古ければ、起動のときに新しい版を読み込み直す。
 // 古い画面では正しく書けない形に DB を変えるときに 1 つ上げ、DB の min_version も同じ値にする（sql/field.sql）
 export const APP_VERSION = 1;
@@ -278,6 +294,88 @@ export function createSupabaseStore(client, options) {
       }
       return data.stations || [];
     },
+    // ---- 農作業日記。diary スキーマは API に出していないので、field の関数（sql/diary.sql）を通す ----
+    async diaryDays(from, to) {
+      return check(await client.rpc("diary_get_days", { p_from: from, p_to: to }));
+    },
+    async diaryCalendar(from, to) {
+      return check(await client.rpc("diary_calendar", { p_from: from, p_to: to }));
+    },
+    async diarySearch(words) {
+      return check(await client.rpc("diary_search", { p_words: words }));
+    },
+    async diaryTagNames() {
+      return check(await client.rpc("diary_tag_names"));
+    },
+    async diaryPhotoNames(date) {
+      return check(await client.rpc("diary_photo_names", { p_date: date }));
+    },
+    // その日を保存する。返り値は { updated_at, removed }。removed は、どこからも使われなくなった写真の名前
+    async diarySaveDay({ date, title, body, tags, sections, expected }) {
+      return check(
+        await client.rpc("diary_save_day", { p_date: date, p_title: title, p_body: body, p_tags: tags, p_sections: sections, p_expected: expected ?? null })
+      );
+    },
+    // 同じ名前の写真がもうあれば、code: "exists" の誤りにする（呼ぶ側が次の番号で上げ直す）
+    async diaryUploadPhoto(path, blob) {
+      const { error } = await client.storage.from(DIARY_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: false });
+      if (error) {
+        throw /exist|duplicate/i.test(error.message) || String(error.statusCode) === "409" ? Object.assign(new Error(error.message), { code: "exists" }) : error;
+      }
+    },
+    async diaryAddPhoto({ name, date, takenAt, originalName, width, height }) {
+      check(
+        await client.rpc("diary_add_photo", {
+          p_name: name,
+          p_date: date,
+          p_taken_at: takenAt,
+          p_original_name: originalName,
+          p_width: width,
+          p_height: height,
+        })
+      );
+    },
+    async diaryRemovePhotos(paths) {
+      if (paths.length) {
+        const { error } = await client.storage.from(DIARY_BUCKET).remove(paths);
+        if (error) {
+          throw error;
+        }
+      }
+    },
+    // 写真の署名付き URL を { 置き場の中の場所: URL } で返す。下絵と同じく、長めの期限で発行してブラウザーに覚える
+    async diaryPhotoUrls(paths) {
+      const saved = savedImageUrls();
+      const now = Date.now();
+      const key = (path) => `${DIARY_BUCKET}/${path}`;
+      const urls = {};
+      const missing = [];
+      for (const path of paths) {
+        if (saved[key(path)]?.expires - now > IMAGE_URL_MARGIN_MS) {
+          urls[path] = saved[key(path)].url;
+        } else {
+          missing.push(path);
+        }
+      }
+      if (!missing.length) {
+        return urls;
+      }
+      const signed = check(await client.storage.from(DIARY_BUCKET).createSignedUrls(missing, IMAGE_URL_SECONDS));
+      const fresh = {};
+      for (const item of signed) {
+        if (item.signedUrl && !item.error) {
+          urls[item.path] = item.signedUrl;
+          fresh[key(item.path)] = { url: item.signedUrl, expires: now + IMAGE_URL_SECONDS * 1000 };
+        }
+      }
+      const live = Object.entries(saved).filter(([, item]) => item.expires > now);
+      try {
+        localStorage.setItem(IMAGE_URLS_KEY, JSON.stringify({ ...Object.fromEntries(live), ...fresh }));
+      } catch {
+        // 覚えられなくても、次に開いたときに発行し直すだけ
+      }
+      return urls;
+    },
   };
 }
 
@@ -316,6 +414,7 @@ export function fetchWithOperation(url, options = {}) {
 const QUEUED_WRITES = [
   "upsert", "remove", "saveField", "saveBackdrop", "saveLog", "deleteLog", "saveWorkType", "saveFieldWeather",
   "createField", "deleteField", "createPlan", "renamePlan", "deletePlan", "setActivePlan",
+  "diarySaveDay", "diaryAddPhoto",
 ];
 
 // 書き込みを、呼んだ順に 1 つずつ送る。同時に送ると、親の行より先に子の行が届いて断られることがある。
@@ -600,6 +699,106 @@ export function createLocalStore({ strict = false } = {}) {
     },
     async twoWeekStations() {
       return [];
+    },
+    // ---- 農作業日記。DB の関数（sql/diary.sql）と同じ動きを、このブラウザーの保存で行う ----
+    // data.diary = { days: { 日付: 日 }, photos: { 名前: 写真 }, files: { 場所: data URL }, history: [...], sections: { 日付: [...] } }
+    async diaryDays(from, to) {
+      const diary = read().diary || {};
+      return Object.values(diary.days || {})
+        .filter((day) => day.date >= from && day.date <= to)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map((day) => ({
+          ...day,
+          sections: diary.sections?.[day.date] || [],
+          photos: Object.fromEntries(Object.values(diary.photos || {}).filter((photo) => photo.date === day.date).map((photo) => [photo.name, photo])),
+        }));
+    },
+    async diaryCalendar(from, to) {
+      return Object.values(read().diary?.days || {})
+        .filter((day) => day.date >= from && day.date <= to)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map((day) => ({ date: day.date, title: day.title, photos: photoNames(day.body).length }));
+    },
+    async diarySearch(words) {
+      const fold = (text) => text.normalize("NFKC").toLowerCase();
+      return Object.values(read().diary?.days || {})
+        .filter((day) => words.every((word) => fold(`${day.title}\n${day.body}`).includes(fold(word.trim()))))
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 200)
+        .map(({ date, title, body }) => ({ date, title, body }));
+    },
+    async diaryTagNames() {
+      return { crops: LOCAL_TAG_WORDS.crops.map((item) => item.name), work: LOCAL_TAG_WORDS.work.map((item) => item.name) };
+    },
+    async diaryPhotoNames(date) {
+      return Object.values(read().diary?.photos || {}).filter((photo) => photo.date === date).map((photo) => photo.name).sort();
+    },
+    async diarySaveDay({ date, title, body, tags, sections, expected }) {
+      let result = null;
+      update((data) => {
+        const diary = (data.diary ||= {});
+        diary.days ||= {};
+        diary.sections ||= {};
+        diary.history ||= [];
+        diary.photos ||= {};
+        const old = diary.days[date];
+        if ((old && expected !== old.updated_at) || (!old && expected)) {
+          throw Object.assign(new Error("この日の日記は、ほかの画面で書き換えられています。読み込み直してから書いてください。"), { code: "40001" });
+        }
+        const keys = new Set(sections.map((section) => pathKey(section.path)));
+        const kept = Object.fromEntries(Object.entries(tags || {}).filter(([key]) => keys.has(key)));
+        if (old && JSON.stringify([old.title, old.body, old.tags]) !== JSON.stringify([title, body, kept])) {
+          diary.history.push({ date, title: old.title, body: old.body, tags: old.tags, saved_at: new Date().toISOString() });
+        }
+        const saved = title.trim() || body.trim() ? new Date().toISOString() : null;
+        if (saved) {
+          diary.days[date] = { date, title, body, tags: kept, updated_at: saved };
+          diary.sections[date] = sections.map((section, i) => ({
+            id: `${date}-${String(i + 1).padStart(2, "0")}`,
+            path: section.path,
+            ...(kept[pathKey(section.path)] || sectionTags(section.path, section.body, LOCAL_TAG_WORDS)),
+          }));
+        } else {
+          delete diary.days[date];
+          delete diary.sections[date];
+        }
+        const used = new Set([...Object.values(diary.days), ...diary.history].flatMap((day) => photoNames(day.body)));
+        const removed = Object.values(diary.photos).filter((photo) => photo.date === date && !used.has(photo.name)).map((photo) => photo.name);
+        removed.forEach((name) => delete diary.photos[name]);
+        result = { updated_at: saved, removed };
+      });
+      return result;
+    },
+    async diaryUploadPhoto(path, blob) {
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      }
+      const dataUrl = `data:${blob.type || "image/jpeg"};base64,${btoa(binary)}`;
+      update((data) => {
+        const diary = (data.diary ||= {});
+        diary.files ||= {};
+        if (diary.files[path]) {
+          throw Object.assign(new Error("同じ名前の写真があります"), { code: "exists" });
+        }
+        diary.files[path] = dataUrl;
+      });
+    },
+    async diaryAddPhoto({ name, date, takenAt, originalName, width, height }) {
+      update((data) => {
+        const diary = (data.diary ||= {});
+        diary.photos = { ...diary.photos, [name]: { name, date, taken_at: takenAt, original_name: originalName || null, width, height } };
+      });
+    },
+    async diaryRemovePhotos(paths) {
+      update((data) => {
+        paths.forEach((path) => delete data.diary?.files?.[path]);
+      });
+    },
+    async diaryPhotoUrls(paths) {
+      const files = read().diary?.files || {};
+      return Object.fromEntries(paths.filter((path) => files[path]).map((path) => [path, files[path]]));
     },
   };
 }

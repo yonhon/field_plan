@@ -1,0 +1,134 @@
+// 日記の画面を、Chrome で通して確かめる。実行: node --test "tests/e2e/*.test.mjs"
+// 書く（写真を入れる）→ 保存 → 読む（日・週）→ 探す → 種類を直す → 書きかけを戻す、の流れ。本物の日記は使わない
+import { after, before, test } from "node:test";
+import assert from "node:assert/strict";
+import { findChrome, openBrowser } from "./browser.mjs";
+
+const AT = "2026-01-01T00:00:00Z";
+const pad = (n) => String(n).padStart(2, "0");
+const now = new Date();
+const TODAY = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
+const seed = () => ({
+  fields: [{ id: "f1", name: "試験の圃場", outline: [[0, 0], [40, 0], [40, 20], [0, 20]], note: "", created_at: AT }],
+  plans: [{ id: "p1", field_id: "f1", name: "プラン1" }],
+  zones: [],
+  blocks: [],
+  beds: [],
+  plantings: [],
+  works: [],
+  crops: [],
+  fertilizers: [],
+});
+
+const options = { skip: findChrome() ? false : "Chrome が見つかりません" };
+let page;
+
+before(async () => {
+  if (!options.skip) {
+    page = await openBrowser();
+  }
+});
+
+after(async () => {
+  await page?.close();
+});
+
+const saved = () => page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "保存");
+const diary = async () => (await page.saved()).diary;
+
+// 縦長の写真を作って、「写真を入れる」で選んだことにする
+const choosePhoto = () =>
+  page.run(`(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 30;
+    canvas.height = 40;
+    canvas.getContext("2d").fillRect(0, 0, 10, 10);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg"));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([blob], "IMG_0001.JPG", { type: "image/jpeg" }));
+    const input = document.getElementById("diaryPhotoInput");
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+
+test("日記: 写真を入れて書き、保存して読み、探し、種類を直す", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="diary"]');
+  await page.waitFor(`location.hash === "#diary"`, "日記の URL");
+  await page.click('#diaryMain [data-action="edit"]');
+  await page.click("#diaryTitle");
+  await page.type("試験の日");
+  await page.click("#diaryBody");
+  await page.run(`document.getElementById("diaryBody").marked = true`);
+  await page.type("オクラ");
+  await page.click('#diaryMain [data-action="heading"]');
+  await page.type(String.fromCharCode(10));
+  await page.type("トマトに追肥した。");
+  // 打っているあいだ、入力欄は作り直さない（日本語の変換が切れるため）
+  assert.equal(await page.run(`document.getElementById("diaryBody").marked`), true);
+  await choosePhoto();
+  await page.waitFor(`document.getElementById("diaryBody").value.includes("![](images/${TODAY}_01.jpg)")`, "写真を本文に入れる");
+  await page.click('#diaryMain [data-action="save"]');
+  await saved();
+
+  const stored = await diary();
+  const day = stored.days[TODAY];
+  assert.equal(day.title, "試験の日");
+  assert.equal(day.body, `## オクラ\nトマトに追肥した。\n\n![](images/${TODAY}_01.jpg)`);
+  assert.deepEqual(stored.sections[TODAY].map((section) => [section.path, section.crops]), [[["オクラ"], ["オクラ"]]]);
+  const photo = stored.photos[`${TODAY}_01.jpg`];
+  assert.equal(photo.original_name, "IMG_0001.JPG");
+  assert.deepEqual([photo.width, photo.height], [30, 40]);
+  assert.ok(Object.keys(stored.files).some((path) => path.endsWith(`/photos/${TODAY}_01.jpg`)));
+
+  // 日の表示: 写真と、節の作物の札。カレンダーに印
+  await page.waitFor(`Boolean(document.querySelector('#diaryMain .diary-photo img'))`, "写真の表示");
+  assert.match(await page.run(`document.querySelector("#diaryMain .diary-tags").textContent`), /オクラ/);
+  assert.equal(await page.run(`document.querySelector('#diaryCalendar [data-date="${TODAY}"]').classList.contains("has-entry")`), true);
+
+  // 写真を押すと、元のファイル名を添えて大きく開く
+  await page.click("#diaryMain .diary-photo");
+  await page.waitFor(`document.querySelector("dialog.diary-viewer[open]")?.textContent.includes("IMG_0001.JPG")`, "写真の窓");
+  await page.click('dialog.diary-viewer [data-action="close"]');
+
+  // 週の表示にも出る
+  await page.click('#diaryModes [data-mode="week"]');
+  await page.waitFor(`document.querySelector("#diaryMain .diary-day-title")?.textContent.includes("試験の日")`, "週の表示");
+
+  // 語で探す
+  await page.run(`document.getElementById("diarySearch").value = "ﾄﾏﾄ"`);
+  await page.click('#diarySearchForm button[type="submit"]');
+  await page.waitFor(`document.querySelector("#diaryMain .diary-snippet mark")?.textContent === "トマト"`, "検索の結果");
+  await page.click('#diaryMain [data-action="open-day"]');
+  await page.waitFor(`document.querySelector("#diaryModes .is-on")?.dataset.mode === "day"`, "日の表示へ");
+
+  // 種類を直す: 作物の「オクラ」を外す
+  await page.click('#diaryMain [data-action="tags"]');
+  await page.click('#diaryMain [data-tag-kind="crops"][data-tag-name="オクラ"]');
+  await page.click('#diaryMain [data-action="tags-save"]');
+  await saved();
+  const fixed = (await diary()).days[TODAY].tags;
+  assert.deepEqual(fixed["オクラ"].crops, []);
+  await page.waitFor(`document.querySelector("#diaryMain .diary-tags")?.textContent.includes("直した")`, "直した印");
+  assert.deepEqual(page.errors, []);
+});
+
+test("日記: 保存していない書きかけは、読み込み直しても戻る", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="diary"]');
+  await page.click('#diaryMain [data-action="edit"]');
+  await page.click("#diaryBody");
+  await page.type("書きかけの文");
+  await page.run(`location.reload()`);
+  await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#diary"`, "読み込み直し");
+  await page.click('#diaryMain [data-action="edit"]');
+  await page.waitFor(`document.getElementById("diaryBody")?.value === "書きかけの文"`, "書きかけ");
+  assert.match(await page.run(`document.querySelector("#diaryMain .diary-note").textContent`), /書きかけを戻しました/);
+  // やめると、確かめてから捨てる
+  await page.click('#diaryMain [data-action="cancel"]');
+  await page.click('dialog[open] [data-action="delete"]');
+  await page.waitFor(`!document.getElementById("diaryBody")`, "閉じる");
+  assert.equal(await page.run(`localStorage.getItem("field_plan_diary_drafts")`), "{}");
+  assert.deepEqual(page.errors, []);
+});

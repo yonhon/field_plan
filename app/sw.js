@@ -31,6 +31,8 @@ const FILES = [
   "weather-view.js",
   "prefs.js",
   "upload.js",
+  "diary.js",
+  "diary-view.js",
   "icons/A_mark_color.svg",
   "icons/favicon-32.png",
   "icons/apple-touch-icon.png",

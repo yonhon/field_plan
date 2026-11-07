@@ -33,6 +33,7 @@ import {
   worldToImage,
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
+import { initDiary, renderDiary } from "./diary-view.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
@@ -2567,9 +2568,9 @@ $("rotation").addEventListener("change", (event) => {
 // ---- 圃場図と日程の切り替え ----
 
 // 作付の詳細（planting）は、日程のタブの中の画面として扱う
-// 画面の URL。#map、#schedule、#crops、#journal、作付の詳細は #detail/planting/作付の ID、区画の詳細は #detail/block/区画の ID。
+// 画面の URL。#map、#schedule、#crops、#diary、#journal、作付の詳細は #detail/planting/作付の ID、区画の詳細は #detail/block/区画の ID。
 // 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）
-const VIEW_NAMES = ["map", "schedule", "crops", "journal"];
+const VIEW_NAMES = ["map", "schedule", "crops", "diary", "journal"];
 
 function routeFromHash() {
   const hash = decodeURIComponent(location.hash.slice(1));
@@ -2609,6 +2610,7 @@ function showView(view, { history: mode = "push" } = {}) {
   $("scheduleView").hidden = view !== "schedule";
   $("plantingView").hidden = view !== "planting";
   $("cropsView").hidden = view !== "crops";
+  $("diaryView").hidden = view !== "diary";
   $("journalView").hidden = view !== "journal";
   if (view === "map") {
     render();
@@ -2621,6 +2623,8 @@ function showView(view, { history: mode = "push" } = {}) {
     window.scrollTo(0, 0);
   } else if (view === "crops") {
     renderCrops();
+  } else if (view === "diary") {
+    renderDiary();
   } else {
     renderJournal();
   }
@@ -2807,6 +2811,7 @@ async function startApp() {
     showView(window.matchMedia("(max-width: 800px)").matches ? "schedule" : "map", { history: "replace" });
   }
   initCrops({ state, setStatus });
+  initDiary({ state, setStatus });
   try {
     await initJournal({ state, openTarget, setStatus });
   } catch (error) {
