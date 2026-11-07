@@ -34,6 +34,7 @@ const FILES = [
   "diary.js",
   "diary-view.js",
   "user-menu.js",
+  "toast.js",
   "icons/A_mark_color.svg",
   "icons/favicon-32.png",
   "icons/apple-touch-icon.png",

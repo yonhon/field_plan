@@ -37,10 +37,20 @@
       <div class="header-right">
         <button id="undoBtn" class="text-btn edit-only" title="元に戻す（Ctrl+Z）" hidden>↶ 元に戻す</button>
         <button id="redoBtn" class="text-btn edit-only" title="やり直す（Ctrl+Y）" hidden>↷ やり直す</button>
-        <span id="saveStatus" class="muted" role="status"></span>
-        <button id="updateBtn" class="text-btn" title="アプリの新しい版を取り終えました。読み込み直すと切り替わります" hidden>新しい版にする</button>
+        <!-- 保存の状態の記録の欄。目には見せず、書かれた文を app/toast.js がお知らせに出す -->
+        <span id="saveStatus" hidden></span>
       </div>
     </header>
+
+    <!-- お知らせ（app/toast.js）。ヘッダーの真下に重ねて出し、ヘッダーや画面の形を変えない -->
+    <div class="toast-anchor">
+      <div id="toasts" class="toasts">
+        <div id="updateToast" class="toast toast-update" role="status" hidden>
+          <span class="toast-text">アプリの新しい版があります</span>
+          <button id="updateBtn" type="button" class="toast-btn">読み込み直す</button>
+        </div>
+      </div>
+    </div>
 
     <section id="loginView" class="login" hidden>
       <form id="loginForm" class="panel">
@@ -423,7 +433,7 @@
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // Service Worker（sw.js）が一式をそろえて出しているときは、そのまま読む。
       // そうでないとき（初めて開いたとき、?local=1）は、読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js", "toast.js"];
       // ?local=1 は動作確認用なので、Service Worker を登録しない（手元のファイルを直したら、すぐ反映させたい）
       if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("local")) {
         navigator.serviceWorker.register("./sw.js").catch(() => {});
@@ -437,7 +447,7 @@
             if (outdated) {
               location.reload();
             } else {
-              document.getElementById("updateBtn").hidden = false;
+              document.getElementById("updateToast").hidden = false;
             }
           } else if (outdated && event.data === "up-to-date") {
             fatal.textContent = "この DB を使うには、アプリの新しい版が要ります。新しい版はまだ公開されていません。数分たってから読み込み直してください。";

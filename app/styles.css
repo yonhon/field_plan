@@ -106,6 +106,72 @@ h2 {
   flex-wrap: wrap;
 }
 
+/* お知らせ（app/toast.js）。ヘッダーの真下に、高さを持たない入れ物から重ねて出す。
+   ページをスクロールしても画面の上に残る。消えるお知らせは押せない形にして、下の画面の操作を邪魔しない */
+.toast-anchor {
+  position: sticky;
+  top: 0;
+  z-index: 70;
+  height: 0;
+}
+
+.toasts {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, 100%);
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--text);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 6px 20px rgba(19, 38, 42, 0.22);
+}
+
+.toast[hidden] {
+  display: none;
+}
+
+.toast-error,
+.toast-update {
+  pointer-events: auto;
+}
+
+.toast-error {
+  background: var(--danger);
+}
+
+.toast-btn {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.toast-close {
+  flex: none;
+  padding: 0 4px;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+}
+
 /* ロゴと「圃場計画」。押すと利用者のメニューが開く（見た目は変えない） */
 #brandMenu {
   cursor: pointer;
@@ -1566,9 +1632,9 @@ body.plan-busy #scheduleView {
     flex-wrap: wrap;
   }
 
-  /* 右側（保存の状態と「新しい版にする」。元に戻す・やり直すはスマホでは隠す）は、折り返して次の行に出る。
-     出すものがないときは入れ物ごと隠し、空の行と行の間隔が余白になって、ロゴとタブが上に寄って見えないようにする */
-  .header-right:not(:has(#saveStatus:not(:empty), #updateBtn:not([hidden]))) {
+  /* 右側には、スマホで出すものがない（元に戻す・やり直すは隠し、保存の状態と新しい版はお知らせに出す）。
+     入れ物ごと隠し、折り返した空の行が余白になって、ロゴとタブが上に寄って見えないようにする */
+  .header-right {
     display: none;
   }
 

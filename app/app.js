@@ -35,6 +35,7 @@ import {
 import { initCrops, renderCrops } from "./crops-view.js";
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, renderDiary } from "./diary-view.js";
 import { setUserMenu } from "./user-menu.js";
+import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
@@ -2863,10 +2864,10 @@ async function logout() {
 }
 
 async function main() {
+  initToasts();
   const params = new URLSearchParams(location.search);
   if (params.has("local")) {
     state.store = inOrder(createLocalStore({ strict: params.has("strict") }));
-    $("saveStatus").textContent = "このブラウザーの中だけに保存します";
     setUserMenu({ local: true });
     await startApp();
     return;
