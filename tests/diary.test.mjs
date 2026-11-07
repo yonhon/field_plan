@@ -8,6 +8,7 @@ import {
   exifDateTime,
   fiscalYear,
   insertBlock,
+  monthChoices,
   nextPhotoName,
   periodOf,
   photoMarkdown,
@@ -145,6 +146,11 @@ test("週は月曜から日曜まで、月は 1 日から末日まで", () => {
   assert.equal(days.length % 7, 0);
 });
 
+test("カレンダーの年月のリストは、新しい月から古い月へ、年をまたいで並ぶ", () => {
+  assert.deepEqual(monthChoices("2025-11", "2026-02"), ["2026-02", "2026-01", "2025-12", "2025-11"]);
+  assert.deepEqual(monthChoices("2026-11", "2026-11"), ["2026-11"]);
+});
+
 test("Markdown の表示: 見出し、箇条書き、写真の表、リンク、太字、取り消し線", () => {
   const photo = (name) => `<img data-photo="${name}">`;
   const html = renderMarkdown(
@@ -277,4 +283,5 @@ test("カレンダーの印と、語での検索", async () => {
   assert.deepEqual((await store.diarySearch(["ab", "オクラ"])).map((hit) => hit.date), ["2026-11-02"]);
   assert.deepEqual((await store.diarySearch(["の"])).map((hit) => hit.date), ["2026-11-05", "2026-11-02"]);
   assert.deepEqual(await store.diarySearch(["ない語"]), []);
+  assert.equal(await store.diaryFirstDate(), "2026-11-02");
 });

@@ -2495,6 +2495,21 @@ body.plan-busy #scheduleView {
   margin-bottom: 6px;
 }
 
+.diary-month-select {
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.diary-month-select:hover,
+.diary-month-select:focus {
+  border-color: var(--line);
+}
+
 .diary-month .text-btn {
   font-size: 18px;
   line-height: 1;

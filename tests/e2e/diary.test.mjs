@@ -114,6 +114,28 @@ test("日記: 写真を入れて書き、保存して読み、探し、種類を
   assert.deepEqual(page.errors, []);
 });
 
+test("日記: 年月のリストで、古い日記の月へ移り、検索の欄は「検索ワード」", options, async () => {
+  const data = seed();
+  data.diary = {
+    days: { "2024-05-10": { date: "2024-05-10", title: "古い日", body: "前の年の記録", tags: {}, updated_at: AT } },
+    sections: { "2024-05-10": [{ id: "2024-05-10-01", path: [], crops: [], work: [] }] },
+    photos: {},
+    files: {},
+    history: [],
+  };
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="diary"]');
+  assert.equal(await page.run(`document.getElementById("diarySearch").placeholder`), "検索ワード");
+  // リストは、いちばん古い日記の月（2024 年 5 月）まである
+  await page.waitFor(`Boolean(document.querySelector('#diaryMonthSelect option[value="2024-05"]'))`, "年月のリスト");
+  await page.setValue("#diaryMonthSelect", "2024-05");
+  await page.waitFor(`document.querySelector('#diaryCalendar [data-date="2024-05-10"]')?.classList.contains("has-entry")`, "古い月のカレンダー");
+  assert.equal(await page.run(`document.getElementById("diaryMonthSelect").value`), "2024-05");
+  await page.click('#diaryCalendar [data-date="2024-05-10"]');
+  await page.waitFor(`document.querySelector("#diaryMain .diary-day-title")?.textContent.includes("古い日")`, "古い日の日記");
+  assert.deepEqual(page.errors, []);
+});
+
 test("日記: 保存していない書きかけは、読み込み直しても戻る", options, async () => {
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="diary"]');

@@ -184,6 +184,15 @@ export function shiftPeriod(mode, date, step) {
   return addDays(date, step * (mode === "week" ? 7 : 1));
 }
 
+// カレンダーの年月のリスト。新しい月から古い月へ、last から first まで（どちらも YYYY-MM）
+export function monthChoices(first, last) {
+  const months = [];
+  for (let month = last; month >= first; month = shiftPeriod("month", `${month}-01`, -1).slice(0, 7)) {
+    months.push(month);
+  }
+  return months;
+}
+
 // 月のカレンダーの日付。月曜から始まる週ごとに、前後の月の日も含めて並べる
 export function calendarDays(month) {
   const { from, to } = periodOf("month", `${month}-01`);

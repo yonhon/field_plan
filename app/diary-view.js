@@ -9,6 +9,7 @@ import {
   bodyChunks,
   calendarDays,
   dateLabel,
+  monthChoices,
   exifDateTime,
   insertBlock,
   nextPhotoName,
@@ -46,6 +47,7 @@ const view = {
   month: null, // カレンダーに出している月（YYYY-MM）
   calendar: new Map(), // 日付 → { title, photos }
   calendarKey: null,
+  firstDate: undefined, // いちばん古い日記の日。undefined はまだ読んでいない、null は日記がない
   days: [], // 選んだ期間の日記
   daysKey: null,
   loading: false,
@@ -137,6 +139,9 @@ function ensureLoaded() {
   if (!view.tagNames) {
     tasks.push(ctx.state.store.diaryTagNames().then((names) => (view.tagNames = names)));
   }
+  if (view.firstDate === undefined) {
+    tasks.push(ctx.state.store.diaryFirstDate().then((date) => (view.firstDate = date)));
+  }
   if (!tasks.length || loadingPromise) {
     return;
   }
@@ -148,6 +153,9 @@ function ensureLoaded() {
       view.calendarKey = calendarKey;
       view.daysKey = daysKey;
       view.tagNames ||= { crops: [], work: [] };
+      if (view.firstDate === undefined) {
+        view.firstDate = null;
+      }
     })
     .finally(() => {
       view.loading = false;
@@ -217,11 +225,30 @@ function renderCalendar() {
     $("diaryCalendar"),
     `<div class="diary-month">` +
       `<button type="button" class="text-btn" data-month="-1" aria-label="前の月">‹</button>` +
-      `<strong>${view.month.slice(0, 4)}年${Number(view.month.slice(5))}月</strong>` +
+      monthSelectHtml(today) +
       `<button type="button" class="text-btn" data-month="1" aria-label="次の月">›</button>` +
       `<button type="button" class="chip-btn" data-action="today">今日</button>` +
       `</div><div class="diary-grid">${head}${cells}</div>`
   );
+}
+
+// 年月を押すと、年月のリストが開く。いちばん古い日記の月から、今月（か、出している月）まで
+function monthSelectHtml(today) {
+  const months = [view.month, today.slice(0, 7), view.firstDate?.slice(0, 7)].filter(Boolean).sort();
+  const groups = new Map();
+  for (const month of monthChoices(months[0], months[months.length - 1])) {
+    const year = month.slice(0, 4);
+    groups.set(year, [...(groups.get(year) || []), month]);
+  }
+  const options = [...groups]
+    .map(
+      ([year, list]) =>
+        `<optgroup label="${year}年">${list
+          .map((month) => `<option value="${month}"${month === view.month ? " selected" : ""}>${year}年${Number(month.slice(5))}月</option>`)
+          .join("")}</optgroup>`
+    )
+    .join("");
+  return `<select id="diaryMonthSelect" class="diary-month-select" aria-label="カレンダーの年月">${options}</select>`;
 }
 
 function tagsHtml(day, section, key) {
@@ -470,6 +497,7 @@ async function saveEditor() {
     ctx.setStatus("保存しました");
     view.date = e.date;
     view.month = e.date.slice(0, 7);
+    view.firstDate = undefined;
     await refresh({ calendar: true, period: true });
   } catch (error) {
     failed(error);
@@ -658,6 +686,12 @@ export function initDiary(context) {
       renderDiary();
     } else if (target.dataset.action === "today") {
       pick(localToday());
+    }
+  });
+  $("diaryCalendar").addEventListener("change", (event) => {
+    if (event.target.id === "diaryMonthSelect" && event.target.value) {
+      view.month = event.target.value;
+      renderDiary();
     }
   });
   $("diarySearchForm").addEventListener("submit", (event) => {

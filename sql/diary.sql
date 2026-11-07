@@ -182,6 +182,19 @@ begin
 end;
 $$;
 
+-- いちばん古い日記の日。日記がなければ null（カレンダーの年月のリストを、ここから始める）
+create or replace function field.diary_first_date()
+returns date
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not field.is_owner() then
+    raise exception 'この利用者は日記を読めません。' using errcode = '42501';
+  end if;
+  return (select min(entry_date) from diary.days);
+end;
+$$;
+
 -- 作物と作業の種類の名前の一覧（画面で種類を直すときの選択肢）
 create or replace function field.diary_tag_names()
 returns jsonb
@@ -221,6 +234,7 @@ revoke all on function field.diary_photo_names(date) from public, anon;
 revoke all on function field.diary_calendar(date, date) from public, anon;
 revoke all on function field.diary_search(text[]) from public, anon;
 revoke all on function field.diary_tag_names() from public, anon;
+revoke all on function field.diary_first_date() from public, anon;
 revoke all on function field.diary_add_photo(text, date, timestamp, text, int, int) from public, anon;
 grant execute on function field.diary_save_day(date, text, text, jsonb, jsonb, timestamptz) to authenticated;
 grant execute on function field.diary_get_days(date, date) to authenticated;
@@ -228,6 +242,7 @@ grant execute on function field.diary_photo_names(date) to authenticated;
 grant execute on function field.diary_calendar(date, date) to authenticated;
 grant execute on function field.diary_search(text[]) to authenticated;
 grant execute on function field.diary_tag_names() to authenticated;
+grant execute on function field.diary_first_date() to authenticated;
 grant execute on function field.diary_add_photo(text, date, timestamp, text, int, int) to authenticated;
 
 -- 日記の写真の置き場。非公開のまま、本人だけが上げて読めるようにする（公開キーでは一覧も取り出しもできない）

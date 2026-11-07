@@ -307,6 +307,10 @@ export function createSupabaseStore(client, options) {
     async diaryTagNames() {
       return check(await client.rpc("diary_tag_names"));
     },
+    // いちばん古い日記の日（YYYY-MM-DD）。日記がなければ null
+    async diaryFirstDate() {
+      return check(await client.rpc("diary_first_date"));
+    },
     async diaryPhotoNames(date) {
       return check(await client.rpc("diary_photo_names", { p_date: date }));
     },
@@ -729,6 +733,9 @@ export function createLocalStore({ strict = false } = {}) {
     },
     async diaryTagNames() {
       return { crops: LOCAL_TAG_WORDS.crops.map((item) => item.name), work: LOCAL_TAG_WORDS.work.map((item) => item.name) };
+    },
+    async diaryFirstDate() {
+      return Object.keys(read().diary?.days || {}).sort()[0] || null;
     },
     async diaryPhotoNames(date) {
       return Object.values(read().diary?.photos || {}).filter((photo) => photo.date === date).map((photo) => photo.name).sort();
