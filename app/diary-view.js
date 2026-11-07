@@ -85,6 +85,20 @@ function writeDraft(date, draft) {
   }
 }
 
+// 保存していない書きかけがあるか（ログアウトの前に確かめる）
+export function hasDiaryDrafts() {
+  return Object.keys(readDrafts()).length > 0;
+}
+
+// 書きかけをすべて消す（ログアウトのとき。日記にはほかの方の名前も入るので、端末に残さない）
+export function clearDiaryDrafts() {
+  try {
+    localStorage.removeItem(DRAFTS_KEY);
+  } catch {
+    // 消せなくても、ログアウトは続ける
+  }
+}
+
 function keepDraft() {
   const e = view.editing;
   if (e) {

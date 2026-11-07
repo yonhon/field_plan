@@ -33,7 +33,8 @@ import {
   worldToImage,
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
-import { initDiary, renderDiary } from "./diary-view.js";
+import { clearDiaryDrafts, hasDiaryDrafts, initDiary, renderDiary } from "./diary-view.js";
+import { setUserMenu } from "./user-menu.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
@@ -2847,11 +2848,26 @@ async function startApp() {
   });
 }
 
+// ログアウト。日記の書きかけが端末に残っていれば、消してよいかを確かめる（日記にはほかの方の名前も入るので、端末に残さない）
+async function logout() {
+  if (
+    hasDiaryDrafts() &&
+    !(await confirmAction({ message: "保存していない書きかけがあります。消してログアウトしますか", action: "消してログアウト", cancel: "キャンセル" }))
+  ) {
+    return;
+  }
+  clearDiaryDrafts();
+  await state.client.auth.signOut();
+  forgetImageUrls();
+  location.reload();
+}
+
 async function main() {
   const params = new URLSearchParams(location.search);
   if (params.has("local")) {
     state.store = inOrder(createLocalStore({ strict: params.has("strict") }));
     $("saveStatus").textContent = "このブラウザーの中だけに保存します";
+    setUserMenu({ local: true });
     await startApp();
     return;
   }
@@ -2862,7 +2878,7 @@ async function main() {
   $("loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     $("loginError").textContent = "";
-    const { error } = await state.client.auth.signInWithPassword({
+    const { data: signedIn, error } = await state.client.auth.signInWithPassword({
       email: $("loginEmail").value,
       password: $("loginPassword").value,
     });
@@ -2870,18 +2886,13 @@ async function main() {
       $("loginError").textContent = "ログインできませんでした。メールアドレスとパスワードを確かめてください。";
       return;
     }
-    $("logoutBtn").hidden = false;
+    setUserMenu({ email: signedIn.user?.email, logout });
     await startApp();
-  });
-  $("logoutBtn").addEventListener("click", async () => {
-    await state.client.auth.signOut();
-    forgetImageUrls();
-    location.reload();
   });
 
   const { data } = await state.client.auth.getSession();
   if (data.session) {
-    $("logoutBtn").hidden = false;
+    setUserMenu({ email: data.session.user?.email, logout });
     await startApp();
   } else {
     $("loginView").hidden = false;

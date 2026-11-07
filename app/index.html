@@ -19,9 +19,13 @@
   </head>
   <body>
     <header class="page-header">
-      <div class="brand">
-        <img class="brand-logo" src="./icons/A_mark_color.svg" alt="いのーファーム" width="36" height="36" />
-        <h1>圃場計画</h1>
+      <!-- ロゴと「圃場計画」を押すと、利用者のメニュー（app/user-menu.js）が開く -->
+      <div class="brand-area">
+        <div id="brandMenu" class="brand" role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu">
+          <img class="brand-logo" src="./icons/A_mark_color.svg" alt="いのーファーム" width="36" height="36" />
+          <h1>圃場計画</h1>
+        </div>
+        <div id="userMenu" class="user-menu" role="menu" aria-label="利用者のメニュー" hidden></div>
       </div>
       <nav id="viewTabs" class="control-group" aria-label="画面の切り替え" hidden>
         <button class="tab-btn is-active" data-view="map">圃場図<span id="mapBadge" class="tab-badge" hidden></span></button>
@@ -35,7 +39,6 @@
         <button id="redoBtn" class="text-btn edit-only" title="やり直す（Ctrl+Y）" hidden>↷ やり直す</button>
         <span id="saveStatus" class="muted" role="status"></span>
         <button id="updateBtn" class="text-btn" title="アプリの新しい版を取り終えました。読み込み直すと切り替わります" hidden>新しい版にする</button>
-        <button id="logoutBtn" class="text-btn" hidden>ログアウト</button>
       </div>
     </header>
 
@@ -420,7 +423,7 @@
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // Service Worker（sw.js）が一式をそろえて出しているときは、そのまま読む。
       // そうでないとき（初めて開いたとき、?local=1）は、読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js"];
       // ?local=1 は動作確認用なので、Service Worker を登録しない（手元のファイルを直したら、すぐ反映させたい）
       if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("local")) {
         navigator.serviceWorker.register("./sw.js").catch(() => {});

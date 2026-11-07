@@ -106,6 +106,53 @@ h2 {
   flex-wrap: wrap;
 }
 
+/* ロゴと「圃場計画」。押すと利用者のメニューが開く（見た目は変えない） */
+#brandMenu {
+  cursor: pointer;
+}
+
+/* メニューは、ロゴと「圃場計画」の真下に出す（スマホでヘッダーが折り返しても） */
+.brand-area {
+  position: relative;
+}
+
+.user-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: -2px;
+  z-index: 60;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(19, 38, 42, 0.16);
+}
+
+.user-menu-account {
+  margin: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.user-menu-item {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 10px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 14px;
+}
+
+.user-menu-item:hover,
+.user-menu-item:focus-visible {
+  background: var(--bg);
+}
+
 .brand-logo {
   width: 36px;
   height: 36px;
