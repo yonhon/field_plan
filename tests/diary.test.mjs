@@ -181,7 +181,7 @@ test("写真の表では 1 行目も見出しにせず、写真の説明は書�
   assert.doesNotMatch(html, /<th>/);
   assert.match(html, /<td><div class="diary-figure"><span class="diary-caption">4\/27<\/span><img data-photo="a.jpg"><\/div><\/td>/);
   assert.match(html, /<td><div class="diary-figure"><img data-photo="b.jpg"><span class="diary-caption">支柱を立てた<\/span><\/div><\/td>/);
-  assert.match(html, /<tr><td><div class="diary-figure"><img data-photo="c.jpg"><\/div><\/td><td class="diary-side"><\/td><\/tr>/);
+  assert.match(html, /<tr><td><div class="diary-figure"><img data-photo="c.jpg"><\/div><\/td><td><\/td><\/tr>/);
 });
 
 test("検索の語に印を付け、前後の文を切り出す。全角と半角の違いは見ない", () => {

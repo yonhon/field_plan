@@ -315,7 +315,8 @@ const hasPhoto = (text) => /!\[[^\]]*\]\([^)]+\)/.test(text);
 // 写真の表のセル。写真と説明の文を、書いた順に縦に並べる。説明は写真と同じ幅で折り返す
 function photoCell(text, photo) {
   if (!hasPhoto(text)) {
-    return `<td class="diary-side">${inline(text, photo)}</td>`;
+    // 空のセルは幅を持たせない（Google ドキュメントの表の名残で、写真の列に空のセルがあることがある）
+    return text.trim() ? `<td class="diary-side">${inline(text, photo)}</td>` : "<td></td>";
   }
   const parts = [];
   let at = 0;
