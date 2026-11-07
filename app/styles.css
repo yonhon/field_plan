@@ -84,14 +84,35 @@ h2 {
   white-space: pre-line;
 }
 
+/* ヘッダーは「ロゴ・タブ・右側（元に戻すなど）」。ロゴと右側で余りの幅を半分ずつ分け、タブを真ん中に置く。
+   余りが足りないときは、右側が先に 0 まで縮み、ロゴの幅は削らない（タブは少し右に寄るが 1 行に収まる）。
+   ロゴとタブそのものが入りきらないときだけ、タブを次の行に折り返す。
+   右側の幅 0 が折り返しの原因にならないよう、横の間隔は gap ではなく、タブの左右の余白（同じ幅）で取る */
 .page-header {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  column-gap: 0;
+  row-gap: 12px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+}
+
+.page-header > .brand-area {
+  flex: 1 1 0;
+  min-width: max-content;
+}
+
+.page-header > #viewTabs {
+  flex: none;
+  margin: 0 6px;
+}
+
+.page-header > .header-right {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: flex-end;
 }
 
 .brand,
@@ -1632,11 +1653,8 @@ body.plan-busy #scheduleView {
     flex-wrap: wrap;
   }
 
-  /* 右側には、スマホで出すものがない（元に戻す・やり直すは隠し、保存の状態と新しい版はお知らせに出す）。
-     入れ物ごと隠し、折り返した空の行が余白になって、ロゴとタブが上に寄って見えないようにする */
-  .header-right {
-    display: none;
-  }
+  /* 右側は、スマホでは中身がない（元に戻す・やり直すは隠し、保存の状態と新しい版はお知らせに出す）。
+     入れ物は消さずに残す。消すと、ロゴとタブの 2 つだけになり、タブが右端に寄る */
 
   .view-only {
     display: inline;
