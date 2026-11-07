@@ -1566,6 +1566,12 @@ body.plan-busy #scheduleView {
     flex-wrap: wrap;
   }
 
+  /* 右側（保存の状態と「新しい版にする」。元に戻す・やり直すはスマホでは隠す）は、折り返して次の行に出る。
+     出すものがないときは入れ物ごと隠し、空の行と行の間隔が余白になって、ロゴとタブが上に寄って見えないようにする */
+  .header-right:not(:has(#saveStatus:not(:empty), #updateBtn:not([hidden]))) {
+    display: none;
+  }
+
   .view-only {
     display: inline;
   }
