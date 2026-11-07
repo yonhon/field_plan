@@ -2463,12 +2463,6 @@ body.plan-busy #scheduleView {
 
 /* ---- 農作業日記 ---- */
 
-/* 日記の長さで画面の右のスクロールバーが出たり消えたりすると、その幅だけ全体が左右に動く。
-   日記の画面では、スクロールバーの場所をいつも空けておき、前の日・次の日へ移っても枠とボタンを動かさない */
-html:has(#diaryView:not([hidden])) {
-  scrollbar-gutter: stable;
-}
-
 /* 日・週・月と、検索の欄を 1 行に並べる */
 .diary-top {
   display: flex;
@@ -2868,19 +2862,26 @@ h4.diary-heading {
   margin: 0 auto 10px;
 }
 
-/* PC は、カレンダーを左に置き、日記を右に並べる */
+/* PC は、カレンダーを左に置き、日記を右に並べる。画面はブラウザーの高さちょうどに収め、ページはスクロールさせない。
+   日記の枠はいつも同じ大きさで、収まらない日だけ枠の中にスクロールバーを出す。
+   ページのスクロールバーが出たり消えたりして、全体が左右に動くのを防ぐため */
 @media (min-width: 801px) {
   .diary {
     display: grid;
     grid-template-columns: 360px minmax(0, 1fr);
-    align-items: start;
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
   }
 
   .diary-nav {
-    position: sticky;
-    top: 12px;
+    align-self: start;
   }
 
+  .diary-main {
+    min-height: 0;
+    overflow-y: auto;
+  }
 }
 
 @media (max-width: 800px) {

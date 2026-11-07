@@ -360,23 +360,34 @@ function editorHtml() {
   );
 }
 
+// いま日記の枠に出しているもの。変わったら、枠のスクロールをいちばん上に戻す（前の日の読んでいた位置を残さない）
+let shown = null;
+
 function drawMain() {
   const main = $("diaryMain");
+  const now = view.editing ? `edit:${view.editing.date}` : view.results ? `search:${view.query}` : `period:${view.mode}:${periodOf(view.mode, view.date).from}`;
+  const moved = shown !== null && now !== shown;
+  shown = now;
+  $("diaryView").classList.toggle("is-editing", Boolean(view.editing));
   if (view.editing) {
-    $("diaryView").classList.add("is-editing");
     draw(main, editorHtml());
     if (view.editing.preview) {
       requestUrls(photoNames(view.editing.body));
     }
-    return;
-  }
-  $("diaryView").classList.remove("is-editing");
-  if (view.results) {
+  } else if (view.results) {
     draw(main, resultsHtml());
-    return;
+  } else {
+    draw(main, periodHtml());
+    requestUrls(view.days.flatMap((day) => photoNames(day.body)));
   }
-  draw(main, periodHtml());
-  requestUrls(view.days.flatMap((day) => photoNames(day.body)));
+  // 描き直したあとに戻す（draw は、押したボタンの位置を保とうとしてスクロールを動かすことがある）
+  if (moved) {
+    main.scrollTop = 0;
+    // スマホはページごとスクロールするので、日記の枠の頭が画面の上に隠れていたら、見える所まで戻す
+    if (main.getBoundingClientRect().top < 0) {
+      main.scrollIntoView({ block: "start" });
+    }
+  }
 }
 
 export function renderDiary() {

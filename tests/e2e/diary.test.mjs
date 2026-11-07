@@ -137,6 +137,41 @@ test("日記: 年月のリストで、古い日記の月へ移り、検索の欄
   assert.deepEqual(page.errors, []);
 });
 
+test("日記: PC では日記の枠の中だけがスクロールし、日を移るといちばん上に戻る", options, async () => {
+  const data = seed();
+  const long = Array.from({ length: 120 }, (_, i) => `${i + 1} 行目の記録`).join(String.fromCharCode(10));
+  data.diary = {
+    days: {
+      "2026-10-20": { date: "2026-10-20", title: "長い日", body: long, tags: {}, updated_at: AT },
+      "2026-10-21": { date: "2026-10-21", title: "短い日", body: "短い", tags: {}, updated_at: AT },
+    },
+    sections: {
+      "2026-10-20": [{ id: "2026-10-20-01", path: [], crops: [], work: [] }],
+      "2026-10-21": [{ id: "2026-10-21-01", path: [], crops: [], work: [] }],
+    },
+    photos: {},
+    files: {},
+    history: [],
+  };
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="diary"]');
+  await page.setValue("#diaryMonthSelect", "2026-10");
+  await page.click('#diaryCalendar [data-date="2026-10-20"]');
+  await page.waitFor(`document.querySelector("#diaryMain .diary-day-title")?.textContent.includes("長い日")`, "長い日");
+  // ページはスクロールせず、日記の枠の中がスクロールする
+  const pageScrolls = () => page.run(`document.scrollingElement.scrollHeight > document.scrollingElement.clientHeight`);
+  assert.equal(await pageScrolls(), false);
+  assert.equal(await page.run(`(() => { const m = document.getElementById("diaryMain"); return m.scrollHeight > m.clientHeight; })()`), true);
+  const navTop = await page.run(`document.querySelector(".diary-nav").getBoundingClientRect().top`);
+  await page.run(`document.getElementById("diaryMain").scrollTop = 500`);
+  await page.run(`document.querySelector('#diaryMain [data-step="1"]').click()`);
+  await page.waitFor(`document.querySelector("#diaryMain .diary-day-title")?.textContent.includes("短い日")`, "次の日");
+  assert.equal(await page.run(`document.getElementById("diaryMain").scrollTop`), 0);
+  assert.equal(await pageScrolls(), false);
+  assert.equal(await page.run(`document.querySelector(".diary-nav").getBoundingClientRect().top`), navTop);
+  assert.deepEqual(page.errors, []);
+});
+
 test("日記: 保存していない書きかけは、読み込み直しても戻る", options, async () => {
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="diary"]');
