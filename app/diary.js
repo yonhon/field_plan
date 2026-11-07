@@ -310,6 +310,63 @@ function tableCells(line) {
 }
 
 const isSeparator = (cells) => cells.every((cell) => /^:?-+:?$/.test(cell));
+const hasPhoto = (text) => /!\[[^\]]*\]\([^)]+\)/.test(text);
+
+// 写真の表のセル。写真と説明の文を、書いた順に縦に並べる。説明は写真と同じ幅で折り返す
+function photoCell(text, photo) {
+  if (!hasPhoto(text)) {
+    return `<td class="diary-side">${inline(text, photo)}</td>`;
+  }
+  const parts = [];
+  let at = 0;
+  for (const match of text.matchAll(/!\[[^\]]*\]\([^)]+\)/g)) {
+    const before = text.slice(at, match.index).trim();
+    if (before) {
+      parts.push(`<span class="diary-caption">${inline(before, photo)}</span>`);
+    }
+    parts.push(inline(match[0], photo));
+    at = match.index + match[0].length;
+  }
+  const after = text.slice(at).trim();
+  if (after) {
+    parts.push(`<span class="diary-caption">${inline(after, photo)}</span>`);
+  }
+  return `<td><div class="diary-figure">${parts.join("")}</div></td>`;
+}
+
+// 表。写真が 1 枚でも入っていれば写真の表（枠線なしで並べる。1 行目も見出しにしない）、
+// なければ文字の表（枠線を付け、区切りの行の上の行を見出しとして太字にする）
+function tableHtml(lines, photo) {
+  const rows = [];
+  let headerRows = 0;
+  for (const line of lines) {
+    const cells = tableCells(line);
+    if (isSeparator(cells)) {
+      headerRows ||= rows.length;
+    } else {
+      rows.push(cells);
+    }
+  }
+  const width = Math.max(...rows.map((row) => row.length));
+  const full = (row) => Array.from({ length: width }, (_, k) => row[k] || "");
+  if (rows.some((row) => row.some(hasPhoto))) {
+    const body = rows
+      .filter((row) => row.some(Boolean))
+      .map((row) => `<tr>${full(row).map((cell) => photoCell(cell, photo)).join("")}</tr>`)
+      .join("");
+    return `<div class="diary-table is-photos"><table>${body}</table></div>`;
+  }
+  const head = rows
+    .slice(0, headerRows)
+    .map((row) => `<tr>${full(row).map((cell) => `<th>${inline(cell, photo)}</th>`).join("")}</tr>`)
+    .join("");
+  const body = rows
+    .slice(headerRows)
+    .filter((row) => row.some(Boolean))
+    .map((row) => `<tr>${full(row).map((cell) => `<td>${inline(cell, photo)}</td>`).join("")}</tr>`)
+    .join("");
+  return `<div class="diary-table is-text"><table>${head ? `<thead>${head}</thead>` : ""}<tbody>${body}</tbody></table></div>`;
+}
 
 // headingBase: 本文の見出し（##）を、画面の何番目の見出しにするか
 export function renderMarkdown(body, photo, { headingBase = 3 } = {}) {
@@ -326,20 +383,12 @@ export function renderMarkdown(body, photo, { headingBase = 3 } = {}) {
       html.push(`<h${level} class="diary-heading">${inline(heading[2].trim(), photo)}</h${level}>`);
       i += 1;
     } else if (line.trim().startsWith("|")) {
-      const rows = [];
+      const block = [];
       while (i < lines.length && lines[i].trim().startsWith("|")) {
-        const cells = tableCells(lines[i]);
-        if (!isSeparator(cells)) {
-          rows.push(cells);
-        }
+        block.push(lines[i]);
         i += 1;
       }
-      const width = Math.max(...rows.map((row) => row.length));
-      const body = rows
-        .filter((row) => row.some(Boolean))
-        .map((row) => `<tr>${Array.from({ length: width }, (_, k) => `<td>${inline(row[k] || "", photo)}</td>`).join("")}</tr>`)
-        .join("");
-      html.push(`<div class="diary-table"><table>${body}</table></div>`);
+      html.push(tableHtml(block, photo));
     } else if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
       const ordered = /^\s*\d+[.)]\s+/.test(line);
       const items = [];

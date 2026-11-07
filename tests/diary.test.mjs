@@ -159,11 +159,29 @@ test("Markdown の表示: 見出し、箇条書き、写真の表、リンク、
   );
   assert.match(html, /<h3 class="diary-heading">見出し<\/h3>/);
   assert.match(html, /<li class="diary-depth-0"><strong>太字<\/strong> と <del>消した<\/del><\/li><li class="diary-depth-1">下の段<\/li>/);
-  assert.match(html, /<table><tr><td><img data-photo="a.jpg"><\/td><td>説明<\/td><\/tr><\/table>/);
+  // 写真の横のセルの説明は、写真の表の中の文として出す
+  assert.match(html, /<div class="diary-table is-photos"><table><tr><td><div class="diary-figure"><img data-photo="a.jpg"><\/div><\/td><td class="diary-side">説明<\/td><\/tr><\/table><\/div>/);
   assert.match(html, /<a href="https:\/\/example.test\/a" target="_blank" rel="noopener">資料<\/a>/);
   assert.match(html, /&lt;script&gt;/);
   // http(s) でないリンクは、リンクにしない
   assert.doesNotMatch(renderMarkdown("[x](javascript:alert(1))", photo), /<a /);
+});
+
+test("文字の表は枠線付きで、区切りの行の上の行を見出しにする", () => {
+  const html = renderMarkdown(["| 品種 | 株間 |", "| :---- | :---- |", "| 島にんじん | 10cm |", "|  |  |"].join(String.fromCharCode(10)), () => "");
+  assert.equal(
+    html,
+    '<div class="diary-table is-text"><table><thead><tr><th>品種</th><th>株間</th></tr></thead><tbody><tr><td>島にんじん</td><td>10cm</td></tr></tbody></table></div>'
+  );
+});
+
+test("写真の表では 1 行目も見出しにせず、写真の説明は書いた順に写真の上か下に添える", () => {
+  const photo = (name) => `<img data-photo="${name}">`;
+  const html = renderMarkdown(["| 4/27 ![](images/a.jpg) | ![](images/b.jpg) 支柱を立てた |", "| :---- | :---- |", "| ![](images/c.jpg) |  |"].join(String.fromCharCode(10)), photo);
+  assert.doesNotMatch(html, /<th>/);
+  assert.match(html, /<td><div class="diary-figure"><span class="diary-caption">4\/27<\/span><img data-photo="a.jpg"><\/div><\/td>/);
+  assert.match(html, /<td><div class="diary-figure"><img data-photo="b.jpg"><span class="diary-caption">支柱を立てた<\/span><\/div><\/td>/);
+  assert.match(html, /<tr><td><div class="diary-figure"><img data-photo="c.jpg"><\/div><\/td><td class="diary-side"><\/td><\/tr>/);
 });
 
 test("検索の語に印を付け、前後の文を切り出す。全角と半角の違いは見ない", () => {

@@ -2790,10 +2790,42 @@ h4.diary-heading {
   border-collapse: collapse;
 }
 
-.diary-table td {
+/* 写真の表: 枠線なしで写真を並べる。説明は写真のすぐ上か下に、写真と同じ幅で添える */
+.diary-table.is-photos td {
   padding: 2px;
   vertical-align: top;
+}
+
+.diary-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min-content;
+}
+
+.diary-caption {
   font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.diary-table.is-photos .diary-side {
+  min-width: 8em;
+  padding: 2px 8px;
+}
+
+/* 文字の表: 枠線を付け、1 行目（区切りの行の上）を見出しとして太字にする */
+.diary-table.is-text th,
+.diary-table.is-text td {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.diary-table.is-text th {
+  background: var(--bg);
+  font-weight: 700;
 }
 
 .diary-photo {
