@@ -92,9 +92,10 @@ test("日記: 写真を入れて書き、保存して読み、探し、種類を
   await page.waitFor(`document.querySelector("dialog.diary-viewer[open]")?.textContent.includes("IMG_0001.JPG")`, "写真の窓");
   await page.click('dialog.diary-viewer [data-action="close"]');
 
-  // 週の表示にも出る
-  await page.click('#diaryModes [data-mode="week"]');
-  await page.waitFor(`document.querySelector("#diaryMain .diary-day-title")?.textContent.includes("試験の日")`, "週の表示");
+  // 月の表示にも出る。週の表示はない
+  assert.equal(await page.run(`document.querySelectorAll("#diaryModes [data-mode]").length`), 2);
+  await page.click('#diaryModes [data-mode="month"]');
+  await page.waitFor(`document.querySelector("#diaryMain .diary-day-title")?.textContent.includes("試験の日")`, "月の表示");
 
   // 語で探す
   await page.run(`document.getElementById("diarySearch").value = "ﾄﾏﾄ"`);

@@ -1,4 +1,4 @@
-// 「日記」の画面（docs/actuals-plan.md の 11.1）。農作業日記を 1 日ずつ書き、カレンダーで日・週・月を選んで読み、語で探す。
+// 「日記」の画面（docs/actuals-plan.md の 11.1）。農作業日記を 1 日ずつ書き、カレンダーで日か月を選んで読み、語で探す。
 // 日記は圃場ごとではなく共通。画面の状態は view に持ち、描くときは view から HTML を作る（docs/implementation-rules.md）。
 // 書いている本文は、打つたびに view と端末の中（書きかけ）に入れるだけで、入れ物は描き直さない（日本語の変換が切れるため）。
 import { confirmAction, notify, notifySaveFailed } from "./dialog.js";
@@ -36,14 +36,13 @@ const escapeHtml = (text) =>
 const DRAFTS_KEY = "field_plan_diary_drafts";
 const MODES = [
   ["day", "日"],
-  ["week", "週"],
   ["month", "月"],
 ];
 
 let ctx = null; // { state, setStatus }
 const view = {
   mode: "day",
-  date: null, // 選んでいる日。週と月は、この日を含む期間
+  date: null, // 選んでいる日。月は、この日を含む月
   month: null, // カレンダーに出している月（YYYY-MM）
   calendar: new Map(), // 日付 → { title, photos }
   calendarKey: null,
@@ -289,21 +288,21 @@ function dayHtml(day, { single }) {
     return heading + renderMarkdown(chunk.text, photoHtml, { headingBase: 4 }) + (section ? tagsHtml(day, section, key) : "");
   });
   const title = `${single ? "" : `<a href="#diary" data-action="open-day" data-date="${day.date}">${dateLabel(day.date)}</a> `}${escapeHtml(day.title)}`;
-  return (
-    `<article class="diary-day" data-date="${day.date}">` +
-    `<div class="panel-heading"><h3 class="diary-day-title">${title}</h3>` +
-    `<button type="button" class="chip-btn" data-action="edit" data-date="${day.date}">直す</button></div>` +
-    `${parts.join("")}</article>`
-  );
+  const editButton = (extra) => `<button type="button" class="chip-btn${extra}" data-action="edit" data-date="${day.date}">編集</button>`;
+  // 日の表示で題がないときは、題の行を作らない。「編集」は右に寄せ、本文はその横から始める
+  const head = single && !day.title.trim()
+    ? editButton(" diary-edit-float")
+    : `<div class="panel-heading"><h3 class="diary-day-title">${title}</h3>${editButton("")}</div>`;
+  return `<article class="diary-day" data-date="${day.date}">${head}${parts.join("")}</article>`;
 }
 
 function periodHtml() {
   const single = view.mode === "day";
   const heading =
     `<div class="panel-heading diary-period">` +
-    `<button type="button" class="text-btn" data-step="-1">‹ 前の${single ? "日" : view.mode === "week" ? "週" : "月"}</button>` +
+    `<button type="button" class="text-btn" data-step="-1">‹ 前の${single ? "日" : "月"}</button>` +
     `<h2>${escapeHtml(periodLabel(view.mode, view.date))}</h2>` +
-    `<button type="button" class="text-btn" data-step="1">次の${single ? "日" : view.mode === "week" ? "週" : "月"} ›</button></div>`;
+    `<button type="button" class="text-btn" data-step="1">次の${single ? "日" : "月"} ›</button></div>`;
   if (view.loading && !view.days.length) {
     return `${heading}<p class="muted">読み込んでいます…</p>`;
   }

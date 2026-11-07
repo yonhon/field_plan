@@ -2463,20 +2463,24 @@ body.plan-busy #scheduleView {
 
 /* ---- 農作業日記 ---- */
 
+/* 日・週・月と、検索の欄を 1 行に並べる */
 .diary-top {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 10px;
+}
+
+.diary-top .log-modes {
+  flex: none;
+  flex-wrap: nowrap;
 }
 
 .diary-search {
   display: flex;
   gap: 6px;
-  flex: 1 1 220px;
-  max-width: 360px;
+  flex: 1;
+  min-width: 0;
 }
 
 .diary-search input {
@@ -2495,6 +2499,7 @@ body.plan-busy #scheduleView {
   margin-bottom: 6px;
 }
 
+/* 年月の表示。押すと年月のリストが開く。リストの印（下向きの矢印）は出さない */
 .diary-month-select {
   padding: 4px 6px;
   border: 1px solid transparent;
@@ -2503,6 +2508,8 @@ body.plan-busy #scheduleView {
   font-weight: 700;
   font-size: 14px;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .diary-month-select:hover,
@@ -2586,9 +2593,15 @@ body.plan-busy #scheduleView {
 }
 
 .diary-day {
+  display: flow-root;
   padding: 10px 0 14px;
   border-top: 1px solid var(--line);
   line-height: 1.7;
+}
+
+.diary-edit-float {
+  float: right;
+  margin: 0 0 6px 10px;
 }
 
 .diary-day-title {
@@ -2719,12 +2732,15 @@ h4.diary-heading {
   margin-bottom: 8px;
 }
 
-.diary-photo-btn {
+/* 「写真を入れる」は label なので、入力欄の label の余白と文字の指定を外し、「見出し」のボタンとそろえる */
+.diary-main .diary-photo-btn {
   display: inline-flex;
   flex-direction: row;
+  align-items: center;
   margin: 0;
   color: var(--text);
   font-size: 13px;
+  line-height: normal;
   cursor: pointer;
 }
 
@@ -2816,23 +2832,9 @@ h4.diary-heading {
     top: 12px;
   }
 
-  .diary-top .diary-search {
-    flex-basis: 100%;
-    max-width: none;
-  }
 }
 
 @media (max-width: 800px) {
-  .diary-top {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .diary-search {
-    flex: none;
-    max-width: none;
-  }
-
   /* 書いているあいだは、カレンダーを隠して書く欄を上に出す */
   .diary.is-editing .diary-nav {
     display: none;
