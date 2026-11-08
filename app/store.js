@@ -3,23 +3,19 @@
 // さらに &strict=1 を付けると、保存の遅れと外部キーを DB に近づける。
 import { DEFAULT_WORK_TYPES } from "./schedule.js";
 import { uploadWithProgress } from "./upload.js";
-import { pathKey, photoNames, sectionTags } from "./diary.js";
+import { pathKey, photoNames, pickLabels } from "./diary.js";
 
 const BUCKET = "field-plan";
 // 農作業日記の写真の置き場（inoo_farm と共用。非公開）
 const DIARY_BUCKET = "diary-photos";
-// DB を使わないモードの、作物と作業の種類を見分ける語（動作確認用の見本）
-const LOCAL_TAG_WORDS = {
-  crops: [
-    { name: "オクラ", words: ["オクラ"] },
-    { name: "トマト", words: ["トマト", "ミニトマト"] },
-    { name: "大根", words: ["大根", "ダイコン"] },
-  ],
-  work: [
-    { name: "定植", words: ["定植"] },
-    { name: "収穫", words: ["収穫"] },
-    { name: "農薬散布", words: ["防除", "散布"] },
-  ],
+// DB を使わないモードの、タグの言葉の一覧（動作確認用の見本）。Claude のタグは、テストが diary.days の ai_tags に入れる
+const LOCAL_TAG_NAMES = {
+  crops: ["オクラ", "トマト", "大根"],
+  work: ["定植・播種", "収穫", "防除"],
+  place: ["露地", "ハウス"],
+  issues: ["アブラムシ", "うどんこ病"],
+  stage: ["発芽", "収穫期"],
+  topic: ["講義・研修"],
 };
 // この画面の版。DB の field.app_compat の min_version より古ければ、起動のときに新しい版を読み込み直す。
 // 古い画面では正しく書けない形に DB を変えるときに 1 つ上げ、DB の min_version も同じ値にする（sql/field.sql）
@@ -306,6 +302,10 @@ export function createSupabaseStore(client, options) {
     },
     async diaryTagNames() {
       return check(await client.rpc("diary_tag_names"));
+    },
+    // 対象（作付か区画）に付いた日記の節。ids は作付か区画の ID の並び
+    async diaryTargetSections(ids) {
+      return check(await client.rpc("diary_target_sections", { p_ids: ids }));
     },
     // いちばん古い日記の日（YYYY-MM-DD）。日記がなければ null
     async diaryFirstDate() {
@@ -732,7 +732,17 @@ export function createLocalStore({ strict = false } = {}) {
         .map(({ date, title, body }) => ({ date, title, body }));
     },
     async diaryTagNames() {
-      return { crops: LOCAL_TAG_WORDS.crops.map((item) => item.name), work: LOCAL_TAG_WORDS.work.map((item) => item.name) };
+      return structuredClone(LOCAL_TAG_NAMES);
+    },
+    async diaryTargetSections(ids) {
+      const diary = read().diary || {};
+      return Object.entries(diary.sections || {})
+        .flatMap(([date, sections]) =>
+          sections
+            .filter((section) => (section.labels?.targets || []).some((item) => ids.includes(item.id)))
+            .map((section) => ({ id: section.id, date, title: diary.days?.[date]?.title || "", heading: section.path.join(" > "), body: section.body || "" }))
+        )
+        .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
     },
     async diaryFirstDate() {
       return Object.keys(read().diary?.days || {}).sort()[0] || null;
@@ -759,12 +769,22 @@ export function createLocalStore({ strict = false } = {}) {
         }
         const saved = title.trim() || body.trim() ? new Date().toISOString() : null;
         if (saved) {
-          diary.days[date] = { date, title, body, tags: kept, updated_at: saved };
-          diary.sections[date] = sections.map((section, i) => ({
-            id: `${date}-${String(i + 1).padStart(2, "0")}`,
-            path: section.path,
-            ...(kept[pathKey(section.path)] || sectionTags(section.path, section.body, LOCAL_TAG_WORDS)),
-          }));
+          // Claude のタグ（ai_tags）は保存では変えない。節のタグは、手直し → Claude の順で選ぶ（DB の diary.apply_labels と同じ）
+          const ai = old?.ai_tags || {};
+          diary.days[date] = { date, title, body, tags: kept, ai_tags: ai, updated_at: saved };
+          diary.sections[date] = sections.map((section, i) => {
+            const key = pathKey(section.path);
+            const { labels, tag_source } = pickLabels(kept[key], ai[key]);
+            return {
+              id: `${date}-${String(i + 1).padStart(2, "0")}`,
+              path: section.path,
+              body: section.body,
+              crops: labels.crops || [],
+              work: labels.work || [],
+              labels,
+              tag_source,
+            };
+          });
         } else {
           delete diary.days[date];
           delete diary.sections[date];

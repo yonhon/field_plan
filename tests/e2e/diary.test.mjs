@@ -89,15 +89,16 @@ test("日記: 写真を入れて書き、保存して読み、探し、種類を
   const day = stored.days[TODAY];
   assert.equal(day.title, "試験の日");
   assert.equal(day.body, `## オクラ\nトマトに追肥した。\n\n![](images/${TODAY}_01.jpg)`);
-  assert.deepEqual(stored.sections[TODAY].map((section) => [section.path, section.crops]), [[["オクラ"], ["オクラ"]]]);
+  // 語では種類を付けない（Claude Code に頼んだときに付く）
+  assert.deepEqual(stored.sections[TODAY].map((section) => [section.path, section.crops, section.tag_source]), [[["オクラ"], [], null]]);
   const photo = stored.photos[`${TODAY}_01.jpg`];
   assert.equal(photo.original_name, "IMG_0001.JPG");
   assert.deepEqual([photo.width, photo.height], [30, 40]);
   assert.ok(Object.keys(stored.files).some((path) => path.endsWith(`/photos/${TODAY}_01.jpg`)));
 
-  // 日の表示: 写真と、節の作物の札。カレンダーに印
+  // 日の表示: 写真と、節の札（まだ種類なし）。カレンダーに印
   await page.waitFor(`Boolean(document.querySelector('#diaryMain .diary-photo img'))`, "写真の表示");
-  assert.match(await page.run(`document.querySelector("#diaryMain .diary-tags").textContent`), /オクラ/);
+  assert.match(await page.run(`document.querySelector("#diaryMain .diary-tags").textContent`), /種類なし/);
   assert.equal(await page.run(`document.querySelector('#diaryCalendar [data-date="${TODAY}"]').classList.contains("has-entry")`), true);
 
   // 写真を押すと、元のファイル名を添えて大きく開く
@@ -117,14 +118,60 @@ test("日記: 写真を入れて書き、保存して読み、探し、種類を
   await page.click('#diaryMain [data-action="open-day"]');
   await page.waitFor(`document.querySelector("#diaryModes .is-on")?.dataset.mode === "day"`, "日の表示へ");
 
-  // 種類を直す: 作物の「オクラ」を外す
+  // 種類を直す: 6 つの種類から選べる。作物の「オクラ」と場所の「露地」を付ける
   await page.click('#diaryMain [data-action="tags"]');
+  assert.equal(await page.run(`document.querySelectorAll("#diaryMain .diary-tag-edit .log-chips").length`), 6);
   await page.click('#diaryMain [data-tag-kind="crops"][data-tag-name="オクラ"]');
+  await page.click('#diaryMain [data-tag-kind="place"][data-tag-name="露地"]');
   await page.click('#diaryMain [data-action="tags-save"]');
   await saved();
   const fixed = (await diary()).days[TODAY].tags;
-  assert.deepEqual(fixed["オクラ"].crops, []);
+  assert.deepEqual([fixed["オクラ"].crops, fixed["オクラ"].place], [["オクラ"], ["露地"]]);
   await page.waitFor(`document.querySelector("#diaryMain .diary-tags")?.textContent.includes("直した")`, "直した印");
+  assert.equal(await page.run(`document.querySelector("#diaryMain .diary-tag.is-place").textContent`), "露地");
+  // Claude のタグに戻す: 直した内容が外れる
+  await page.click('#diaryMain [data-action="tags"]');
+  await page.click('#diaryMain [data-action="tags-auto"]');
+  await saved();
+  assert.deepEqual((await diary()).days[TODAY].tags, {});
+  assert.deepEqual(page.errors, []);
+});
+
+test("日記: Claude のタグは種類ごとに出し、手で直した節にだけ印を付ける。写真のタグは大きく開いたときに出す", options, async () => {
+  const data = seed();
+  const day = "2026-10-15";
+  data.diary = {
+    days: {
+      [day]: {
+        date: day, title: "", body: "## オクラ\n収穫した。\n\n![](images/2026-10-15_01.jpg)\n\n## 畑\n見回り", updated_at: AT,
+        tags: { 畑: { topic: ["講義・研修"] } },
+        ai_tags: { オクラ: { crops: ["オクラ"], stage: ["収穫期"], targets: [{ kind: "planting", id: "x1", label: "区画1 畝1 オクラ" }] } },
+      },
+    },
+    sections: {
+      [day]: [
+        { id: `${day}-01`, path: ["オクラ"], crops: ["オクラ"], work: [], tag_source: "claude",
+          labels: { crops: ["オクラ"], stage: ["収穫期"], targets: [{ kind: "planting", id: "x1", label: "区画1 畝1 オクラ" }] } },
+        { id: `${day}-02`, path: ["畑"], crops: [], work: [], tag_source: "manual", labels: { topic: ["講義・研修"] } },
+      ],
+    },
+    photos: { "2026-10-15_01.jpg": { name: "2026-10-15_01.jpg", date: day, tags: { crops: ["オクラ"], subject: ["収穫物"], use: "記事向き" } } },
+    files: {},
+  };
+  await page.loadApp(data);
+  await page.run(`location.hash = "#diary"`);
+  await page.waitFor(`Boolean(document.querySelector('#diaryMonthSelect option[value="2026-10"]'))`, "日記の画面");
+  await page.run(`(() => { const select = document.getElementById("diaryMonthSelect"); select.value = "2026-10"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.click(`#diaryCalendar [data-date="${day}"]`);
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-tags").length === 2`, "節の札");
+  const tags = await page.run(`[...document.querySelectorAll("#diaryMain .diary-tags")].map((box) => [[...box.querySelectorAll(".diary-tag")].map((t) => t.className.replace("diary-tag is-", "") + ":" + t.textContent), box.textContent.includes("直した")])`);
+  assert.deepEqual(tags, [
+    [["crops:オクラ", "stage:収穫期", "targets:区画1 畝1 オクラ"], false],
+    [["topic:講義・研修"], true],
+  ]);
+  await page.click("#diaryMain .diary-photo");
+  await page.waitFor(`document.querySelector("dialog.diary-viewer[open] .diary-tags")?.textContent === "オクラ収穫物記事向き"`, "写真のタグ");
+  await page.click('dialog.diary-viewer [data-action="close"]');
   assert.deepEqual(page.errors, []);
 });
 
@@ -201,5 +248,48 @@ test("日記: 保存していない書きかけは、読み込み直しても戻
   await page.click('dialog[open] [data-action="delete"]');
   await page.waitFor(`!document.getElementById("diaryBody")`, "閉じる");
   assert.equal(await page.run(`localStorage.getItem("field_plan_diary_drafts")`), "{}");
+  assert.deepEqual(page.errors, []);
+});
+
+test("作付の詳細: 日記の対象から、この作付の日記を出し、日付を押すとその日の日記を開く", options, async () => {
+  const area = [[0, 0], [40, 0], [40, 20], [0, 20]];
+  const data = {
+    ...seed(),
+    fields: [{ id: "f1", name: "試験の圃場", outline: area, note: "", active_plan_id: "p1", created_at: AT }],
+    zones: [{ id: "z1", plan_id: "p1", kind: "tillable", name: "", shape: area, created_at: AT }],
+    blocks: [{ id: "b1", plan_id: "p1", zone_id: "z1", name: "区画1", shape: [[1, 1], [39, 1], [39, 19], [1, 19]], start_date: null, end_date: null, created_at: AT }],
+    beds: [1, 2].map((seq) => ({ id: `bed${seq}`, plan_id: "p1", block_id: "b1", seq, shape: [[seq * 3, 2], [seq * 3 + 1, 2], [seq * 3 + 1, 18], [seq * 3, 18]], start_date: null, removed_on: null })),
+    plantings: [1, 2].map((seq) => ({ id: `pl${seq}`, plan_id: "p1", bed_id: `bed${seq}`, seq: 1, crop_id: "c1", crop_name: "試験菜" })),
+    crops: [{ id: "c1", name: "試験菜", mulch: false, bed_width_cm: 100, aisle_width_cm: 60 }],
+  };
+  const section = (date, n, heading, targets) => ({
+    id: `${date}-0${n}`, path: [heading], body: `${heading}の様子を見た。\n\n| a | b |\n| :- | :- |`, crops: [], work: [], tag_source: "claude",
+    labels: { targets: targets.map((id) => ({ kind: id.startsWith("pl") ? "planting" : "block", id, label: id })) },
+  });
+  data.diary = {
+    days: {
+      "2026-10-02": { date: "2026-10-02", title: "", body: "## 畝1", tags: {}, updated_at: AT },
+      "2026-10-05": { date: "2026-10-05", title: "見回り", body: "## 畝1と畝2", tags: {}, updated_at: AT },
+    },
+    sections: {
+      "2026-10-02": [section("2026-10-02", 1, "畝1", ["pl1"])],
+      "2026-10-05": [section("2026-10-05", 1, "畝1と畝2", ["pl1", "pl2"])],
+    },
+    photos: {},
+    files: {},
+  };
+  await page.loadApp(data);
+  await page.run(`location.hash = "#detail/planting/pl1"`);
+  await page.waitFor(`document.querySelectorAll("#plantingBody .detail-diary li").length === 2`, "この作付の日記");
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("#plantingBody .detail-diary li")].map((li) => li.querySelector("span").textContent + "|" + li.querySelector("p").textContent)`), [
+    "畝1と畝2|畝1と畝2の様子を見た。",
+    "畝1|畝1の様子を見た。",
+  ]);
+  // 区画の詳細には、区画の中の作付に付いた日記も出る
+  await page.run(`location.hash = "#detail/block/b1"`);
+  await page.waitFor(`document.querySelector("#plantingBody .panel h2:last-of-type") && [...document.querySelectorAll("#plantingBody h2")].some((h) => h.textContent === "この区画の日記") && document.querySelectorAll("#plantingBody .detail-diary li").length === 2`, "この区画の日記");
+  // 日付を押すと、その日の日記を開く
+  await page.click('#plantingBody [data-diary-date="2026-10-05"]');
+  await page.waitFor(`location.hash === "#diary" && document.querySelector("#diaryMain")?.textContent.includes("見回り")`, "その日の日記");
   assert.deepEqual(page.errors, []);
 });

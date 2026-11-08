@@ -2883,6 +2883,28 @@ h4.diary-heading {
   background: #f1ece0;
 }
 
+/* タグの種類ごとの地の色。対象（作付か区画）は枠だけにする */
+.diary-tag.is-place {
+  background: #e6eaf4;
+}
+
+.diary-tag.is-issues {
+  background: #f6e3e0;
+}
+
+.diary-tag.is-stage {
+  background: #e8f0dc;
+}
+
+.diary-tag.is-topic {
+  background: #eee8f3;
+}
+
+.diary-tag.is-targets {
+  border: 1px solid var(--line);
+  background: transparent;
+}
+
 .diary-tags .text-btn {
   padding: 2px 6px;
   font-size: 12px;
@@ -3141,4 +3163,25 @@ h4.diary-heading {
   #printArea .gantt-legend {
     break-inside: avoid;
   }
+}
+
+/* 作付の詳細の「この作付の日記」。日付を押すと、その日の日記を開く */
+.detail-diary {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.detail-diary li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-diary li:last-child {
+  border-bottom: 0;
+}
+
+.detail-diary .muted {
+  margin: 2px 0 0;
+  font-size: 12px;
 }

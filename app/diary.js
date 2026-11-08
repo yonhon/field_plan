@@ -81,18 +81,30 @@ export function bodyChunks(body) {
   return chunks.map(({ lines, ...chunk }) => ({ ...chunk, text: lines.join("\n") }));
 }
 
-// 文に入っている種類の名前（words: [{name, words}] の並びの順）。DB の diary.tag と同じく、語の部分一致で見る
-export function tagText(text, words) {
-  return words.filter((item) => item.words.some((word) => text.includes(word))).map((item) => item.name);
-}
+// 節のタグの種類（inoo_farm の docs/diary-tags.md）。Claude Code が本文の意味と写真の中身から付ける（推定）。
+// 本人が画面で直した種類は、diary.days.tags に見出しごとに残る
+export const TAG_KINDS = [
+  ["crops", "作物"],
+  ["work", "作業"],
+  ["place", "場所"],
+  ["issues", "症状・病害虫"],
+  ["stage", "生育段階"],
+  ["topic", "話題"],
+];
+// 写真のタグの種類。use（使い道）は 1 つ
+export const PHOTO_TAG_KINDS = [
+  ["crops", "作物"],
+  ["issues", "症状・病害虫"],
+  ["stage", "生育段階"],
+  ["subject", "写っているもの"],
+];
 
-// 節の作物と作業の種類。見出しに作物名があればそれを優先し、なければ本文から拾う（DB の diary.section_tags と同じ）
-export function sectionTags(path, body, words) {
-  const heading = path.join(" ");
-  const fromHeading = tagText(heading, words.crops);
+// 節のタグを、手で直したタグ（manual）と Claude のタグ（ai）から決める（DB の diary.apply_labels と同じ）。
+// 手で直した種類はそれを、直していない種類は Claude のタグを使う。tag_source は manual / claude / null（まだ付いていない）
+export function pickLabels(manual, ai) {
   return {
-    crops: fromHeading.length ? fromHeading : tagText(body, words.crops),
-    work: tagText(`${heading}\n${body}`, words.work),
+    labels: { ...(ai || {}), ...(manual || {}) },
+    tag_source: manual ? "manual" : ai ? "claude" : null,
   };
 }
 

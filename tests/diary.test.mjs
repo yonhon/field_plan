@@ -19,7 +19,7 @@ import {
   renderMarkdown,
   replacePlaceholder,
   searchWords,
-  sectionTags,
+  pickLabels,
   shiftPeriod,
   snippetHtml,
   splitSections,
@@ -27,16 +27,6 @@ import {
 } from "../app/diary.js";
 import { createLocalStore } from "../app/store.js";
 
-const WORDS = {
-  crops: [
-    { name: "オクラ", words: ["オクラ"] },
-    { name: "トマト", words: ["トマト"] },
-  ],
-  work: [
-    { name: "収穫", words: ["収穫"] },
-    { name: "施肥", words: ["追肥", "元肥"] },
-  ],
-};
 
 test("本文を見出しごとの節に分け、写真を本文から抜く（build_sections.py と同じ）", () => {
   const body = [
@@ -92,10 +82,11 @@ test("表示のためのまとまりは、写真と束ねるだけの見出し�
   );
 });
 
-test("作物は見出しにあればそれを優先し、作業の種類は見出しと本文から拾う", () => {
-  assert.deepEqual(sectionTags(["オクラ"], "トマトの横で収穫", WORDS), { crops: ["オクラ"], work: ["収穫"] });
-  assert.deepEqual(sectionTags(["畑A"], "トマトとオクラに追肥", WORDS), { crops: ["オクラ", "トマト"], work: ["施肥"] });
-  assert.deepEqual(sectionTags([], "雨", WORDS), { crops: [], work: [] });
+test("節のタグは、手で直した種類はそれを、直していない種類は Claude のタグを使う", () => {
+  const ai = { crops: ["オクラ"], work: ["収穫"], place: ["露地"] };
+  assert.deepEqual(pickLabels(null, ai), { labels: ai, tag_source: "claude" });
+  assert.deepEqual(pickLabels({ crops: [], work: ["防除"] }, ai), { labels: { crops: [], work: ["防除"], place: ["露地"] }, tag_source: "manual" });
+  assert.deepEqual(pickLabels(undefined, undefined), { labels: {}, tag_source: null });
 });
 
 test("写真の置き場の場所は、年度（4 月始まり）ごとのフォルダー", () => {
@@ -255,24 +246,39 @@ beforeEach(() => {
 
 const save = (store, day) => store.diarySaveDay({ ...day, sections: splitSections(day.body) });
 
-test("日記を保存すると、節と作物・作業の種類ができ、直した種類は見出しごとに残る", async () => {
+test("日記を保存すると節ができ、語では種類を付けない。Claude のタグを使い、直した種類は見出しごとに残る", async () => {
   const store = createLocalStore();
   const first = await save(store, { date: "2026-11-08", title: "題", body: "## オクラ\n収穫\n## 畑\nトマト", tags: {}, expected: null });
   let [day] = await store.diaryDays("2026-11-01", "2026-11-30");
   assert.equal(day.updated_at, first.updated_at);
-  assert.deepEqual(day.sections.map((s) => [s.id, s.crops, s.work]), [
-    ["2026-11-08-01", ["オクラ"], ["収穫"]],
-    ["2026-11-08-02", ["トマト"], []],
+  assert.deepEqual(day.sections.map((s) => [s.id, s.crops, s.work, s.tag_source]), [
+    ["2026-11-08-01", [], [], null],
+    ["2026-11-08-02", [], [], null],
   ]);
-  await save(store, { date: "2026-11-08", title: "題", body: day.body, tags: { 畑: { crops: [], work: ["定植"] }, 消えた見出し: { crops: [], work: [] } }, expected: day.updated_at });
+  // Claude が付けたタグ（ai_tags）は、次の保存でも節のタグになる
+  const data = JSON.parse(localStorage.getItem("field_plan_local"));
+  data.diary.days["2026-11-08"].ai_tags = {
+    オクラ: { crops: ["オクラ"], work: ["収穫"], targets: [{ kind: "planting", id: "p1", label: "区画1 畝1 オクラ" }] },
+    畑: { crops: ["トマト"] },
+  };
+  localStorage.setItem("field_plan_local", JSON.stringify(data));
+  await save(store, { date: "2026-11-08", title: "題", body: day.body, tags: {}, expected: day.updated_at });
   [day] = await store.diaryDays("2026-11-08", "2026-11-08");
-  assert.deepEqual(day.tags, { 畑: { crops: [], work: ["定植"] } });
-  assert.deepEqual(day.sections[1].work, ["定植"]);
-  // 見出しを書き換えた節は、自動に戻る
+  assert.deepEqual(day.sections.map((s) => [s.crops, s.work, s.tag_source]), [
+    [["オクラ"], ["収穫"], "claude"],
+    [["トマト"], [], "claude"],
+  ]);
+  assert.deepEqual((await store.diaryTargetSections(["p1"])).map((row) => [row.id, row.heading]), [["2026-11-08-01", "オクラ"]]);
+  // 直した種類は残り、直していない種類は Claude のタグを使う
+  await save(store, { date: "2026-11-08", title: "題", body: day.body, tags: { 畑: { work: ["定植・播種"] }, 消えた見出し: { crops: [] } }, expected: day.updated_at });
+  [day] = await store.diaryDays("2026-11-08", "2026-11-08");
+  assert.deepEqual(day.tags, { 畑: { work: ["定植・播種"] } });
+  assert.deepEqual([day.sections[1].crops, day.sections[1].work, day.sections[1].tag_source], [["トマト"], ["定植・播種"], "manual"]);
+  // 見出しを書き換えた節は、直した内容が外れ、Claude が付け直すまでタグがない
   await save(store, { date: "2026-11-08", title: "題", body: "## オクラ\n収穫\n## 畑B\nトマト", tags: day.tags, expected: day.updated_at });
   [day] = await store.diaryDays("2026-11-08", "2026-11-08");
   assert.deepEqual(day.tags, {});
-  assert.deepEqual(day.sections[1].crops, ["トマト"]);
+  assert.deepEqual([day.sections[1].crops, day.sections[1].tag_source], [[], null]);
 });
 
 test("ほかの画面で書き換えられていたら、保存を止める", async () => {

@@ -185,7 +185,7 @@ begin
 end;
 $$;
 
--- 作物と作業の種類の名前の一覧（画面で種類を直すときの選択肢）
+-- タグの言葉の一覧（画面で種類を直すときの選択肢）。節に付ける 6 つの種類ごとに、並びの順で返す
 create or replace function field.diary_tag_names()
 returns jsonb
 language plpgsql stable security definer set search_path = ''
@@ -194,9 +194,28 @@ begin
   if not field.is_owner() then
     raise exception 'この利用者は日記を読めません。' using errcode = '42501';
   end if;
-  return jsonb_build_object(
-    'crops', (select coalesce(jsonb_agg(name order by sort), '[]') from diary.tag_words where kind = 'crops'),
-    'work', (select coalesce(jsonb_agg(name order by sort), '[]') from diary.tag_words where kind = 'work')
+  return (
+    select jsonb_object_agg(k.kind, (select coalesce(jsonb_agg(t.name order by t.sort), '[]') from diary.tag_words t where t.kind = k.kind))
+    from unnest(array['crops', 'work', 'place', 'issues', 'stage', 'topic']) as k(kind)
+  );
+end;
+$$;
+
+-- 対象（field_plan の作付か区画）に付いた日記の節を、新しい日から順に返す。p_ids は作付か区画の ID
+create or replace function field.diary_target_sections(p_ids text[])
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not field.is_owner() then
+    raise exception 'この利用者は日記を読めません。' using errcode = '42501';
+  end if;
+  return (
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id', s.id, 'date', s.entry_date, 'title', s.day_title, 'heading', array_to_string(s.path, ' > '), 'body', s.body
+    ) order by s.entry_date desc, s.id), '[]')
+    from diary.sections s
+    where exists (select 1 from jsonb_array_elements(coalesce(s.labels -> 'targets', '[]')) t where t ->> 'id' = any(p_ids))
   );
 end;
 $$;
@@ -224,6 +243,7 @@ revoke all on function field.diary_photo_names(date) from public, anon;
 revoke all on function field.diary_calendar(date, date) from public, anon;
 revoke all on function field.diary_search(text[]) from public, anon;
 revoke all on function field.diary_tag_names() from public, anon;
+revoke all on function field.diary_target_sections(text[]) from public, anon;
 revoke all on function field.diary_first_date() from public, anon;
 revoke all on function field.diary_add_photo(text, date, timestamp, text, int, int) from public, anon;
 grant execute on function field.diary_save_day(date, text, text, jsonb, jsonb, timestamptz) to authenticated;
@@ -232,6 +252,7 @@ grant execute on function field.diary_photo_names(date) to authenticated;
 grant execute on function field.diary_calendar(date, date) to authenticated;
 grant execute on function field.diary_search(text[]) to authenticated;
 grant execute on function field.diary_tag_names() to authenticated;
+grant execute on function field.diary_target_sections(text[]) to authenticated;
 grant execute on function field.diary_first_date() to authenticated;
 grant execute on function field.diary_add_photo(text, date, timestamp, text, int, int) to authenticated;
 

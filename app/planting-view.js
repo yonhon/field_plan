@@ -21,6 +21,8 @@ import {
   setGanttMode,
 } from "./schedule-view.js";
 import { draw } from "./draw.js";
+import { dateLabel } from "./diary.js";
+import { openDiaryDay } from "./diary-view.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -36,6 +38,8 @@ const weather = { key: "", rows: null, loading: false };
 const forecast = { key: "", days: null, error: "", loading: false };
 let stationNames = null;
 let wx = null; // いま描いている作付の気象の表示（作業の表の列で使う）
+// この作付（区画）に付いた日記の節。画面を開いたあとで読み、読み終えたら描き直す
+const diary = { key: "", rows: null, error: "" };
 
 const state = () => ctx.state;
 const bySeq = (a, b) => a.seq - b.seq;
@@ -155,8 +159,80 @@ export function renderPlantingDetail() {
     `<section class="panel">${timelineHtml(c, mode, actuals)}</section>` +
     (mode === "both" ? diffHtml(c, actuals, logs) : "") +
     `<section class="panel"><div class="panel-heading"><h2>作業</h2>${tableNote(mode) ? `<span class="muted">${tableNote(mode)}</span>` : ""}</div>${tableHtml(c, mode, actuals, logs)}</section>` +
+    diaryHtml(c, active) +
     `</div><aside class="detail-aside">${asideHtml(c, active)}</aside></div>`
   );
+}
+
+// ---- 日記 ----
+
+// 日記の「対象」で、この作付（区画）に付いた節を出す。区画なら、区画の中の作付に付いた節も出す。
+// 日記の対象は実際に使うプランの作付を指すので、ほかのプランを開いているときは出さない
+function diaryIds(c) {
+  if (c.planting) {
+    return [c.planting.id];
+  }
+  const s = state();
+  const beds = new Set(s.beds.filter((bed) => bed.block_id === c.block.id).map((bed) => bed.id));
+  return [c.block.id, ...s.plantings.filter((planting) => beds.has(planting.bed_id)).map((planting) => planting.id)];
+}
+
+// 本文の頭を短く出す。写真と表の行は除く
+function diarySnippet(body) {
+  const text = String(body || "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/^\|.*$/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+}
+
+function diaryHtml(c, active) {
+  const store = state().store;
+  if (!active || !store.diaryTargetSections) {
+    return "";
+  }
+  const ids = diaryIds(c);
+  const key = ids.join(",");
+  if (diary.key !== key) {
+    Object.assign(diary, { key, rows: null, error: "" });
+    store
+      .diaryTargetSections(ids)
+      .then((rows) => {
+        if (diary.key === key) {
+          diary.rows = rows;
+          renderPlantingDetail();
+        }
+      })
+      .catch((error) => {
+        if (diary.key === key) {
+          diary.error = error.message;
+          renderPlantingDetail();
+        }
+      });
+  }
+  const title = c.planting ? "この作付の日記" : "この区画の日記";
+  let inner;
+  if (diary.error) {
+    inner = `<p class="muted">日記を読み込めませんでした: ${escapeHtml(diary.error)}</p>`;
+  } else if (!diary.rows) {
+    inner = '<p class="muted">読み込んでいます…</p>';
+  } else if (!diary.rows.length) {
+    inner = '<p class="muted">この作付に付いた日記はありません。日記のタグ（対象）は、日記にタグを付けるときに Claude が付けます。</p>';
+  } else {
+    inner =
+      '<ul class="detail-diary">' +
+      diary.rows
+        .map(
+          (row) =>
+            `<li><a href="#diary" data-diary-date="${row.date}">${dateLabel(row.date)}</a>` +
+            `${row.heading ? ` <span>${escapeHtml(row.heading)}</span>` : ""}` +
+            `<p class="muted">${escapeHtml(diarySnippet(row.body))}</p></li>`
+        )
+        .join("") +
+      "</ul>";
+  }
+  return `<section class="panel"><div class="panel-heading"><h2>${title}</h2><span class="muted">日記のタグ（対象）から</span></div>${inner}</section>`;
 }
 
 // ---- 気象 ----
@@ -829,8 +905,15 @@ async function reschedule() {
 }
 
 function onClick(event) {
-  const el = event.target.closest("[data-act], [data-log], [data-plan-edit], [data-uncancel], [data-gantt-mode], [data-plan]");
+  const el = event.target.closest("[data-act], [data-log], [data-plan-edit], [data-uncancel], [data-gantt-mode], [data-plan], [data-diary-date]");
   if (!el) {
+    return;
+  }
+  if (el.dataset.diaryDate) {
+    // その日の日記を開く
+    event.preventDefault();
+    openDiaryDay(el.dataset.diaryDate);
+    ctx.showView("diary");
     return;
   }
   if (el.dataset.ganttMode) {

@@ -5,6 +5,7 @@ import { confirmAction, notify, notifySaveFailed } from "./dialog.js";
 import { draw } from "./draw.js";
 import {
   PHOTO_PLACEHOLDER,
+  PHOTO_TAG_KINDS,
   PHOTO_QUALITY,
   WEEKDAYS,
   bodyChunks,
@@ -27,6 +28,7 @@ import {
   shiftPeriod,
   snippetHtml,
   splitSections,
+  TAG_KINDS,
   toggleHeading,
 } from "./diary.js";
 import { localToday } from "./schedule.js";
@@ -54,8 +56,8 @@ const view = {
   loading: false,
   query: "",
   results: null, // 検索の結果。null なら検索していない
-  tagNames: null, // { crops, work }
-  tagEdit: null, // { date, key, crops: [...], work: [...] }
+  tagNames: null, // { crops, work, place, issues, stage, topic }（言葉の一覧）
+  tagEdit: null, // { date, key, values: { crops: [...], ... } }
   editing: null, // { date, title, body, tags, expected, preview, cursor, known: [...], note }
   uploading: "",
   urls: {}, // 置き場の中の場所 → 署名付き URL
@@ -167,7 +169,7 @@ function ensureLoaded() {
       // 同じ失敗を繰り返さないよう、読んだことにする
       view.calendarKey = calendarKey;
       view.daysKey = daysKey;
-      view.tagNames ||= { crops: [], work: [] };
+      view.tagNames ||= Object.fromEntries(TAG_KINDS.map(([kind]) => [kind, []]));
       if (view.firstDate === undefined) {
         view.firstDate = null;
       }
@@ -267,24 +269,31 @@ function monthSelectHtml(today) {
   return `<select id="diaryMonthSelect" class="diary-month-select" aria-label="カレンダーの年月">${options}</select>`;
 }
 
+// 節のタグ。Claude Code が本文と写真から付けた推定で、本人が直した節にだけ「（直した）」と出す。
+// 対象（field_plan の作付か区画）は、表示名で出す（直すのは Claude に頼む）
+const sectionLabels = (section) => section.labels || { crops: section.crops || [], work: section.work || [] };
+
 function tagsHtml(day, section, key) {
   const edit = view.tagEdit;
   if (edit && edit.date === day.date && edit.key === key) {
-    const chips = (kind, names) =>
-      names
-        .map((name) => `<button type="button" class="chip-btn${edit[kind].includes(name) ? " is-on" : ""}" data-tag-kind="${kind}" data-tag-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`)
+    const chips = (kind) =>
+      (view.tagNames?.[kind] || [])
+        .map((name) => `<button type="button" class="chip-btn${edit.values[kind].includes(name) ? " is-on" : ""}" data-tag-kind="${kind}" data-tag-name="${escapeHtml(name)}">${escapeHtml(name)}</button>`)
         .join("");
     return (
       `<div class="diary-tag-edit" data-date="${day.date}" data-key="${escapeHtml(key)}">` +
-      `<p class="muted">作物</p><div class="log-chips">${chips("crops", view.tagNames?.crops || [])}</div>` +
-      `<p class="muted">作業の種類</p><div class="log-chips">${chips("work", view.tagNames?.work || [])}</div>` +
+      TAG_KINDS.map(([kind, label]) => `<p class="muted">${label}</p><div class="log-chips">${chips(kind)}</div>`).join("") +
       `<div class="row"><button type="button" class="primary-btn" data-action="tags-save">保存</button>` +
-      `<button type="button" class="text-btn" data-action="tags-auto">自動に戻す</button>` +
+      `<button type="button" class="text-btn" data-action="tags-auto">Claude のタグに戻す</button>` +
       `<button type="button" class="text-btn" data-action="tags-cancel">やめる</button></div></div>`
     );
   }
-  const names = [...section.crops.map((name) => ["crop", name]), ...section.work.map((name) => ["work", name])];
-  const fixed = Boolean(day.tags?.[key]);
+  const labels = sectionLabels(section);
+  const names = [
+    ...TAG_KINDS.flatMap(([kind]) => (labels[kind] || []).map((name) => [kind, name])),
+    ...(labels.targets || []).map((item) => ["targets", item.label]),
+  ];
+  const fixed = section.tag_source === "manual" || Boolean(day.tags?.[key]);
   return (
     `<div class="diary-tags" data-date="${day.date}" data-key="${escapeHtml(key)}">` +
     (names.length ? names.map(([kind, name]) => `<span class="diary-tag is-${kind}">${escapeHtml(name)}</span>`).join("") : '<span class="muted">種類なし</span>') +
@@ -424,6 +433,15 @@ export function renderDiary() {
 }
 
 // ---- 操作 ----
+
+// ほかの画面から、ある日の日記を開く（作付の詳細の「この作付の日記」）。開くのは呼んだ側（showView）
+export function openDiaryDay(date) {
+  view.mode = "day";
+  view.date = date;
+  view.month = date.slice(0, 7);
+  view.results = null;
+  view.tagEdit = null;
+}
 
 function pick(date) {
   view.date = date;
@@ -715,10 +733,14 @@ function openPhoto(name) {
     meta.taken_at ? `撮影 ${String(meta.taken_at).replace("T", " ").slice(0, 19)}` : "",
     meta.original_name ? `元のファイル名 ${meta.original_name}` : "",
   ].filter(Boolean);
+  // 写真のタグ（Claude Code が写真から付けた推定）
+  const tags = meta.tags || {};
+  const tagNames = [...PHOTO_TAG_KINDS.flatMap(([kind]) => tags[kind] || []), ...(tags.use ? [tags.use] : [])];
   draw(
     dialog,
     (url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(name)}" />` : '<p class="muted">写真を読み込めていません。</p>') +
       `<p class="muted">${escapeHtml(name)}${facts.length ? `。${escapeHtml(facts.join("、"))}` : ""}</p>` +
+      (tagNames.length ? `<div class="diary-tags">${tagNames.map((tag) => `<span class="diary-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : "") +
       `<p class="muted">もっと大きい写真が要るときは、撮影日時か元のファイル名で、Google フォトから探してください。</p>` +
       `<div class="row">${url ? `<a class="chip-btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">別のタブで開く</a>` : ""}<button type="button" class="primary-btn" data-action="close">閉じる</button></div>`
   );
@@ -826,20 +848,21 @@ export function initDiary(context) {
       const day = dayOf(box.dataset.date);
       const section = day?.sections.find((item) => pathKey(item.path) === box.dataset.key);
       if (section) {
-        view.tagEdit = { date: day.date, key: box.dataset.key, crops: [...section.crops], work: [...section.work] };
+        const labels = sectionLabels(section);
+        view.tagEdit = { date: day.date, key: box.dataset.key, values: Object.fromEntries(TAG_KINDS.map(([kind]) => [kind, [...(labels[kind] || [])]])) };
         drawMain();
       }
     } else if (target.dataset.tagKind) {
       const edit = view.tagEdit;
-      const list = edit[target.dataset.tagKind];
+      const list = edit.values[target.dataset.tagKind];
       const name = target.dataset.tagName;
-      edit[target.dataset.tagKind] = list.includes(name) ? list.filter((item) => item !== name) : [...list, name];
+      edit.values[target.dataset.tagKind] = list.includes(name) ? list.filter((item) => item !== name) : [...list, name];
       drawMain();
     } else if (action === "tags-save" || action === "tags-auto") {
       const edit = view.tagEdit;
       const day = dayOf(edit.date);
       const order = (kind, names) => (view.tagNames?.[kind] || []).filter((name) => names.includes(name));
-      saveTags(day, edit.key, action === "tags-save" ? { crops: order("crops", edit.crops), work: order("work", edit.work) } : null);
+      saveTags(day, edit.key, action === "tags-save" ? Object.fromEntries(TAG_KINDS.map(([kind]) => [kind, order(kind, edit.values[kind])])) : null);
     } else if (action === "tags-cancel") {
       view.tagEdit = null;
       drawMain();
