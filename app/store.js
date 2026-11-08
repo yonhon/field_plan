@@ -777,6 +777,10 @@ export function createLocalStore({ strict = false } = {}) {
       return result;
     },
     async diaryUploadPhoto(path, blob) {
+      // strict では、写真を送るのに時間がかかる（スマホの回線に近づける）
+      if (strict) {
+        await new Promise((resolve) => setTimeout(resolve, 10 * STRICT_DELAY_MS));
+      }
       const bytes = new Uint8Array(await blob.arrayBuffer());
       let binary = "";
       for (let i = 0; i < bytes.length; i += 0x8000) {

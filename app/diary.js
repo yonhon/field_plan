@@ -132,6 +132,27 @@ export function photoMarkdown(names) {
   return `| ${names.map((name) => `![](images/${name})`).join(" | ")} |\n| ${names.map(() => ":----").join(" | ")} |`;
 }
 
+// 写真を上げているあいだ、入れる所に置いておく行。上げ終えたら写真に置き換える
+export const PHOTO_PLACEHOLDER = "（写真を上げています…）";
+
+// 本文の仮の行を text に置き換える。text が空なら、仮の行を前後の空の行ごと除く。
+// 返り値は新しい本文と、仮の行があった位置、ずれた文字数。仮の行がなければ null
+export function replacePlaceholder(body, text) {
+  const at = body.indexOf(PHOTO_PLACEHOLDER);
+  if (at < 0) {
+    return null;
+  }
+  let next;
+  if (text) {
+    next = body.slice(0, at) + text + body.slice(at + PHOTO_PLACEHOLDER.length);
+  } else {
+    const before = body.slice(0, at).replace(/\n*$/, "");
+    const after = body.slice(at + PHOTO_PLACEHOLDER.length).replace(/^\n*/, "");
+    next = before && after ? `${before}\n\n${after}` : before ? `${before}\n` : after;
+  }
+  return { body: next, at, delta: next.length - body.length };
+}
+
 // 本文の pos の位置に、段落として text を差し込む。前後に空の行を入れる。返り値は新しい本文と、差し込んだあとの位置
 export function insertBlock(body, pos, text) {
   const before = body.slice(0, pos).replace(/[ \t]*$/, "");

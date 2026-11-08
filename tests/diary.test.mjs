@@ -7,6 +7,7 @@ import {
   calendarDays,
   exifDateTime,
   fiscalYear,
+  PHOTO_PLACEHOLDER,
   insertBlock,
   monthChoices,
   nextPhotoName,
@@ -16,6 +17,7 @@ import {
   photoPath,
   photoSize,
   renderMarkdown,
+  replacePlaceholder,
   searchWords,
   sectionTags,
   shiftPeriod,
@@ -125,6 +127,18 @@ test("写真は段落として差し込み、前後に空の行を入れる", ()
   assert.equal(middle.body, "前の文\n\nX\n\n後の文");
   assert.equal(middle.body.slice(middle.pos), "後の文");
   assert.equal(insertBlock("前の文\n\n", 5, "X").body, "前の文\n\nX\n");
+});
+
+test("写真を上げているあいだの仮の行は、上げ終えたら写真に置き換え、上げられなければ除く", () => {
+  const body = insertBlock("前の文\n後の文", 4, PHOTO_PLACEHOLDER).body;
+  const done = replacePlaceholder(body, "![](images/a.jpg)");
+  assert.equal(done.body, "前の文\n\n![](images/a.jpg)\n\n後の文");
+  assert.equal(done.at, 5);
+  assert.equal(done.delta, "![](images/a.jpg)".length - PHOTO_PLACEHOLDER.length);
+  assert.equal(replacePlaceholder(body, "").body, "前の文\n\n後の文");
+  assert.equal(replacePlaceholder(insertBlock("前の文", 3, PHOTO_PLACEHOLDER).body, "").body, "前の文\n");
+  assert.equal(replacePlaceholder(insertBlock("", 0, PHOTO_PLACEHOLDER).body, "").body, "");
+  assert.equal(replacePlaceholder("仮の行はない", "X"), null);
 });
 
 test("見出しのボタンは、カーソルの行を見出しにし、もう一度押すと戻す", () => {

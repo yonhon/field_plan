@@ -2947,6 +2947,12 @@ h4.diary-heading {
   cursor: pointer;
 }
 
+/* 写真を上げているあいだは、押せないことが分かるように薄くする */
+.diary-main .diary-photo-btn.is-busy {
+  color: var(--muted);
+  cursor: progress;
+}
+
 .diary-photo-btn input {
   position: absolute;
   width: 1px;

@@ -68,7 +68,20 @@ test("日記: 写真を入れて書き、保存して読み、探し、種類を
   // 打っているあいだ、入力欄は作り直さない（日本語の変換が切れるため）
   assert.equal(await page.run(`document.getElementById("diaryBody").marked`), true);
   await choosePhoto();
-  await page.waitFor(`document.getElementById("diaryBody").value.includes("![](images/${TODAY}_01.jpg)")`, "写真を本文に入れる");
+  // 選んですぐ、入れる所に仮の行が入り、ボタンは押せなくなり、お知らせに進み具合が出る（送るのに時間がかかっても、押したことが分かる）
+  assert.match(await page.run(`document.getElementById("diaryBody").value`), /（写真を上げています…）/);
+  assert.equal(await page.run(`document.getElementById("diaryPhotoInput").disabled`), true);
+  assert.equal(await page.run(`document.getElementById("diaryPhotoLabel").textContent`), "上げています 1/1…");
+  assert.equal(await page.run(`document.querySelector("#toasts .toast-progress")?.textContent`), "写真を上げています 1/1…");
+  // 上げているあいだにプレビューを開いても、上げ終えたら写真が出る
+  await page.click('#diaryMain [data-action="preview-mode"]');
+  assert.match(await page.run(`document.querySelector("#diaryMain .diary-preview").textContent`), /写真を上げています/);
+  await page.waitFor(`Boolean(document.querySelector("#diaryMain .diary-preview .diary-photo"))`, "プレビューを描き直す");
+  assert.doesNotMatch(await page.run(`document.querySelector("#diaryMain .diary-preview").textContent`), /写真を上げています/);
+  await page.click('#diaryMain [data-action="edit-mode"]');
+  assert.equal(await page.run(`document.getElementById("diaryBody").value.includes("![](images/${TODAY}_01.jpg)")`), true);
+  assert.equal(await page.run(`document.getElementById("diaryPhotoInput").disabled`), false);
+  assert.equal(await page.run(`document.getElementById("diaryPhotoLabel").textContent`), "写真を入れる");
   await page.click('#diaryMain [data-action="save"]');
   await saved();
 

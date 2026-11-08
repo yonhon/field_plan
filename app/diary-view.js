@@ -4,6 +4,7 @@
 import { confirmAction, notify, notifySaveFailed } from "./dialog.js";
 import { draw } from "./draw.js";
 import {
+  PHOTO_PLACEHOLDER,
   PHOTO_QUALITY,
   WEEKDAYS,
   bodyChunks,
@@ -21,6 +22,7 @@ import {
   photoPath,
   photoSize,
   renderMarkdown,
+  replacePlaceholder,
   searchWords,
   shiftPeriod,
   snippetHtml,
@@ -349,7 +351,8 @@ function editorHtml() {
     ? ""
     : `<div class="diary-tools">` +
       `<button type="button" class="chip-btn" data-action="heading">見出し</button>` +
-      `<label class="chip-btn diary-photo-btn">写真を入れる<input id="diaryPhotoInput" type="file" accept="image/*" multiple /></label></div>`;
+      `<label class="chip-btn diary-photo-btn${view.uploading ? " is-busy" : ""}"><span id="diaryPhotoLabel">${escapeHtml(view.uploading || "写真を入れる")}</span>` +
+      `<input id="diaryPhotoInput" type="file" accept="image/*" multiple${view.uploading ? " disabled" : ""} /></label></div>`;
   // 編集とプレビューは、入力欄の真上につなげたタブ。選んでいるタブは、下の入力欄とつながって見える
   const tab = (action, label, on) =>
     `<button type="button" role="tab" aria-selected="${on}" class="diary-tab${on ? " is-on" : ""}" data-action="${action}">${label}</button>`;
@@ -367,7 +370,6 @@ function editorHtml() {
     `<label>題<input id="diaryTitle" type="text" data-field="title" value="${escapeHtml(e.title)}" placeholder="なくてもかまいません" /></label>` +
     bar +
     content +
-    `<p id="diaryUploadStatus" class="muted" role="status">${escapeHtml(view.uploading)}</p>` +
     `<p class="muted">写真は、スマホのカメラのアプリで撮ってから、「写真を入れる」でアルバムから選んでください（ここから直接撮ると、Google フォトに残らないことがあります）。短辺 1080 px に縮めて保存します。</p>` +
     `<div class="row"><button type="button" class="primary-btn" data-action="save">保存</button>` +
     `<button type="button" class="text-btn" data-action="cancel">やめる</button></div>`
@@ -442,14 +444,16 @@ function openEditor(date) {
       note += "書きかけを始めたあとに、別の画面で保存された内容があります。保存すると、書きかけの内容で置き換わります。";
     }
   }
+  // 写真を上げている途中で閉じた書きかけには、仮の行が残っている。上げ終えていないので除く
+  const body = restored ? (replacePlaceholder(draft.body, "")?.body ?? draft.body) : base.body;
   view.editing = {
     date,
     title: restored ? draft.title : base.title,
-    body: restored ? draft.body : base.body,
+    body,
     tags: saved?.tags || {},
     expected: saved?.updated_at || null,
     preview: false,
-    cursor: (restored ? draft.body : base.body).length,
+    cursor: body.length,
     known: Object.keys(saved?.photos || {}),
     note,
   };
@@ -602,24 +606,60 @@ async function shrink(file) {
   return { blob, width, height };
 }
 
+// 写真を上げている状態を出す。「写真を入れる」のボタンの文字を変えて押せなくし、お知らせにも出す
 function setUploading(text) {
   view.uploading = text;
-  const status = $("diaryUploadStatus");
-  if (status) {
-    status.textContent = text;
+  const label = $("diaryPhotoLabel");
+  if (label) {
+    label.textContent = text || "写真を入れる";
+    label.parentElement.classList.toggle("is-busy", Boolean(text));
+    $("diaryPhotoInput").disabled = Boolean(text);
   }
 }
 
-async function addPhotos(files) {
-  const e = view.editing;
-  if (!e || !files.length) {
+// 本文を書き換える。入力欄があれば値を入れ直し、打っている人のカーソルは、ずれた分だけ動かして保つ。
+// プレビューを開いていれば、描き直す
+function changeBody(e, change) {
+  // 上げているあいだに書く欄を閉じていたら、本文には入れない（写真は、使っていない写真として保存のときに片付く）
+  if (view.editing !== e) {
     return;
   }
+  const shift = (pos) => (pos > change.at ? Math.max(change.at, pos + change.delta) : pos);
+  e.body = change.body;
+  e.cursor = shift(e.cursor);
+  keepDraft();
+  const area = $("diaryBody");
+  if (area) {
+    const [start, end] = [shift(area.selectionStart), shift(area.selectionEnd)];
+    area.value = e.body;
+    area.setSelectionRange(start, end);
+  } else if (e.preview) {
+    drawMain();
+  }
+}
+
+// 選んだ写真を縮めて上げ、本文に入れる。選んですぐ、入れる所に仮の行を置き（押したことが分かるように）、
+// 上げ終えたら写真に置き換える。上げているあいだは、もう一度は選べない
+async function addPhotos(files) {
+  const e = view.editing;
+  if (!e || !files.length || view.uploading) {
+    return;
+  }
+  const progress = (i) => `上げています ${i}/${files.length}…`;
+  setUploading(progress(1));
+  ctx.setStatus(`写真を${progress(1)}`);
+  const pos = Math.min(e.cursor, e.body.length);
+  const start = insertBlock(e.body, pos, PHOTO_PLACEHOLDER);
+  changeBody(e, { body: start.body, at: pos, delta: start.body.length - e.body.length });
+  e.cursor = start.pos;
+  $("diaryBody")?.setSelectionRange(e.cursor, e.cursor);
   const used = new Set([...e.known, ...photoNames(e.body)]);
   const names = [];
+  let failure = null;
   try {
     for (const [i, file] of files.entries()) {
-      setUploading(`写真を縮めて上げています（${i + 1}/${files.length}）`);
+      setUploading(progress(i + 1));
+      ctx.setStatus(`写真を${progress(i + 1)}`);
       const takenAt = /jpe?g$/i.test(file.type) ? exifDateTime(await file.arrayBuffer()) : null;
       const { blob, width, height } = await shrink(file);
       let name = null;
@@ -644,21 +684,23 @@ async function addPhotos(files) {
       names.push(name);
     }
   } catch (error) {
-    notify(`写真を上げられませんでした。${names.length ? `上げ終えた ${names.length} 枚は、本文に入れます。` : ""}\n${error.message}`);
+    failure = error;
   } finally {
     setUploading("");
   }
-  if (!names.length || view.editing !== e) {
-    return;
+  // 仮の行を写真に置き換える。仮の行を消されていたら、いまのカーソルの所に入れる
+  const text = names.length ? photoMarkdown(names) : "";
+  const done = replacePlaceholder(e.body, text);
+  if (done) {
+    changeBody(e, done);
+  } else if (text) {
+    const at = Math.min(e.cursor, e.body.length);
+    const inserted = insertBlock(e.body, at, text);
+    changeBody(e, { body: inserted.body, at, delta: inserted.body.length - e.body.length });
   }
-  const inserted = insertBlock(e.body, Math.min(e.cursor, e.body.length), photoMarkdown(names));
-  e.body = inserted.body;
-  e.cursor = inserted.pos;
-  keepDraft();
-  const area = $("diaryBody");
-  if (area) {
-    area.value = e.body;
-    area.setSelectionRange(e.cursor, e.cursor);
+  ctx.setStatus(names.length && !failure ? `写真を ${names.length} 枚入れました` : "");
+  if (failure) {
+    notify(`写真を上げられませんでした。${names.length ? `上げ終えた ${names.length} 枚は、本文に入れました。` : ""}\n${failure.message}`);
   }
 }
 
