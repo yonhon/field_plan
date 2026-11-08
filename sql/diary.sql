@@ -201,6 +201,55 @@ begin
 end;
 $$;
 
+-- タグの条件に合う日記の節を返す（日記の画面で、タグの札を押したとき）。
+--   p_filters: [{kind, name}] か、対象なら [{kind: "targets", id}]。すべてに合う節だけ（かつ）
+--   p_oldest: true なら古い日から（経過を追う）、false なら新しい日から
+--   p_limit, p_offset: 一度に返す数と、飛ばす数（「続きを出す」）
+-- 返り値は { total, sections: [{id, date, title, path, day_body, labels, tag_source}], photos: {名前: {taken_at, original_name, tags}} }
+-- 節の本文には写真の書き込みが入らないので、その日の本文（day_body）を返し、画面が見出しで節の部分を切り出す
+create or replace function field.diary_tag_sections(p_filters jsonb, p_oldest boolean, p_limit int, p_offset int)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not field.is_owner() then
+    raise exception 'この利用者は日記を読めません。' using errcode = '42501';
+  end if;
+  return (
+    with hit as (
+      select s.*, d.title, d.body as day_body
+      from diary.sections s
+      join diary.days d on d.entry_date = s.entry_date
+      where not exists (
+        select 1 from jsonb_array_elements(coalesce(p_filters, '[]')) f
+        where not (case
+          when f ->> 'kind' = 'targets' then coalesce(s.labels -> 'targets', '[]') @> jsonb_build_array(jsonb_build_object('id', f ->> 'id'))
+          else coalesce(s.labels -> (f ->> 'kind'), '[]') ? (f ->> 'name')
+        end)
+      )
+    ), page as (
+      select * from hit
+      order by case when p_oldest then entry_date end asc, case when not p_oldest then entry_date end desc, id
+      limit greatest(1, least(p_limit, 100)) offset greatest(0, p_offset)
+    )
+    select jsonb_build_object(
+      'total', (select count(*) from hit),
+      'sections', coalesce((
+        select jsonb_agg(jsonb_build_object(
+          'id', p.id, 'date', p.entry_date, 'title', p.title, 'path', to_jsonb(p.path), 'day_body', p.day_body, 'labels', p.labels, 'tag_source', p.tag_source
+        ) order by case when p_oldest then p.entry_date end asc, case when not p_oldest then p.entry_date end desc, p.id)
+        from page p
+      ), '[]'),
+      'photos', coalesce((
+        select jsonb_object_agg(ph.name, jsonb_build_object('taken_at', ph.taken_at, 'original_name', ph.original_name, 'tags', ph.tags))
+        from diary.photos ph
+        where exists (select 1 from page p where 'images/' || ph.name = any(p.images))
+      ), '{}')
+    )
+  );
+end;
+$$;
+
 -- 対象（field_plan の作付か区画）に付いた日記の節を、新しい日から順に返す。p_ids は作付か区画の ID
 create or replace function field.diary_target_sections(p_ids text[])
 returns jsonb
@@ -244,6 +293,7 @@ revoke all on function field.diary_calendar(date, date) from public, anon;
 revoke all on function field.diary_search(text[]) from public, anon;
 revoke all on function field.diary_tag_names() from public, anon;
 revoke all on function field.diary_target_sections(text[]) from public, anon;
+revoke all on function field.diary_tag_sections(jsonb, boolean, int, int) from public, anon;
 revoke all on function field.diary_first_date() from public, anon;
 revoke all on function field.diary_add_photo(text, date, timestamp, text, int, int) from public, anon;
 grant execute on function field.diary_save_day(date, text, text, jsonb, jsonb, timestamptz) to authenticated;
@@ -253,6 +303,7 @@ grant execute on function field.diary_calendar(date, date) to authenticated;
 grant execute on function field.diary_search(text[]) to authenticated;
 grant execute on function field.diary_tag_names() to authenticated;
 grant execute on function field.diary_target_sections(text[]) to authenticated;
+grant execute on function field.diary_tag_sections(jsonb, boolean, int, int) to authenticated;
 grant execute on function field.diary_first_date() to authenticated;
 grant execute on function field.diary_add_photo(text, date, timestamp, text, int, int) to authenticated;
 

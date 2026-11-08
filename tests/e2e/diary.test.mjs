@@ -293,3 +293,50 @@ test("作付の詳細: 日記の対象から、この作付の日記を出し、
   await page.waitFor(`location.hash === "#diary" && document.querySelector("#diaryMain")?.textContent.includes("見回り")`, "その日の日記");
   assert.deepEqual(page.errors, []);
 });
+
+test("日記: 札を押すと、そのタグの付いた節を並べ、札を重ねて絞り、並び順を変え、続きを出す", options, async () => {
+  const data = seed();
+  const days = {};
+  const sections = {};
+  // 25 日分。どの日もオクラの節。偶数の日は、ほかに「アブラムシ」も付く
+  for (let i = 1; i <= 25; i += 1) {
+    const date = `2026-09-${String(i).padStart(2, "0")}`;
+    days[date] = { date, title: `${i} 日目`, body: `## オクラ\n${i} 日目の見回り。`, tags: {}, updated_at: AT };
+    sections[date] = [{
+      id: `${date}-01`, path: ["オクラ"], crops: ["オクラ"], work: [], tag_source: "claude",
+      labels: { crops: ["オクラ"], ...(i % 2 ? {} : { issues: ["アブラムシ"] }) },
+    }];
+  }
+  data.diary = { days, sections, photos: {}, files: {} };
+  await page.loadApp(data);
+  await page.run(`location.hash = "#diary"`);
+  await page.waitFor(`Boolean(document.querySelector('#diaryMonthSelect option[value="2026-09"]'))`, "日記の画面");
+  await page.run(`(() => { const select = document.getElementById("diaryMonthSelect"); select.value = "2026-09"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.click('#diaryCalendar [data-date="2026-09-10"]');
+  await page.waitFor(`Boolean(document.querySelector('#diaryMain [data-tag-filter="crops"]'))`, "札");
+
+  // 作物の札を押すと、新しい順に 20 節を並べ、続きがある
+  await page.click('#diaryMain [data-tag-filter="crops"]');
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 20`, "タグの一覧");
+  const titles = () => page.run(`[...document.querySelectorAll("#diaryMain .diary-day-title")].map((h) => h.textContent.trim())`);
+  assert.match((await titles())[0], /25 日目$/);
+  assert.match(await page.run(`document.querySelector('#diaryMain [data-action="tag-more"]').textContent`), /残り 5 節/);
+  await page.click('#diaryMain [data-action="tag-more"]');
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 25 && !document.querySelector('#diaryMain [data-action="tag-more"]')`, "続き");
+
+  // 古い順にすると、1 日目から並ぶ
+  await page.click('#diaryMain [data-action="tag-order"][data-oldest="true"]');
+  await page.waitFor(`/1 日目$/.test(document.querySelector("#diaryMain .diary-day-title")?.textContent.trim() || "")`, "古い順");
+
+  // 一覧の中の札を押すと、条件に足して絞る（オクラ かつ アブラムシ）
+  await page.click('#diaryMain [data-tag-filter="issues"]');
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 12`, "札を重ねる");
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("#diaryMain .diary-tag-filters .diary-tag")].map((b) => b.textContent)`), ["オクラ ×", "アブラムシ ×"]);
+  // × で外すと、オクラだけに戻る
+  await page.click('#diaryMain [data-action="tag-remove"][data-index="1"]');
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 20`, "札を外す");
+  // 日付を押すと、その日を開く
+  await page.click('#diaryMain .diary-day-title a[data-date="2026-09-03"]');
+  await page.waitFor(`document.querySelector("#diaryMain .diary-day-title")?.textContent.includes("3 日目") && !document.querySelector("#diaryMain .diary-tag-filters")`, "その日");
+  assert.deepEqual(page.errors, []);
+});

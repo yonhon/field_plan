@@ -56,6 +56,8 @@ const view = {
   loading: false,
   query: "",
   results: null, // 検索の結果。null なら検索していない
+  // タグの一覧（札を押したとき）。null なら出していない。filters は [{ kind, name, id? }]（対象は id で絞る）
+  tagView: null, // { filters, oldest, sections, total, loading, error, token }
   tagNames: null, // { crops, work, place, issues, stage, topic }（言葉の一覧）
   tagEdit: null, // { date, key, values: { crops: [...], ... } }
   editing: null, // { date, title, body, tags, expected, preview, cursor, known: [...], note }
@@ -288,18 +290,138 @@ function tagsHtml(day, section, key) {
       `<button type="button" class="text-btn" data-action="tags-cancel">やめる</button></div></div>`
     );
   }
-  const labels = sectionLabels(section);
-  const names = [
-    ...TAG_KINDS.flatMap(([kind]) => (labels[kind] || []).map((name) => [kind, name])),
-    ...(labels.targets || []).map((item) => ["targets", item.label]),
-  ];
   const fixed = section.tag_source === "manual" || Boolean(day.tags?.[key]);
   return (
     `<div class="diary-tags" data-date="${day.date}" data-key="${escapeHtml(key)}">` +
-    (names.length ? names.map(([kind, name]) => `<span class="diary-tag is-${kind}">${escapeHtml(name)}</span>`).join("") : '<span class="muted">種類なし</span>') +
-    `${fixed ? '<span class="muted">（直した）</span>' : ""}` +
+    labelChipsHtml(section, fixed) +
     `<button type="button" class="text-btn" data-action="tags">種類を直す</button></div>`
   );
+}
+
+// 節の札。押すと、そのタグの付いた節の一覧を出す（対象は作付か区画の ID で絞る）
+function labelChipsHtml(section, fixed) {
+  const labels = sectionLabels(section);
+  const chips = [
+    ...TAG_KINDS.flatMap(([kind]) => (labels[kind] || []).map((name) => ({ kind, name, value: name }))),
+    ...(labels.targets || []).map((item) => ({ kind: "targets", name: item.label, value: item.id })),
+  ];
+  return (
+    (chips.length
+      ? chips
+          .map(
+            (chip) =>
+              `<button type="button" class="diary-tag is-${chip.kind}" data-tag-filter="${chip.kind}" data-tag-value="${escapeHtml(chip.value)}" data-tag-label="${escapeHtml(chip.name)}">${escapeHtml(chip.name)}</button>`
+          )
+          .join("")
+      : '<span class="muted">種類なし</span>') + (fixed ? '<span class="muted">（直した）</span>' : "")
+  );
+}
+
+// ---- タグの一覧（札を押したとき） ----
+
+const TAG_PAGE = 20;
+const tagViewKey = (t) => `tags:${JSON.stringify(t.filters)}:${t.oldest}`;
+
+// 節の部分を、その日の本文から見出しで切り出して描く（節の本文には写真の書き込みが入らないため）
+function tagSectionHtml(section) {
+  const key = pathKey(section.path);
+  const chunk = bodyChunks(section.day_body || "").find((item) => pathKey(item.path) === key);
+  const level = chunk ? Math.min(6, chunk.level + 2) : 4;
+  const heading = chunk?.heading ? `<h${level} class="diary-heading">${escapeHtml(chunk.heading)}</h${level}>` : "";
+  return (
+    `<article class="diary-day" data-date="${section.date}">` +
+    `<div class="panel-heading"><h3 class="diary-day-title"><a href="#diary" data-action="open-day" data-date="${section.date}">${dateLabel(section.date)}</a> ${escapeHtml(section.title || "")}</h3></div>` +
+    heading +
+    (chunk ? renderMarkdown(chunk.text, photoHtml, { headingBase: 4 }) : "") +
+    `<div class="diary-tags">${labelChipsHtml(section, section.tag_source === "manual")}</div></article>`
+  );
+}
+
+function tagViewHtml() {
+  const t = view.tagView;
+  const filters = t.filters
+    .map(
+      (filter, i) =>
+        `<button type="button" class="diary-tag is-${filter.kind}" data-action="tag-remove" data-index="${i}" aria-label="${escapeHtml(filter.name)} を外す">${escapeHtml(filter.name)} ×</button>`
+    )
+    .join("");
+  const order = (oldest, label) =>
+    `<button type="button" class="chip-btn${t.oldest === oldest ? " is-on" : ""}" data-action="tag-order" data-oldest="${oldest}">${label}</button>`;
+  let list;
+  if (t.error) {
+    list = `<p class="muted">日記を読み込めませんでした: ${escapeHtml(t.error)}</p>`;
+  } else if (!t.sections.length) {
+    list = `<p class="muted">${t.loading ? "読み込んでいます…" : "このタグの付いた節はありません。"}</p>`;
+  } else {
+    const rest = t.total - t.sections.length;
+    list =
+      t.sections.map(tagSectionHtml).join("") +
+      (rest > 0
+        ? `<div class="row"><button type="button" class="chip-btn" data-action="tag-more"${t.loading ? " disabled" : ""}>${t.loading ? "読み込んでいます…" : `続きを出す（残り ${rest} 節）`}</button></div>`
+        : "");
+  }
+  return (
+    `<div class="panel-heading"><h2 class="diary-tag-filters">${filters}</h2><button type="button" class="text-btn" data-action="tag-clear">一覧をやめる</button></div>` +
+    `<div class="row diary-tag-order"><span class="muted">${t.loading && !t.sections.length ? "" : `${t.total} 節。札を押すと、さらに絞れます`}</span>` +
+    `<div class="diary-modes">${order(false, "新しい順")}${order(true, "古い順")}</div></div>` +
+    list
+  );
+}
+
+// タグの一覧を読む。more なら続きを足す。読んでいるあいだに条件が変わったら、古い結果は捨てる
+async function loadTagView({ more = false } = {}) {
+  const t = view.tagView;
+  if (!t) {
+    return;
+  }
+  const token = (t.token = (t.token || 0) + 1);
+  t.loading = true;
+  if (!more) {
+    t.sections = [];
+    t.total = 0;
+  }
+  drawMain();
+  try {
+    const result = await ctx.state.store.diaryTagSections({
+      filters: t.filters.map(({ kind, name, id }) => (kind === "targets" ? { kind, id } : { kind, name })),
+      oldest: t.oldest,
+      limit: TAG_PAGE,
+      offset: more ? t.sections.length : 0,
+    });
+    if (view.tagView !== t || t.token !== token) {
+      return;
+    }
+    Object.assign(view.meta, result.photos || {});
+    t.sections = more ? [...t.sections, ...result.sections] : result.sections;
+    t.total = result.total;
+    t.error = "";
+  } catch (error) {
+    if (view.tagView === t && t.token === token) {
+      t.error = error.message;
+    }
+  }
+  if (view.tagView === t && t.token === token) {
+    t.loading = false;
+    drawMain();
+  }
+}
+
+// 札を押したとき。一覧を出していなければ出し、出していれば条件に足す（かつ）
+function addTagFilter(kind, value, label) {
+  const filter = kind === "targets" ? { kind, id: value, name: label } : { kind, name: value };
+  const t = view.tagView;
+  if (t) {
+    if (t.filters.some((item) => item.kind === kind && (item.id ?? item.name) === value)) {
+      return;
+    }
+    t.filters = [...t.filters, filter];
+  } else {
+    view.tagView = { filters: [filter], oldest: false, sections: [], total: 0, loading: false, error: "" };
+  }
+  view.results = null;
+  view.tagEdit = null;
+  renderDiary();
+  loadTagView();
 }
 
 // 1 日分。見出しごとに、本文と、節の作物・作業の種類を並べる
@@ -391,7 +513,13 @@ let shown = null;
 
 function drawMain() {
   const main = $("diaryMain");
-  const now = view.editing ? `edit:${view.editing.date}` : view.results ? `search:${view.query}` : `period:${view.mode}:${periodOf(view.mode, view.date).from}`;
+  const now = view.editing
+    ? `edit:${view.editing.date}`
+    : view.tagView
+      ? tagViewKey(view.tagView)
+      : view.results
+        ? `search:${view.query}`
+        : `period:${view.mode}:${periodOf(view.mode, view.date).from}`;
   const moved = shown !== null && now !== shown;
   shown = now;
   $("diaryView").classList.toggle("is-editing", Boolean(view.editing));
@@ -400,6 +528,9 @@ function drawMain() {
     if (view.editing.preview) {
       requestUrls(photoNames(view.editing.body));
     }
+  } else if (view.tagView) {
+    draw(main, tagViewHtml());
+    requestUrls(view.tagView.sections.flatMap((section) => photoNames(section.day_body || "")));
   } else if (view.results) {
     draw(main, resultsHtml());
   } else {
@@ -440,6 +571,7 @@ export function openDiaryDay(date) {
   view.date = date;
   view.month = date.slice(0, 7);
   view.results = null;
+  view.tagView = null;
   view.tagEdit = null;
 }
 
@@ -447,6 +579,7 @@ function pick(date) {
   view.date = date;
   view.month = date.slice(0, 7);
   view.results = null;
+  view.tagView = null;
   view.tagEdit = null;
   renderDiary();
 }
@@ -588,6 +721,7 @@ async function runSearch() {
     ctx.setStatus(`探せませんでした: ${error.message}`);
     return;
   }
+  view.tagView = null;
   view.editing = null;
   renderDiary();
 }
@@ -765,6 +899,7 @@ export function initDiary(context) {
     if (mode && mode !== view.mode) {
       view.mode = mode;
       view.results = null;
+      view.tagView = null;
       view.tagEdit = null;
       renderDiary();
     }
@@ -838,6 +973,25 @@ export function initDiary(context) {
       area.setSelectionRange(e.cursor, e.cursor);
     } else if (action === "photo") {
       openPhoto(target.dataset.photo);
+    } else if (target.dataset.tagFilter) {
+      addTagFilter(target.dataset.tagFilter, target.dataset.tagValue, target.dataset.tagLabel);
+    } else if (action === "tag-remove") {
+      const t = view.tagView;
+      t.filters = t.filters.filter((_, i) => i !== Number(target.dataset.index));
+      if (!t.filters.length) {
+        view.tagView = null;
+        renderDiary();
+      } else {
+        loadTagView();
+      }
+    } else if (action === "tag-order") {
+      view.tagView.oldest = target.dataset.oldest === "true";
+      loadTagView();
+    } else if (action === "tag-more") {
+      loadTagView({ more: true });
+    } else if (action === "tag-clear") {
+      view.tagView = null;
+      renderDiary();
     } else if (action === "search-clear") {
       view.query = "";
       view.results = null;

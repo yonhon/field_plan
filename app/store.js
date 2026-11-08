@@ -307,6 +307,10 @@ export function createSupabaseStore(client, options) {
     async diaryTargetSections(ids) {
       return check(await client.rpc("diary_target_sections", { p_ids: ids }));
     },
+    // タグの条件（filters: [{kind, name}] か [{kind: "targets", id}]）にすべて合う節。返り値は { total, sections, photos }
+    async diaryTagSections({ filters, oldest, limit, offset }) {
+      return check(await client.rpc("diary_tag_sections", { p_filters: filters, p_oldest: oldest, p_limit: limit, p_offset: offset }));
+    },
     // いちばん古い日記の日（YYYY-MM-DD）。日記がなければ null
     async diaryFirstDate() {
       return check(await client.rpc("diary_first_date"));
@@ -733,6 +737,24 @@ export function createLocalStore({ strict = false } = {}) {
     },
     async diaryTagNames() {
       return structuredClone(LOCAL_TAG_NAMES);
+    },
+    async diaryTagSections({ filters, oldest, limit, offset }) {
+      const diary = read().diary || {};
+      const fits = (section) =>
+        filters.every((filter) =>
+          filter.kind === "targets"
+            ? (section.labels?.targets || []).some((item) => item.id === filter.id)
+            : (section.labels?.[filter.kind] || []).includes(filter.name)
+        );
+      const hits = Object.entries(diary.sections || {})
+        .flatMap(([date, sections]) => sections.filter(fits).map((section) => ({ ...section, date, title: diary.days?.[date]?.title || "" })))
+        .sort((a, b) => (oldest ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)) || a.id.localeCompare(b.id));
+      const page = hits
+        .slice(offset, offset + limit)
+        .map(({ id, date, title, path, labels, tag_source }) => ({ id, date, title, path, day_body: diary.days?.[date]?.body || "", labels, tag_source }));
+      const names = new Set(page.flatMap((section) => photoNames(section.day_body)));
+      const photos = Object.fromEntries(Object.values(diary.photos || {}).filter((photo) => names.has(photo.name)).map((photo) => [photo.name, photo]));
+      return { total: hits.length, sections: page, photos };
     },
     async diaryTargetSections(ids) {
       const diary = read().diary || {};
