@@ -238,10 +238,11 @@ function renderCalendar() {
     .join("");
   draw(
     $("diaryCalendar"),
-    `<div class="diary-month">` +
+    // 「‹ 年月 ›」はカレンダーの幅の中央に、「今日」は右端に置く
+    `<div class="diary-month"><div class="diary-month-nav">` +
       `<button type="button" class="text-btn" data-month="-1" aria-label="前の月">‹</button>` +
       monthSelectHtml(today) +
-      `<button type="button" class="text-btn" data-month="1" aria-label="次の月">›</button>` +
+      `<button type="button" class="text-btn" data-month="1" aria-label="次の月">›</button></div>` +
       `<button type="button" class="chip-btn" data-action="today">今日</button>` +
       `</div><div class="diary-grid">${head}${cells}</div>`
   );

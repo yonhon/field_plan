@@ -2629,11 +2629,19 @@ body.plan-busy #scheduleView {
   background: var(--surface);
 }
 
+/* 年月の行。左右を同じ幅の列にして、「‹ 年月 ›」をカレンダーの中央に置き、「今日」は右の列の右端に置く */
 .diary-month {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.diary-month-nav {
+  grid-column: 2;
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-bottom: 6px;
 }
 
 /* 年月の表示。押すと年月のリストが開く。リストの印（下向きの矢印）は出さない */
@@ -2660,7 +2668,7 @@ body.plan-busy #scheduleView {
 }
 
 .diary-month .chip-btn {
-  margin-left: auto;
+  justify-self: end;
 }
 
 .diary-grid {
