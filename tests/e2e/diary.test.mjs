@@ -251,7 +251,7 @@ test("日記: 保存していない書きかけは、読み込み直しても戻
   assert.deepEqual(page.errors, []);
 });
 
-test("作付の詳細: 日記の対象から、この作付の日記を出し、日付を押すとその日の日記を開く", options, async () => {
+test("作付の詳細: 頭の「日記 n 節（最新 M/D）」で、その作付の日記を、対象の札で絞った一覧として古い順に開く", options, async () => {
   const area = [[0, 0], [40, 0], [40, 20], [0, 20]];
   const data = {
     ...seed(),
@@ -262,35 +262,42 @@ test("作付の詳細: 日記の対象から、この作付の日記を出し、
     plantings: [1, 2].map((seq) => ({ id: `pl${seq}`, plan_id: "p1", bed_id: `bed${seq}`, seq: 1, crop_id: "c1", crop_name: "試験菜" })),
     crops: [{ id: "c1", name: "試験菜", mulch: false, bed_width_cm: 100, aisle_width_cm: 60 }],
   };
-  const section = (date, n, heading, targets) => ({
-    id: `${date}-0${n}`, path: [heading], body: `${heading}の様子を見た。\n\n| a | b |\n| :- | :- |`, crops: [], work: [], tag_source: "claude",
-    labels: { targets: targets.map((id) => ({ kind: id.startsWith("pl") ? "planting" : "block", id, label: id })) },
+  const section = (date, heading, targets) => ({
+    id: `${date}-01`, path: [heading], crops: [], work: [], tag_source: "claude",
+    labels: { targets: targets.map((id) => ({ kind: "planting", id, label: id })) },
   });
+  const day = (date, heading) => ({ date, title: "", body: `## ${heading}\n${heading}の様子を見た。`, tags: {}, updated_at: AT });
   data.diary = {
-    days: {
-      "2026-10-02": { date: "2026-10-02", title: "", body: "## 畝1", tags: {}, updated_at: AT },
-      "2026-10-05": { date: "2026-10-05", title: "見回り", body: "## 畝1と畝2", tags: {}, updated_at: AT },
-    },
+    days: { "2026-10-02": day("2026-10-02", "畝1"), "2026-10-05": day("2026-10-05", "畝1と畝2"), "2026-10-08": day("2026-10-08", "畝2") },
     sections: {
-      "2026-10-02": [section("2026-10-02", 1, "畝1", ["pl1"])],
-      "2026-10-05": [section("2026-10-05", 1, "畝1と畝2", ["pl1", "pl2"])],
+      "2026-10-02": [section("2026-10-02", "畝1", ["pl1"])],
+      "2026-10-05": [section("2026-10-05", "畝1と畝2", ["pl1", "pl2"])],
+      "2026-10-08": [section("2026-10-08", "畝2", ["pl2"])],
     },
     photos: {},
     files: {},
   };
   await page.loadApp(data);
   await page.run(`location.hash = "#detail/planting/pl1"`);
-  await page.waitFor(`document.querySelectorAll("#plantingBody .detail-diary li").length === 2`, "この作付の日記");
-  assert.deepEqual(await page.run(`[...document.querySelectorAll("#plantingBody .detail-diary li")].map((li) => li.querySelector("span").textContent + "|" + li.querySelector("p").textContent)`), [
-    "畝1と畝2|畝1と畝2の様子を見た。",
-    "畝1|畝1の様子を見た。",
-  ]);
-  // 区画の詳細には、区画の中の作付に付いた日記も出る
+  // 一番下の一覧はやめ、頭に件数と最新の日のボタンを出す
+  await page.waitFor(`document.querySelector('#plantingBody .detail-head [data-act="diary"]')?.textContent === "日記 2 節（最新 10/5）"`, "日記のボタン");
+  assert.equal(await page.run(`document.querySelectorAll("#plantingBody .detail-diary").length`), 0);
+  // 押すと、日記の画面で、この作付の対象の札で絞った一覧を、古い順で開く
+  await page.click('#plantingBody [data-act="diary"]');
+  await page.waitFor(`location.hash === "#diary" && document.querySelectorAll("#diaryMain .diary-day").length === 2`, "この作付の日記の一覧");
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("#diaryMain .diary-day")].map((el) => el.dataset.date)`), ["2026-10-02", "2026-10-05"]);
+  assert.equal(await page.run(`document.querySelector("#diaryMain .diary-tag-filters").textContent`), "区画1 畝1 試験菜 ×");
+  assert.equal(await page.run(`document.querySelector('#diaryMain [data-action="tag-order"].is-on').dataset.oldest`), "true");
+  // 戻るで、作付の詳細に戻る
+  await page.run(`history.back()`);
+  await page.waitFor(`location.hash === "#detail/planting/pl1" && Boolean(document.querySelector('#plantingBody [data-act="diary"]'))`, "作付の詳細に戻る");
+
+  // 区画の詳細は、区画の中の作付に付いた日記も数え、一覧にも出す
   await page.run(`location.hash = "#detail/block/b1"`);
-  await page.waitFor(`document.querySelector("#plantingBody .panel h2:last-of-type") && [...document.querySelectorAll("#plantingBody h2")].some((h) => h.textContent === "この区画の日記") && document.querySelectorAll("#plantingBody .detail-diary li").length === 2`, "この区画の日記");
-  // 日付を押すと、その日の日記を開く
-  await page.click('#plantingBody [data-diary-date="2026-10-05"]');
-  await page.waitFor(`location.hash === "#diary" && document.querySelector("#diaryMain")?.textContent.includes("見回り")`, "その日の日記");
+  await page.waitFor(`document.querySelector('#plantingBody [data-act="diary"]')?.textContent === "日記 3 節（最新 10/8）"`, "区画の日記のボタン");
+  await page.click('#plantingBody [data-act="diary"]');
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 3`, "この区画の日記の一覧");
+  assert.equal(await page.run(`document.querySelector("#diaryMain .diary-tag-filters").textContent`), "区画1 ×");
   assert.deepEqual(page.errors, []);
 });
 

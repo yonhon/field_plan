@@ -3165,27 +3165,6 @@ h4.diary-heading {
   }
 }
 
-/* 作付の詳細の「この作付の日記」。日付を押すと、その日の日記を開く */
-.detail-diary {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.detail-diary li {
-  padding: 6px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.detail-diary li:last-child {
-  border-bottom: 0;
-}
-
-.detail-diary .muted {
-  margin: 2px 0 0;
-  font-size: 12px;
-}
-
 /* 節の札は押せる（そのタグの付いた節の一覧を出す）。スマホでも押せる高さにする */
 button.diary-tag {
   min-height: 26px;

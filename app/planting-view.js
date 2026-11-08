@@ -21,8 +21,7 @@ import {
   setGanttMode,
 } from "./schedule-view.js";
 import { draw } from "./draw.js";
-import { dateLabel } from "./diary.js";
-import { openDiaryDay } from "./diary-view.js";
+import { openDiaryTarget } from "./diary-view.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -159,7 +158,6 @@ export function renderPlantingDetail() {
     `<section class="panel">${timelineHtml(c, mode, actuals)}</section>` +
     (mode === "both" ? diffHtml(c, actuals, logs) : "") +
     `<section class="panel"><div class="panel-heading"><h2>作業</h2>${tableNote(mode) ? `<span class="muted">${tableNote(mode)}</span>` : ""}</div>${tableHtml(c, mode, actuals, logs)}</section>` +
-    diaryHtml(c, active) +
     `</div><aside class="detail-aside">${asideHtml(c, active)}</aside></div>`
   );
 }
@@ -177,17 +175,8 @@ function diaryIds(c) {
   return [c.block.id, ...s.plantings.filter((planting) => beds.has(planting.bed_id)).map((planting) => planting.id)];
 }
 
-// 本文の頭を短く出す。写真と表の行は除く
-function diarySnippet(body) {
-  const text = String(body || "")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-    .replace(/^\|.*$/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
-}
-
-function diaryHtml(c, active) {
+// 頭の「日記 n 節（最新 M/D）」のボタン。読み終えるまでと、日記がないときは出さない
+function diaryButtonHtml(c, active) {
   const store = state().store;
   if (!active || !store.diaryTargetSections) {
     return "";
@@ -207,32 +196,21 @@ function diaryHtml(c, active) {
       .catch((error) => {
         if (diary.key === key) {
           diary.error = error.message;
-          renderPlantingDetail();
         }
       });
   }
-  const title = c.planting ? "この作付の日記" : "この区画の日記";
-  let inner;
-  if (diary.error) {
-    inner = `<p class="muted">日記を読み込めませんでした: ${escapeHtml(diary.error)}</p>`;
-  } else if (!diary.rows) {
-    inner = '<p class="muted">読み込んでいます…</p>';
-  } else if (!diary.rows.length) {
-    inner = '<p class="muted">この作付に付いた日記はありません。日記のタグ（対象）は、日記にタグを付けるときに Claude が付けます。</p>';
-  } else {
-    inner =
-      '<ul class="detail-diary">' +
-      diary.rows
-        .map(
-          (row) =>
-            `<li><a href="#diary" data-diary-date="${row.date}">${dateLabel(row.date)}</a>` +
-            `${row.heading ? ` <span>${escapeHtml(row.heading)}</span>` : ""}` +
-            `<p class="muted">${escapeHtml(diarySnippet(row.body))}</p></li>`
-        )
-        .join("") +
-      "</ul>";
+  if (!diary.rows?.length) {
+    return "";
   }
-  return `<section class="panel"><div class="panel-heading"><h2>${title}</h2><span class="muted">日記のタグ（対象）から</span></div>${inner}</section>`;
+  const latest = diary.rows.reduce((max, row) => (row.date > max ? row.date : max), "");
+  return `<button type="button" class="chip-btn" data-act="diary">日記 ${diary.rows.length} 節（最新 ${shortDay(latest)}）</button>`;
+}
+
+// 日記の画面で、この作付（区画）の対象で絞った一覧を開く（作業の記録と予定も差し挟まれる）
+function openDiary(c) {
+  const label = c.planting ? `${c.block.name} 畝${c.bed.seq} ${c.planting.crop_name || ""}`.trim() : c.block.name;
+  openDiaryTarget({ kind: c.planting ? "planting" : "block", id: c.planting ? c.planting.id : c.block.id, label });
+  ctx.showView("diary");
 }
 
 // ---- 気象 ----
@@ -506,10 +484,11 @@ function headHtml(c, active) {
   const go = (item, arrow) =>
     item ? `<button type="button" class="chip-btn" data-act="go" data-kind="${item.kind}" data-id="${item.id}">${arrow === "prev" ? "← " : ""}${escapeHtml(item.label)}${arrow === "next" ? " →" : ""}</button>` : "";
   const recordButton = active && c.planting ? '<button type="button" class="primary-btn" data-act="record">＋ この作付の作業を入力する</button>' : "";
+  const diaryButton = diaryButtonHtml(c, active);
   return (
     `<div class="detail-head"><button type="button" class="text-btn" data-act="back">← 工程表に戻る</button>` +
     `<h2>${escapeHtml(title)}</h2><span class="muted">${escapeHtml(info)}</span>` +
-    `<div class="detail-nav">${recordButton}${go(prev, "prev")}${go(next, "next")}</div></div>`
+    `<div class="detail-nav">${recordButton}${diaryButton}${go(prev, "prev")}${go(next, "next")}</div></div>`
   );
 }
 
@@ -905,15 +884,8 @@ async function reschedule() {
 }
 
 function onClick(event) {
-  const el = event.target.closest("[data-act], [data-log], [data-plan-edit], [data-uncancel], [data-gantt-mode], [data-plan], [data-diary-date]");
+  const el = event.target.closest("[data-act], [data-log], [data-plan-edit], [data-uncancel], [data-gantt-mode], [data-plan]");
   if (!el) {
-    return;
-  }
-  if (el.dataset.diaryDate) {
-    // その日の日記を開く
-    event.preventDefault();
-    openDiaryDay(el.dataset.diaryDate);
-    ctx.showView("diary");
     return;
   }
   if (el.dataset.ganttMode) {
@@ -962,6 +934,11 @@ function onClick(event) {
     openPlantingDetail(el.dataset.kind, el.dataset.id);
     renderPlantingDetail();
     window.scrollTo(0, 0);
+  } else if (act === "diary") {
+    const c = context();
+    if (c) {
+      openDiary(c);
+    }
   } else if (act === "record") {
     openLogEditor(null, { plantingId: target.id });
   } else if (act === "apply-spec") {

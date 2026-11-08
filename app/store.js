@@ -766,10 +766,13 @@ export function createLocalStore({ strict = false } = {}) {
     },
     async diaryTagSections({ filters, oldest, limit, offset }) {
       const diary = read().diary || {};
+      const data = read();
+      // 区画を指す対象で絞ったときは、区画の中の作付に付いた節も含める（DB の diary_tag_sections と同じ）
+      const blockOf = new Map((data.plantings || []).map((planting) => [planting.id, (data.beds || []).find((bed) => bed.id === planting.bed_id)?.block_id]));
       const fits = (section) =>
         filters.every((filter) =>
           filter.kind === "targets"
-            ? (section.labels?.targets || []).some((item) => item.id === filter.id)
+            ? (section.labels?.targets || []).some((item) => item.id === filter.id || (filter.target_kind === "block" && blockOf.get(item.id) === filter.id))
             : (section.labels?.[filter.kind] || []).includes(filter.name)
         );
       const hits = Object.entries(diary.sections || {})

@@ -235,7 +235,8 @@ end;
 $$;
 
 -- タグの条件に合う日記の節を返す（日記の画面で、タグの札を押したとき）。
---   p_filters: [{kind, name}] か、対象なら [{kind: "targets", id}]。すべてに合う節だけ（かつ）
+--   p_filters: [{kind, name}] か、対象なら [{kind: "targets", id, target_kind}]。すべてに合う節だけ（かつ）。
+--     target_kind が block なら、その区画を指す節に加えて、区画の中の作付を指す節も合うとする（区画の詳細と同じ範囲）
 --   p_oldest: true なら古い日から（経過を追う）、false なら新しい日から
 --   p_limit, p_offset: 一度に返す数と、飛ばす数（「続きを出す」）
 -- 返り値は { total, sections: [{id, date, title, path, day_body, day_tags, updated_at, labels, tag_source}], photos: {名前: {taken_at, original_name, tags}} }
@@ -255,10 +256,19 @@ begin
       join diary.days d on d.entry_date = s.entry_date
       where not exists (
         select 1 from jsonb_array_elements(coalesce(p_filters, '[]')) f
-        where not (case
-          when f ->> 'kind' = 'targets' then coalesce(s.labels -> 'targets', '[]') @> jsonb_build_array(jsonb_build_object('id', f ->> 'id'))
+        -- 条件の値が空でも「合う」にならないよう、判断できないものは合わないとする
+        where not coalesce(case
+          when f ->> 'kind' = 'targets' then
+            coalesce(s.labels -> 'targets', '[]') @> jsonb_build_array(jsonb_build_object('id', f ->> 'id'))
+            or (coalesce(f ->> 'target_kind', '') = 'block' and exists (
+              select 1
+              from jsonb_array_elements(coalesce(s.labels -> 'targets', '[]')) x
+              join field.plantings p on p.id::text = x ->> 'id'
+              join field.beds b on b.id = p.bed_id
+              where b.block_id::text = f ->> 'id'
+            ))
           else coalesce(s.labels -> (f ->> 'kind'), '[]') ? (f ->> 'name')
-        end)
+        end, false)
       )
     ), page as (
       select * from hit

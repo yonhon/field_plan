@@ -386,6 +386,16 @@ function mergedHtml(t) {
   return entries.map((entry) => entry.html).join("");
 }
 
+// 作付の詳細（区画の詳細）から、その作付の日記を開く。対象の札で絞った一覧を、一作の流れを追いやすい古い順で出す。
+// 開くのは呼んだ側（showView）
+export function openDiaryTarget({ kind, id, label }) {
+  view.mode = "day";
+  view.results = null;
+  view.tagEdit = null;
+  view.tagView = { filters: [{ kind: "targets", id, name: label, targetKind: kind }], oldest: true, sections: [], total: 0, loading: false, error: "" };
+  loadTagView();
+}
+
 // 作業の記録が変わったら（作業の記録の窓で直したとき）、差し挟んでいる作業を読み直す
 export function refreshDiaryWorks() {
   if (targetFilter(view.tagView)) {
@@ -504,7 +514,7 @@ async function loadTagView({ more = false, keep = false } = {}) {
   try {
     const worksTask = target && ctx.state.store.diaryTargetWorks ? ctx.state.store.diaryTargetWorks(target.targetKind, target.id) : null;
     const result = await ctx.state.store.diaryTagSections({
-      filters: t.filters.map(({ kind, name, id }) => (kind === "targets" ? { kind, id } : { kind, name })),
+      filters: t.filters.map(({ kind, name, id, targetKind }) => (kind === "targets" ? { kind, id, target_kind: targetKind } : { kind, name })),
       oldest: t.oldest,
       limit,
       offset: more ? t.sections.length : 0,
@@ -700,16 +710,6 @@ export function renderDiary() {
 }
 
 // ---- 操作 ----
-
-// ほかの画面から、ある日の日記を開く（作付の詳細の「この作付の日記」）。開くのは呼んだ側（showView）
-export function openDiaryDay(date) {
-  view.mode = "day";
-  view.date = date;
-  view.month = date.slice(0, 7);
-  view.results = null;
-  view.tagView = null;
-  view.tagEdit = null;
-}
 
 function pick(date) {
   view.date = date;
