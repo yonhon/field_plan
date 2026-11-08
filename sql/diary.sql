@@ -6,7 +6,8 @@
 
 -- その日の日記を保存する。
 --   p_sections: 本文を見出しごとに分けた節 [{path: [...], body, images: [...]}]（画面の app/diary.js の splitSections が作る）
---   p_tags: 画面で直した作物と作業の種類。{"見出し > 小見出し": {crops, work}}。いまの節にない見出しの分は捨てる
+--   p_tags: 画面で直したタグ。{"見出し > 小見出し": {crops, work, ...}}。いまの節にない見出しの分は捨てる
+-- 節のタグは、手で直した種類はそれを、直していない種類は Claude のタグ（diary.days.ai_tags）を使う（diary.apply_labels）
 --   p_expected: 画面が読んだときの updated_at。新しい日は null。DB の値と違えば、ほかの画面で書き換えられているので止める
 -- 前の版を diary.day_history に残し、diary.days を書き、その日の diary.sections を作り直す。
 -- 題も本文も空なら、その日を消す。どこからも使われなくなった写真の行を消し、その名前を返す（置き場のファイルは画面が消す）
@@ -56,24 +57,13 @@ begin
       to_char(p_date, 'YYYY-MM-DD') || '-' || lpad(n::text, 2, '0'),
       p_date,
       p_title,
-      path,
-      array(select jsonb_array_elements_text(chosen->'crops')),
-      array(select jsonb_array_elements_text(chosen->'work')),
-      body,
-      images
-    from (
-      select
-        n, path, body, images,
-        coalesce(v_tags->array_to_string(path, ' > '), diary.section_tags(path, body)) as chosen
-      from (
-        select
-          n,
-          array(select jsonb_array_elements_text(s->'path')) as path,
-          coalesce(s->>'body', '') as body,
-          array(select jsonb_array_elements_text(coalesce(s->'images', '[]'))) as images
-        from jsonb_array_elements(p_sections) with ordinality as e(s, n)
-      ) raw
-    ) tagged;
+      array(select jsonb_array_elements_text(s->'path')),
+      '{}',
+      '{}',
+      coalesce(s->>'body', ''),
+      array(select jsonb_array_elements_text(coalesce(s->'images', '[]')))
+    from jsonb_array_elements(p_sections) with ordinality as e(s, n);
+    perform diary.apply_labels(p_date);
   end if;
 
   -- その日の写真で、どの日の本文にも、前の版にも出てこないもの
@@ -107,11 +97,11 @@ begin
       'tags', d.tags,
       'updated_at', d.updated_at,
       'sections', (
-        select coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'path', to_jsonb(s.path), 'crops', to_jsonb(s.crops), 'work', to_jsonb(s.work)) order by s.id), '[]')
+        select coalesce(jsonb_agg(jsonb_build_object('id', s.id, 'path', to_jsonb(s.path), 'crops', to_jsonb(s.crops), 'work', to_jsonb(s.work), 'labels', s.labels, 'tag_source', s.tag_source) order by s.id), '[]')
         from diary.sections s where s.entry_date = d.entry_date
       ),
       'photos', (
-        select coalesce(jsonb_object_agg(p.name, jsonb_build_object('taken_at', p.taken_at, 'original_name', p.original_name, 'width', p.width, 'height', p.height)), '{}')
+        select coalesce(jsonb_object_agg(p.name, jsonb_build_object('taken_at', p.taken_at, 'original_name', p.original_name, 'width', p.width, 'height', p.height, 'tags', p.tags)), '{}')
         from diary.photos p where p.entry_date = d.entry_date
       )
     ) order by d.entry_date), '[]')
