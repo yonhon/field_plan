@@ -205,7 +205,7 @@ $$;
 --   p_filters: [{kind, name}] か、対象なら [{kind: "targets", id}]。すべてに合う節だけ（かつ）
 --   p_oldest: true なら古い日から（経過を追う）、false なら新しい日から
 --   p_limit, p_offset: 一度に返す数と、飛ばす数（「続きを出す」）
--- 返り値は { total, sections: [{id, date, title, path, day_body, labels, tag_source}], photos: {名前: {taken_at, original_name, tags}} }
+-- 返り値は { total, sections: [{id, date, title, path, day_body, day_tags, updated_at, labels, tag_source}], photos: {名前: {taken_at, original_name, tags}} }
 -- 節の本文には写真の書き込みが入らないので、その日の本文（day_body）を返し、画面が見出しで節の部分を切り出す
 create or replace function field.diary_tag_sections(p_filters jsonb, p_oldest boolean, p_limit int, p_offset int)
 returns jsonb
@@ -217,7 +217,7 @@ begin
   end if;
   return (
     with hit as (
-      select s.*, d.title, d.body as day_body
+      select s.*, d.title, d.body as day_body, d.tags as day_tags, d.updated_at
       from diary.sections s
       join diary.days d on d.entry_date = s.entry_date
       where not exists (
@@ -236,7 +236,7 @@ begin
       'total', (select count(*) from hit),
       'sections', coalesce((
         select jsonb_agg(jsonb_build_object(
-          'id', p.id, 'date', p.entry_date, 'title', p.title, 'path', to_jsonb(p.path), 'day_body', p.day_body, 'labels', p.labels, 'tag_source', p.tag_source
+          'id', p.id, 'date', p.entry_date, 'title', p.title, 'path', to_jsonb(p.path), 'day_body', p.day_body, 'day_tags', p.day_tags, 'updated_at', p.updated_at, 'labels', p.labels, 'tag_source', p.tag_source
         ) order by case when p_oldest then p.entry_date end asc, case when not p_oldest then p.entry_date end desc, p.id)
         from page p
       ), '[]'),

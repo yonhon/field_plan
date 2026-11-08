@@ -340,3 +340,58 @@ test("日記: 札を押すと、そのタグの付いた節を並べ、札を重
   await page.waitFor(`document.querySelector("#diaryMain .diary-day-title")?.textContent.includes("3 日目") && !document.querySelector("#diaryMain .diary-tag-filters")`, "その日");
   assert.deepEqual(page.errors, []);
 });
+
+test("日記: タグの一覧から修正と種類を直すができ、直したあとは一覧の同じ位置に戻る", options, async () => {
+  const data = seed();
+  const days = {};
+  const sections = {};
+  for (let i = 1; i <= 25; i += 1) {
+    const date = `2026-09-${String(i).padStart(2, "0")}`;
+    days[date] = { date, title: `${i} 日目`, body: `前置き\n## オクラ\n${i} 日目の見回り。`, tags: {}, updated_at: AT, ai_tags: { オクラ: { crops: ["オクラ"] } } };
+    sections[date] = [
+      { id: `${date}-01`, path: [], crops: [], work: [], tag_source: null, labels: {} },
+      { id: `${date}-02`, path: ["オクラ"], crops: ["オクラ"], work: [], tag_source: "claude", labels: { crops: ["オクラ"] } },
+    ];
+  }
+  data.diary = { days, sections, photos: {}, files: {} };
+  await page.loadApp(data);
+  await page.run(`location.hash = "#diary"`);
+  await page.waitFor(`Boolean(document.querySelector('#diaryMonthSelect option[value="2026-09"]'))`, "日記の画面");
+  await page.run(`(() => { const select = document.getElementById("diaryMonthSelect"); select.value = "2026-09"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.click('#diaryCalendar [data-date="2026-09-10"]');
+  await page.waitFor(`Boolean(document.querySelector('#diaryMain [data-tag-filter="crops"]'))`, "札");
+  await page.click('#diaryMain [data-tag-filter="crops"]');
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 20`, "タグの一覧");
+
+  // 修正: 押した節の見出しの下にカーソルを置き、保存したら一覧の同じ位置に戻る
+  const scrollTo = (date) => page.run(`(() => { const el = document.querySelector('#diaryMain .diary-day[data-date="${date}"]'); document.getElementById("diaryMain").scrollTop = el.offsetTop - 40; window.scrollTo(0, 0); return document.getElementById("diaryMain").scrollTop; })()`);
+  await scrollTo("2026-09-12");
+  await page.click('#diaryMain .diary-day[data-date="2026-09-12"] [data-action="edit"]');
+  await page.waitFor(`Boolean(document.getElementById("diaryBody"))`, "修正の画面");
+  assert.equal(await page.run(`document.getElementById("diaryBody").selectionStart`), "前置き\n## オクラ\n".length);
+  await page.type("追記した。");
+  await page.click('#diaryMain [data-action="save"]');
+  await saved();
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 20 && document.querySelector('#diaryMain .diary-day[data-date="2026-09-12"]')?.textContent.includes("追記した。")`, "一覧に戻る");
+  // 直した節が、日記の枠の中に見えている（一覧の頭に戻っていない）
+  const seen = await page.run(`(() => { const main = document.getElementById("diaryMain").getBoundingClientRect(); const el = document.querySelector('#diaryMain .diary-day[data-date="2026-09-12"]').getBoundingClientRect(); return [document.getElementById("diaryMain").scrollTop > 0, el.bottom > main.top && el.top < main.bottom]; })()`);
+  assert.deepEqual(seen, [true, true]);
+  assert.equal((await diary()).days["2026-09-12"].body, "前置き\n## オクラ\n追記した。12 日目の見回り。");
+
+  // やめても、一覧に戻る
+  await page.click('#diaryMain .diary-day[data-date="2026-09-20"] [data-action="edit"]');
+  await page.waitFor(`Boolean(document.getElementById("diaryBody"))`, "修正の画面");
+  await page.click('#diaryMain [data-action="cancel"]');
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 20`, "やめて一覧に戻る");
+
+  // 種類を直す: 一覧のまま直し、札が変わり「（直した）」が付く
+  await page.click('#diaryMain .diary-day[data-date="2026-09-15"] [data-action="tags"]');
+  await page.click('#diaryMain .diary-day[data-date="2026-09-15"] [data-tag-kind="issues"][data-tag-name="アブラムシ"]');
+  await page.click('#diaryMain [data-action="tags-save"]');
+  await saved();
+  await page.waitFor(`document.querySelector('#diaryMain .diary-day[data-date="2026-09-15"] .diary-tags')?.textContent.includes("（直した）")`, "直した札");
+  assert.match(await page.run(`document.querySelector('#diaryMain .diary-day[data-date="2026-09-15"] .diary-tags').textContent`), /アブラムシ/);
+  assert.deepEqual((await diary()).days["2026-09-15"].tags["オクラ"].issues, ["アブラムシ"]);
+  assert.equal(await page.run(`document.querySelectorAll("#diaryMain .diary-tag-filters .diary-tag").length`), 1);
+  assert.deepEqual(page.errors, []);
+});

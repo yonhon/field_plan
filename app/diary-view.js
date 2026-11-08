@@ -330,11 +330,40 @@ function tagSectionHtml(section) {
   const heading = chunk?.heading ? `<h${level} class="diary-heading">${escapeHtml(chunk.heading)}</h${level}>` : "";
   return (
     `<article class="diary-day" data-date="${section.date}">` +
-    `<div class="panel-heading"><h3 class="diary-day-title"><a href="#diary" data-action="open-day" data-date="${section.date}">${dateLabel(section.date)}</a> ${escapeHtml(section.title || "")}</h3></div>` +
+    `<div class="panel-heading"><h3 class="diary-day-title"><a href="#diary" data-action="open-day" data-date="${section.date}">${dateLabel(section.date)}</a> ${escapeHtml(section.title || "")}</h3>` +
+    `<button type="button" class="chip-btn" data-action="edit" data-date="${section.date}" data-key="${escapeHtml(key)}">修正</button></div>` +
     heading +
     (chunk ? renderMarkdown(chunk.text, photoHtml, { headingBase: 4 }) : "") +
-    `<div class="diary-tags">${labelChipsHtml(section, section.tag_source === "manual")}</div></article>`
+    tagsHtml(tagDay(section.date), section, key) +
+    `</article>`
   );
+}
+
+// タグの一覧の節から、その日を作る（「種類を直す」で保存するため）。一覧にその日の節がなければ null
+function tagDay(date) {
+  const rows = view.tagView?.sections.filter((section) => section.date === date) || [];
+  if (!rows.length) {
+    return null;
+  }
+  const [first] = rows;
+  return { date, title: first.title || "", body: first.day_body || "", tags: first.day_tags || {}, updated_at: first.updated_at, sections: rows };
+}
+
+// 札や「種類を直す」の相手の日。タグの一覧を出しているときは、一覧の節から作る
+const dayFor = (date) => (view.tagView ? tagDay(date) : null) || dayOf(date);
+
+// タグの一覧から直しに行くとき、いまの見ている位置を覚えておく（直し終えたら、同じ位置に戻る）
+function keepTagScroll() {
+  if (view.tagView) {
+    view.tagView.scroll = { main: $("diaryMain").scrollTop, page: window.scrollY };
+  }
+}
+
+// 直し終えたあと、タグの一覧を読み直して、覚えておいた位置に戻る
+function returnToTagView() {
+  if (view.tagView && !view.editing) {
+    loadTagView({ keep: true });
+  }
 }
 
 function tagViewHtml() {
@@ -369,23 +398,28 @@ function tagViewHtml() {
 }
 
 // タグの一覧を読む。more なら続きを足す。読んでいるあいだに条件が変わったら、古い結果は捨てる
-async function loadTagView({ more = false } = {}) {
+async function loadTagView({ more = false, keep = false } = {}) {
   const t = view.tagView;
   if (!t) {
     return;
   }
   const token = (t.token = (t.token || 0) + 1);
   t.loading = true;
-  if (!more) {
+  if (!more && !keep) {
     t.sections = [];
     t.total = 0;
   }
+  // 直し終えて読み直すときは、いま出している節を出したまま読む（画面がちらつかず、位置も保てる）
+  const limit = keep ? Math.max(TAG_PAGE, t.sections.length) : TAG_PAGE;
   drawMain();
+  if (keep) {
+    restoreTagScroll(t);
+  }
   try {
     const result = await ctx.state.store.diaryTagSections({
       filters: t.filters.map(({ kind, name, id }) => (kind === "targets" ? { kind, id } : { kind, name })),
       oldest: t.oldest,
-      limit: TAG_PAGE,
+      limit,
       offset: more ? t.sections.length : 0,
     });
     if (view.tagView !== t || t.token !== token) {
@@ -403,6 +437,16 @@ async function loadTagView({ more = false } = {}) {
   if (view.tagView === t && t.token === token) {
     t.loading = false;
     drawMain();
+    if (keep) {
+      restoreTagScroll(t);
+    }
+  }
+}
+
+function restoreTagScroll(t) {
+  if (t.scroll) {
+    $("diaryMain").scrollTop = t.scroll.main;
+    window.scrollTo(0, t.scroll.page);
   }
 }
 
@@ -584,7 +628,22 @@ function pick(date) {
   renderDiary();
 }
 
-function openEditor(date) {
+// 本文の中で、見出し（path の最後）の行のすぐ下の位置と、その行の番号。見つからなければ null
+function headingPosition(body, key) {
+  const heading = key ? key.split(" > ").pop() : "";
+  if (!heading) {
+    return null;
+  }
+  const lines = body.split("\n");
+  const index = lines.findIndex((line) => /^#{1,6}\s+/.test(line) && line.replace(/^#{1,6}\s+/, "").trim() === heading);
+  if (index < 0) {
+    return null;
+  }
+  const pos = lines.slice(0, index + 1).reduce((sum, line) => sum + line.length + 1, 0);
+  return { pos: Math.min(pos, body.length), line: index };
+}
+
+function openEditor(date, key = "") {
   const saved = view.days.find((day) => day.date === date) || null;
   const draft = readDrafts()[date];
   const base = { title: saved?.title || "", body: saved?.body || "" };
@@ -619,10 +678,21 @@ function openEditor(date) {
       }
     })
     .catch(() => {});
+  // タグの一覧から開いたときは、押した節の見出しの下にカーソルを置く
+  const at = headingPosition(body, key);
+  if (at) {
+    view.editing.cursor = at.pos;
+  }
   renderDiary();
   // 書く欄を画面の上に出す（スマホではカレンダーが隠れて、上へずれる）
   $("diaryMain").scrollIntoView({ block: "start" });
-  $("diaryBody")?.focus({ preventScroll: true });
+  const area = $("diaryBody");
+  area?.focus({ preventScroll: true });
+  if (area && at) {
+    area.setSelectionRange(at.pos, at.pos);
+    const lineHeight = parseFloat(getComputedStyle(area).lineHeight) || 20;
+    area.scrollTop = Math.max(0, (at.line - 1) * lineHeight);
+  }
 }
 
 const changed = (e) => {
@@ -639,6 +709,7 @@ async function closeEditor() {
   view.editing = null;
   view.uploading = "";
   renderDiary();
+  returnToTagView();
 }
 
 function failed(error) {
@@ -685,6 +756,7 @@ async function saveEditor() {
     view.month = e.date.slice(0, 7);
     view.firstDate = undefined;
     await refresh({ calendar: true, period: true });
+    returnToTagView();
   } catch (error) {
     failed(error);
   }
@@ -703,6 +775,7 @@ async function saveTags(day, key, value) {
     view.tagEdit = null;
     ctx.setStatus("保存しました");
     await refresh({ period: true });
+    returnToTagView();
   } catch (error) {
     failed(error);
   }
@@ -947,13 +1020,14 @@ export function initDiary(context) {
         notify("書きかけの日記があります。保存するか、やめてから開いてください。");
         return;
       }
+      keepTagScroll();
       if (view.mode !== "day" || view.date !== target.dataset.date) {
         view.mode = "day";
         view.date = target.dataset.date;
         view.month = view.date.slice(0, 7);
         await loadPeriod().catch((error) => ctx.setStatus(`日記を読み込めませんでした: ${error.message}`));
       }
-      openEditor(target.dataset.date);
+      openEditor(target.dataset.date, target.dataset.key || "");
     } else if (action === "save") {
       saveEditor();
     } else if (action === "cancel") {
@@ -999,7 +1073,7 @@ export function initDiary(context) {
       renderDiary();
     } else if (action === "tags") {
       const box = target.closest("[data-key]");
-      const day = dayOf(box.dataset.date);
+      const day = dayFor(box.dataset.date);
       const section = day?.sections.find((item) => pathKey(item.path) === box.dataset.key);
       if (section) {
         const labels = sectionLabels(section);
@@ -1014,7 +1088,8 @@ export function initDiary(context) {
       drawMain();
     } else if (action === "tags-save" || action === "tags-auto") {
       const edit = view.tagEdit;
-      const day = dayOf(edit.date);
+      const day = dayFor(edit.date);
+      keepTagScroll();
       const order = (kind, names) => (view.tagNames?.[kind] || []).filter((name) => names.includes(name));
       saveTags(day, edit.key, action === "tags-save" ? Object.fromEntries(TAG_KINDS.map(([kind]) => [kind, order(kind, edit.values[kind])])) : null);
     } else if (action === "tags-cancel") {

@@ -751,7 +751,10 @@ export function createLocalStore({ strict = false } = {}) {
         .sort((a, b) => (oldest ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)) || a.id.localeCompare(b.id));
       const page = hits
         .slice(offset, offset + limit)
-        .map(({ id, date, title, path, labels, tag_source }) => ({ id, date, title, path, day_body: diary.days?.[date]?.body || "", labels, tag_source }));
+        .map(({ id, date, title, path, labels, tag_source }) => {
+          const day = diary.days?.[date] || {};
+          return { id, date, title, path, day_body: day.body || "", day_tags: day.tags || {}, updated_at: day.updated_at, labels, tag_source };
+        });
       const names = new Set(page.flatMap((section) => photoNames(section.day_body)));
       const photos = Object.fromEntries(Object.values(diary.photos || {}).filter((photo) => names.has(photo.name)).map((photo) => [photo.name, photo]));
       return { total: hits.length, sections: page, photos };
