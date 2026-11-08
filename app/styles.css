@@ -2018,7 +2018,8 @@ body.plan-busy #scheduleView {
   white-space: nowrap;
 }
 
-.detail-head:not(.is-stacked) .detail-title {
+.detail-head:not(.is-stacked) .detail-title,
+.detail-head:not(.is-stacked) .detail-actions {
   flex-wrap: nowrap;
 }
 

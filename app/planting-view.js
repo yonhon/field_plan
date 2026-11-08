@@ -144,7 +144,13 @@ function fitHead() {
   // はみ出すか、名前と面積・苗数が 1 行に並ばない（折り返した）なら、収まらない
   const title = head.querySelector(".detail-title");
   const h2 = head.querySelector(".detail-title h2");
-  const over = head.scrollWidth > head.clientWidth + 1 || (title && h2 && title.getBoundingClientRect().height > h2.getBoundingClientRect().height + 4);
+  // ボタンの並びが 2 段になった（ボタンの高さより高い）ときも、収まらないとする
+  const actions = head.querySelector(".detail-actions");
+  const button = actions?.querySelector("button");
+  const over =
+    head.scrollWidth > head.clientWidth + 1 ||
+    (title && h2 && title.getBoundingClientRect().height > h2.getBoundingClientRect().height + 4) ||
+    (actions && button && actions.getBoundingClientRect().height > button.getBoundingClientRect().height + 4);
   stacked = over;
   head.classList.toggle("is-stacked", over);
 }
