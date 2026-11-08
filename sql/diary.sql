@@ -19,6 +19,7 @@ declare
   old diary.days;
   had boolean;
   v_tags jsonb;
+  v_renamed jsonb;
   saved timestamptz := clock_timestamp();
   removed text[];
 begin
@@ -31,9 +32,34 @@ begin
     raise exception 'この日の日記は、ほかの画面で書き換えられています。読み込み直してから書いてください。' using errcode = '40001';
   end if;
 
-  select coalesce(jsonb_object_agg(t.key, t.value), '{}') into v_tags
+  -- 見出しの名前が変わった節（app/diary.js の renamedHeadings と同じ）。前にしかない見出しと後にしかない見出しを、
+  -- 本文の上から順に組にし、組の数が同じときだけ { 前の見出し: 後の見出し } にする。数が違えば決められないので {}
+  with o as (
+    select k, min(n) as n
+    from (select array_to_string(path, ' > ') as k, row_number() over (order by id) as n from diary.sections where entry_date = p_date) x
+    group by k
+  ), nw as (
+    select k, min(n) as n
+    from (
+      select array_to_string(array(select jsonb_array_elements_text(s->'path')), ' > ') as k, n
+      from jsonb_array_elements(p_sections) with ordinality as e(s, n)
+    ) y
+    group by k
+  ), gone as (
+    select k, row_number() over (order by n) as r from o where k not in (select k from nw)
+  ), added as (
+    select k, row_number() over (order by n) as r from nw where k not in (select k from o)
+  )
+  select case
+    when (select count(*) from gone) > 0 and (select count(*) from gone) = (select count(*) from added)
+      then (select jsonb_object_agg(g.k, a.k) from gone g join added a using (r))
+    else '{}'::jsonb
+  end into v_renamed;
+
+  -- 手で直したタグは、名前が変わった見出しに引き継いでから、いまの節にある見出しの分だけ残す
+  select coalesce(jsonb_object_agg(coalesce(v_renamed ->> t.key, t.key), t.value), '{}') into v_tags
   from jsonb_each(coalesce(p_tags, '{}')) t
-  where t.key in (
+  where coalesce(v_renamed ->> t.key, t.key) in (
     select array_to_string(array(select jsonb_array_elements_text(s->'path')), ' > ')
     from jsonb_array_elements(p_sections) s
   );
@@ -51,6 +77,13 @@ begin
     values (p_date, p_title, p_body, v_tags, saved)
     on conflict (entry_date) do update
       set title = excluded.title, body = excluded.body, tags = excluded.tags, updated_at = excluded.updated_at;
+
+    -- Claude のタグも、名前が変わった見出しに引き継ぐ（付け直すまでのつなぎ）
+    if v_renamed <> '{}'::jsonb then
+      update diary.days
+      set ai_tags = (select coalesce(jsonb_object_agg(coalesce(v_renamed ->> a.key, a.key), a.value), '{}') from jsonb_each(ai_tags) a)
+      where entry_date = p_date;
+    end if;
 
     insert into diary.sections (id, entry_date, day_title, path, crops, work, body, images)
     select

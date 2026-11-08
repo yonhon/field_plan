@@ -20,6 +20,8 @@ import {
   replacePlaceholder,
   searchWords,
   pickLabels,
+  renameTagKeys,
+  renamedHeadings,
   shiftPeriod,
   snippetHtml,
   splitSections,
@@ -80,6 +82,15 @@ test("表示のためのまとまりは、写真と束ねるだけの見出し�
       [["親", "子"], "子", 3, "![](images/x.jpg)"],
     ]
   );
+});
+
+test("見出しの名前が変わった節は、前と後で組の数が同じときだけ見つける", () => {
+  assert.deepEqual(renamedHeadings(["", "オクラ", "畑"], ["", "オクラの収穫", "畑"]), { オクラ: "オクラの収穫" });
+  assert.deepEqual(renamedHeadings(["A", "B", "C"], ["A2", "B", "C2"]), { A: "A2", C: "C2" });
+  assert.deepEqual(renamedHeadings(["A", "B"], ["A2", "B", "新しい節"]), {}); // 名前を変えて、さらに節を足した
+  assert.deepEqual(renamedHeadings(["A", "B"], ["B"]), {}); // 節を消しただけ
+  assert.deepEqual(renamedHeadings(["A"], ["A"]), {});
+  assert.deepEqual(renameTagKeys({ A: { crops: ["オクラ"] }, B: { work: [] } }, { A: "A2" }), { A2: { crops: ["オクラ"] }, B: { work: [] } });
 });
 
 test("節のタグは、手で直した種類はそれを、直していない種類は Claude のタグを使う", () => {
@@ -274,11 +285,17 @@ test("日記を保存すると節ができ、語では種類を付けない。Cl
   [day] = await store.diaryDays("2026-11-08", "2026-11-08");
   assert.deepEqual(day.tags, { 畑: { work: ["定植・播種"] } });
   assert.deepEqual([day.sections[1].crops, day.sections[1].work, day.sections[1].tag_source], [["トマト"], ["定植・播種"], "manual"]);
-  // 見出しを書き換えた節は、直した内容が外れ、Claude が付け直すまでタグがない
+  // 見出しの名前を変えた節は、手で直したタグも Claude のタグも引き継ぐ
   await save(store, { date: "2026-11-08", title: "題", body: "## オクラ\n収穫\n## 畑B\nトマト", tags: day.tags, expected: day.updated_at });
+  [day] = await store.diaryDays("2026-11-08", "2026-11-08");
+  assert.deepEqual(day.tags, { 畑B: { work: ["定植・播種"] } });
+  assert.deepEqual([day.sections[1].crops, day.sections[1].work, day.sections[1].tag_source], [["トマト"], ["定植・播種"], "manual"]);
+  // 名前を変えて、さらに節を足すと、どれがどれか決められないので、引き継がない（Claude が付け直すまでタグがない）
+  await save(store, { date: "2026-11-08", title: "題", body: "## オクラ\n収穫\n## 畑C\nトマト\n## 新しい節\n雨", tags: day.tags, expected: day.updated_at });
   [day] = await store.diaryDays("2026-11-08", "2026-11-08");
   assert.deepEqual(day.tags, {});
   assert.deepEqual([day.sections[1].crops, day.sections[1].tag_source], [[], null]);
+  assert.deepEqual(day.sections[0].crops, ["オクラ"]); // 名前の変わらない節はそのまま
 });
 
 test("ほかの画面で書き換えられていたら、保存を止める", async () => {

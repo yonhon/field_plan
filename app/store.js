@@ -3,7 +3,7 @@
 // さらに &strict=1 を付けると、保存の遅れと外部キーを DB に近づける。
 import { DEFAULT_WORK_TYPES } from "./schedule.js";
 import { uploadWithProgress } from "./upload.js";
-import { pathKey, photoNames, pickLabels } from "./diary.js";
+import { pathKey, photoNames, pickLabels, renameTagKeys, renamedHeadings } from "./diary.js";
 
 const BUCKET = "field-plan";
 // 農作業日記の写真の置き場（inoo_farm と共用。非公開）
@@ -788,14 +788,19 @@ export function createLocalStore({ strict = false } = {}) {
           throw Object.assign(new Error("この日の日記は、ほかの画面で書き換えられています。読み込み直してから書いてください。"), { code: "40001" });
         }
         const keys = new Set(sections.map((section) => pathKey(section.path)));
-        const kept = Object.fromEntries(Object.entries(tags || {}).filter(([key]) => keys.has(key)));
+        // 見出しの名前を変えた節は、手で直したタグも Claude のタグも、新しい見出しに引き継ぐ
+        const renamed = renamedHeadings(
+          (diary.sections[date] || []).map((section) => pathKey(section.path)),
+          sections.map((section) => pathKey(section.path))
+        );
+        const kept = Object.fromEntries(Object.entries(renameTagKeys(tags, renamed)).filter(([key]) => keys.has(key)));
         if (old && JSON.stringify([old.title, old.body, old.tags]) !== JSON.stringify([title, body, kept])) {
           diary.history.push({ date, title: old.title, body: old.body, tags: old.tags, saved_at: new Date().toISOString() });
         }
         const saved = title.trim() || body.trim() ? new Date().toISOString() : null;
         if (saved) {
           // Claude のタグ（ai_tags）は保存では変えない。節のタグは、手直し → Claude の順で選ぶ（DB の diary.apply_labels と同じ）
-          const ai = old?.ai_tags || {};
+          const ai = renameTagKeys(old?.ai_tags, renamed);
           diary.days[date] = { date, title, body, tags: kept, ai_tags: ai, updated_at: saved };
           diary.sections[date] = sections.map((section, i) => {
             const key = pathKey(section.path);

@@ -99,6 +99,25 @@ export const PHOTO_TAG_KINDS = [
   ["subject", "写っているもの"],
 ];
 
+// 見出しの名前が変わった節を見つける。oldKeys と newKeys は、保存の前と後の節の見出し（pathKey）を本文の順に並べたもの。
+// 前にしかない見出しと後にしかない見出しを、本文の上から順に組にする。組の数が同じときだけ「名前が変わった」とみなし、
+// { 前の見出し: 後の見出し } を返す。数が違う（同時に節を足したり消したりした）ときは、どれがどれか決められないので {}（DB の diary_save_day と同じ）
+export function renamedHeadings(oldKeys, newKeys) {
+  const oldSet = new Set(oldKeys);
+  const newSet = new Set(newKeys);
+  const gone = [...new Set(oldKeys.filter((key) => !newSet.has(key)))];
+  const added = [...new Set(newKeys.filter((key) => !oldSet.has(key)))];
+  if (!gone.length || gone.length !== added.length) {
+    return {};
+  }
+  return Object.fromEntries(gone.map((key, i) => [key, added[i]]));
+}
+
+// 見出しごとのタグを、名前が変わった見出しに引き継ぐ
+export function renameTagKeys(tags, renamed) {
+  return Object.fromEntries(Object.entries(tags || {}).map(([key, value]) => [renamed[key] ?? key, value]));
+}
+
 // 節のタグを、手で直したタグ（manual）と Claude のタグ（ai）から決める（DB の diary.apply_labels と同じ）。
 // 手で直した種類はそれを、直していない種類は Claude のタグを使う。tag_source は manual / claude / null（まだ付いていない）
 export function pickLabels(manual, ai) {
