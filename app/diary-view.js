@@ -31,7 +31,10 @@ import {
   TAG_KINDS,
   toggleHeading,
 } from "./diary.js";
-import { localToday } from "./schedule.js";
+import { WORK_COLORS, localToday, workName } from "./schedule.js";
+import { specText } from "./logs.js";
+import { inputHtml } from "./pesticide.js";
+import { openLogEditor } from "./log-view.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -303,14 +306,14 @@ function labelChipsHtml(section, fixed) {
   const labels = sectionLabels(section);
   const chips = [
     ...TAG_KINDS.flatMap(([kind]) => (labels[kind] || []).map((name) => ({ kind, name, value: name }))),
-    ...(labels.targets || []).map((item) => ({ kind: "targets", name: item.label, value: item.id })),
+    ...(labels.targets || []).map((item) => ({ kind: "targets", name: item.label, value: item.id, targetKind: item.kind })),
   ];
   return (
     (chips.length
       ? chips
           .map(
             (chip) =>
-              `<button type="button" class="diary-tag is-${chip.kind}" data-tag-filter="${chip.kind}" data-tag-value="${escapeHtml(chip.value)}" data-tag-label="${escapeHtml(chip.name)}">${escapeHtml(chip.name)}</button>`
+              `<button type="button" class="diary-tag is-${chip.kind}" data-tag-filter="${chip.kind}" data-tag-value="${escapeHtml(chip.value)}" data-tag-label="${escapeHtml(chip.name)}"${chip.targetKind ? ` data-tag-target-kind="${chip.targetKind}"` : ""}>${escapeHtml(chip.name)}</button>`
           )
           .join("")
       : '<span class="muted">種類なし</span>') + (fixed ? '<span class="muted">（直した）</span>' : "")
@@ -320,6 +323,76 @@ function labelChipsHtml(section, fixed) {
 // ---- タグの一覧（札を押したとき） ----
 
 const TAG_PAGE = 20;
+const TARGET_PAGE = 100;
+const targetFilter = (t) => t?.filters.find((filter) => filter.kind === "targets") || null;
+
+// ---- 対象で絞ったときに差し挟む作業（実績と、まだ終わっていない計画） ----
+
+const shortDate = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+const typeLabel = (code) => (ctx.state.allWorkTypes || []).find((type) => type.code === code)?.label || code;
+
+// 作業の札（例: 防除）で絞っているときは、作業も同じ種類だけにする（日記の作業の言葉は、記録の作業の種類とそろえてある）
+function workFilterLabels(t) {
+  const names = t.filters.filter((filter) => filter.kind === "work").map((filter) => filter.name);
+  return names.length ? new Set(names) : null;
+}
+
+function workEntries(t) {
+  if (!t.works) {
+    return [];
+  }
+  const only = workFilterLabels(t);
+  const keep = (type) => !only || only.has(typeLabel(type));
+  return [
+    ...t.works.logs.filter((log) => keep(log.work_type)).map((log) => ({ date: log.date, rank: 0, html: workLogHtml(log) })),
+    ...t.works.works.filter((work) => keep(work.work_type)).map((work) => ({ date: work.plan_start || "9999-12-31", rank: 1, html: workPlanHtml(work) })),
+  ];
+}
+
+const workRange = (start, end) => (end && end !== start ? `${dateLabel(start)}〜${shortDate(end)}` : dateLabel(start));
+const workDot = (type) => `<span class="diary-work-dot" style="background:${WORK_COLORS[type] || "#9e9e9e"}"></span>`;
+
+// 作業の記録。押すと、作業の記録の窓を開く
+function workLogHtml(log) {
+  const lines = [escapeHtml(specText(log.work_type, log.spec || {})), ...(log.inputs || []).map(inputHtml), escapeHtml(log.note || "")].filter(Boolean);
+  return (
+    `<button type="button" class="diary-work is-log" data-action="work-log" data-log-id="${log.id}" data-field-id="${log.field_id}">` +
+    `<span class="diary-work-head">${workDot(log.work_type)}<span class="diary-work-date">${workRange(log.date, log.end_date)}</span>` +
+    `<b>${escapeHtml(workName(typeLabel(log.work_type), log.spec || {}))}</b>${log.block_work ? '<span class="muted">（区画の作業）</span>' : ""}</span>` +
+    (lines.length ? `<span class="diary-work-lines">${lines.join("　")}</span>` : "") +
+    "</button>"
+  );
+}
+
+// まだ終わっていない計画（予定）
+function workPlanHtml(work) {
+  const when = work.plan_start ? workRange(work.plan_start, work.plan_end) : "日付なし";
+  return (
+    `<div class="diary-work is-plan">` +
+    `<span class="diary-work-head">${workDot(work.work_type)}<span class="diary-work-tag">予定</span><span class="diary-work-date">${when}</span>` +
+    `<b>${escapeHtml(workName(typeLabel(work.work_type), work.detail || {}))}</b>${work.block_work ? '<span class="muted">（区画の作業）</span>' : ""}</span>` +
+    (work.note ? `<span class="diary-work-lines">${escapeHtml(work.note)}</span>` : "") +
+    "</div>"
+  );
+}
+
+// 日記の節と作業を、日付で混ぜて並べる。同じ日は、作業（実績、予定）→ 日記の順（古い順のとき）
+function mergedHtml(t) {
+  const entries = [...t.sections.map((section) => ({ date: section.date, rank: 2, html: tagSectionHtml(section) })), ...workEntries(t)];
+  entries.sort((a, b) => a.date.localeCompare(b.date) || a.rank - b.rank);
+  if (!t.oldest) {
+    entries.reverse();
+  }
+  return entries.map((entry) => entry.html).join("");
+}
+
+// 作業の記録が変わったら（作業の記録の窓で直したとき）、差し挟んでいる作業を読み直す
+export function refreshDiaryWorks() {
+  if (targetFilter(view.tagView)) {
+    keepTagScroll();
+    loadTagView({ keep: true });
+  }
+}
 const tagViewKey = (t) => `tags:${JSON.stringify(t.filters)}:${t.oldest}`;
 
 // 節の部分を、その日の本文から見出しで切り出して描く（節の本文には写真の書き込みが入らないため）
@@ -366,6 +439,15 @@ function returnToTagView() {
   }
 }
 
+function worksCount(t) {
+  if (!targetFilter(t) || !t.works) {
+    return "";
+  }
+  const only = workFilterLabels(t);
+  const keep = (type) => !only || only.has(typeLabel(type));
+  return `、作業の記録 ${t.works.logs.filter((log) => keep(log.work_type)).length} 件、予定 ${t.works.works.filter((work) => keep(work.work_type)).length} 件`;
+}
+
 function tagViewHtml() {
   const t = view.tagView;
   const filters = t.filters
@@ -379,6 +461,8 @@ function tagViewHtml() {
   let list;
   if (t.error) {
     list = `<p class="muted">日記を読み込めませんでした: ${escapeHtml(t.error)}</p>`;
+  } else if (targetFilter(t) && (t.sections.length || workEntries(t).length)) {
+    list = mergedHtml(t);
   } else if (!t.sections.length) {
     list = `<p class="muted">${t.loading ? "読み込んでいます…" : "このタグの付いた節はありません。"}</p>`;
   } else {
@@ -391,7 +475,7 @@ function tagViewHtml() {
   }
   return (
     `<div class="panel-heading"><h2 class="diary-tag-filters">${filters}</h2><button type="button" class="text-btn" data-action="tag-clear">一覧をやめる</button></div>` +
-    `<div class="row diary-tag-order"><span class="muted">${t.loading && !t.sections.length ? "" : `${t.total} 節。札を押すと、さらに絞れます`}</span>` +
+    `<div class="row diary-tag-order"><span class="muted">${t.loading && !t.sections.length ? "" : `${t.total} 節${worksCount(t)}。札を押すと、さらに絞れます`}</span>` +
     `<div class="diary-modes">${order(false, "新しい順")}${order(true, "古い順")}</div></div>` +
     list
   );
@@ -409,13 +493,16 @@ async function loadTagView({ more = false, keep = false } = {}) {
     t.sections = [];
     t.total = 0;
   }
-  // 直し終えて読み直すときは、いま出している節を出したまま読む（画面がちらつかず、位置も保てる）
-  const limit = keep ? Math.max(TAG_PAGE, t.sections.length) : TAG_PAGE;
+  // 直し終えて読み直すときは、いま出している節を出したまま読む（画面がちらつかず、位置も保てる）。
+  // 対象で絞っているときは、作業と日付で混ぜて並べるので、区切らずに全部（100 節まで）読む
+  const target = targetFilter(t);
+  const limit = target ? TARGET_PAGE : keep ? Math.max(TAG_PAGE, t.sections.length) : TAG_PAGE;
   drawMain();
   if (keep) {
     restoreTagScroll(t);
   }
   try {
+    const worksTask = target && ctx.state.store.diaryTargetWorks ? ctx.state.store.diaryTargetWorks(target.targetKind, target.id) : null;
     const result = await ctx.state.store.diaryTagSections({
       filters: t.filters.map(({ kind, name, id }) => (kind === "targets" ? { kind, id } : { kind, name })),
       oldest: t.oldest,
@@ -425,6 +512,11 @@ async function loadTagView({ more = false, keep = false } = {}) {
     if (view.tagView !== t || t.token !== token) {
       return;
     }
+    const works = worksTask ? await worksTask : null;
+    if (view.tagView !== t || t.token !== token) {
+      return;
+    }
+    t.works = works;
     Object.assign(view.meta, result.photos || {});
     t.sections = more ? [...t.sections, ...result.sections] : result.sections;
     t.total = result.total;
@@ -451,8 +543,8 @@ function restoreTagScroll(t) {
 }
 
 // 札を押したとき。一覧を出していなければ出し、出していれば条件に足す（かつ）
-function addTagFilter(kind, value, label) {
-  const filter = kind === "targets" ? { kind, id: value, name: label } : { kind, name: value };
+function addTagFilter(kind, value, label, targetKind) {
+  const filter = kind === "targets" ? { kind, id: value, name: label, targetKind: targetKind || "planting" } : { kind, name: value };
   const t = view.tagView;
   if (t) {
     if (t.filters.some((item) => item.kind === kind && (item.id ?? item.name) === value)) {
@@ -1048,7 +1140,7 @@ export function initDiary(context) {
     } else if (action === "photo") {
       openPhoto(target.dataset.photo);
     } else if (target.dataset.tagFilter) {
-      addTagFilter(target.dataset.tagFilter, target.dataset.tagValue, target.dataset.tagLabel);
+      addTagFilter(target.dataset.tagFilter, target.dataset.tagValue, target.dataset.tagLabel, target.dataset.tagTargetKind);
     } else if (action === "tag-remove") {
       const t = view.tagView;
       t.filters = t.filters.filter((_, i) => i !== Number(target.dataset.index));
@@ -1061,6 +1153,15 @@ export function initDiary(context) {
     } else if (action === "tag-order") {
       view.tagView.oldest = target.dataset.oldest === "true";
       loadTagView();
+    } else if (action === "work-log") {
+      const field = ctx.state.field;
+      const log = field?.id === target.dataset.fieldId ? (ctx.state.logs || []).find((item) => item.id === target.dataset.logId) : null;
+      if (log) {
+        openLogEditor(log);
+      } else {
+        const name = (ctx.state.fields || []).find((item) => item.id === target.dataset.fieldId)?.name || "別の圃場";
+        notify(`この作業の記録は「${name}」の記録です。圃場図の画面の「圃場」で「${name}」を選ぶと、直せます。`);
+      }
     } else if (action === "tag-more") {
       loadTagView({ more: true });
     } else if (action === "tag-clear") {

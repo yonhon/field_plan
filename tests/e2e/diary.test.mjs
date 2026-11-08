@@ -395,3 +395,68 @@ test("日記: タグの一覧から修正と種類を直すができ、直した
   assert.equal(await page.run(`document.querySelectorAll("#diaryMain .diary-tag-filters .diary-tag").length`), 1);
   assert.deepEqual(page.errors, []);
 });
+
+test("日記: 対象の札で絞ると、その作付の作業の記録と予定を、日付の順に差し挟む", options, async () => {
+  const area = [[0, 0], [40, 0], [40, 20], [0, 20]];
+  const data = {
+    ...seed(),
+    fields: [{ id: "f1", name: "試験の圃場", outline: area, note: "", active_plan_id: "p1", created_at: AT }],
+    zones: [{ id: "z1", plan_id: "p1", kind: "tillable", name: "", shape: area, created_at: AT }],
+    blocks: [{ id: "b1", plan_id: "p1", zone_id: "z1", name: "区画1", shape: [[1, 1], [39, 1], [39, 19], [1, 19]], start_date: null, end_date: null, created_at: AT }],
+    beds: [1, 2].map((seq) => ({ id: `bed${seq}`, plan_id: "p1", block_id: "b1", seq, shape: [[seq * 3, 2], [seq * 3 + 1, 2], [seq * 3 + 1, 18], [seq * 3, 18]], start_date: null, removed_on: null })),
+    plantings: [1, 2].map((seq) => ({ id: `pl${seq}`, plan_id: "p1", bed_id: `bed${seq}`, seq: 1, crop_id: "c1", crop_name: "試験菜" })),
+    crops: [{ id: "c1", name: "試験菜", mulch: false, bed_width_cm: 100, aisle_width_cm: 60 }],
+    // 計画: 収穫はまだ終わっていない。定植は記録で終えた。畝 2 の計画は出さない
+    works: [
+      { id: "w1", plan_id: "p1", block_id: null, planting_id: "pl1", work_type: "plant", seq: 1, plan_start: "2026-10-01", plan_end: "2026-10-01", note: "", cancelled_on: null, detail: {} },
+      { id: "w2", plan_id: "p1", block_id: null, planting_id: "pl1", work_type: "harvest", seq: 2, plan_start: "2026-12-01", plan_end: "2026-12-10", note: "", cancelled_on: null, detail: {} },
+      { id: "w3", plan_id: "p1", block_id: null, planting_id: "pl2", work_type: "harvest", seq: 1, plan_start: "2026-12-01", plan_end: "2026-12-10", note: "", cancelled_on: null, detail: {} },
+    ],
+  };
+  const log = (id, date, type, planting, extra = {}) => ({
+    id, field_id: "f1", date, end_date: null, work_type: type, finishes: true, spec: {}, note: "", created_at: AT, inputs: [],
+    targets: [{ id: `t-${id}`, log_id: id, planting_id: planting, bed_id: planting ? `bed${planting.slice(2)}` : null, block_id: "b1", work_id: extra.work_id ?? null, label: "", crop_name: "試験菜", area_m2: null, spray_l: null }],
+    ...extra,
+  });
+  data.workLogs = [
+    log("L1", "2026-09-20", "rotary", null),
+    log("L2", "2026-10-01", "plant", "pl1", { work_id: "w1", note: "株間 20cm" }),
+    log("L3", "2026-10-05", "spray", "pl1"),
+    log("L4", "2026-10-05", "spray", "pl2"),
+  ];
+  const target = { kind: "planting", id: "pl1", label: "区画1 畝1 試験菜" };
+  const section = (date, heading) => ({ id: `${date}-01`, path: [heading], crops: [], work: [], tag_source: "claude", labels: { targets: [target], ...(heading === "防除" ? { work: ["防除"] } : {}) } });
+  data.diary = {
+    days: {
+      "2026-10-02": { date: "2026-10-02", title: "", body: "## 発芽\n芽が出た。", tags: {}, updated_at: AT },
+      "2026-10-05": { date: "2026-10-05", title: "", body: "## 防除\n虫がいた。", tags: {}, updated_at: AT },
+    },
+    sections: { "2026-10-02": [section("2026-10-02", "発芽")], "2026-10-05": [section("2026-10-05", "防除")] },
+    photos: {},
+    files: {},
+  };
+  await page.loadApp(data);
+  await page.run(`location.hash = "#diary"`);
+  await page.waitFor(`Boolean(document.querySelector('#diaryMonthSelect option[value="2026-10"]'))`, "日記の画面");
+  await page.run(`(() => { const select = document.getElementById("diaryMonthSelect"); select.value = "2026-10"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.click('#diaryCalendar [data-date="2026-10-02"]');
+  await page.waitFor(`Boolean(document.querySelector('#diaryMain [data-tag-filter="targets"]'))`, "対象の札");
+  await page.click('#diaryMain [data-tag-filter="targets"]');
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-work").length === 4`, "作業を差し挟む");
+  await page.click('#diaryMain [data-action="tag-order"][data-oldest="true"]');
+  const order = `[...document.querySelectorAll("#diaryMain .diary-work, #diaryMain .diary-day")].map((el) => el.classList.contains("diary-day") ? "日記 " + el.dataset.date : (el.classList.contains("is-plan") ? "予定 " : "実績 ") + el.querySelector("b").textContent)`;
+  await page.waitFor(`document.querySelector("#diaryMain .diary-work b")?.textContent === "ロータリー" && !document.querySelector("#diaryMain .diary-work").previousElementSibling?.classList.contains("diary-day")`, "古い順");
+  assert.deepEqual(await page.run(order), ["実績 ロータリー", "実績 定植・播種", "日記 2026-10-02", "実績 防除", "日記 2026-10-05", "予定 収穫"]);
+  assert.match(await page.run(`document.querySelector("#diaryMain .diary-tag-order").textContent`), /2 節、作業の記録 3 件、予定 1 件/);
+  assert.match(await page.run(`document.querySelector("#diaryMain .diary-work.is-log").textContent`), /区画の作業/);
+
+  // 作業の札（防除）を重ねると、作業も防除だけになる
+  await page.click('#diaryMain .diary-day[data-date="2026-10-05"] [data-tag-filter="work"]');
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 1`, "防除で絞る");
+  assert.deepEqual(await page.run(order), ["実績 防除", "日記 2026-10-05"]);
+
+  // 作業の記録を押すと、作業の記録の窓を開く
+  await page.click('#diaryMain .diary-work.is-log');
+  await page.waitFor(`Boolean(document.querySelector("dialog.log-dialog[open]"))`, "作業の記録の窓");
+  assert.deepEqual(page.errors, []);
+});

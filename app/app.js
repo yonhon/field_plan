@@ -33,7 +33,7 @@ import {
   worldToImage,
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
-import { clearDiaryDrafts, hasDiaryDrafts, initDiary, renderDiary } from "./diary-view.js";
+import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
 import { setUserMenu } from "./user-menu.js";
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
@@ -2792,6 +2792,7 @@ async function startApp() {
   const refreshRecords = () => {
     renderSchedule();
     renderPlantingDetail();
+    refreshDiaryWorks();
   };
   initLogs({ state, activePlanData, setStatus, onLogsChanged: refreshRecords, selectedTarget: selectedRowPreset });
   initPlantingView({

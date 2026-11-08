@@ -3222,3 +3222,64 @@ button.diary-tag:hover {
   display: flex;
   gap: 4px;
 }
+
+/* 日記のタグの一覧に差し挟む作業（対象で絞ったとき）。日記の節より小さい帯にし、読む流れを邪魔しない */
+.diary-work {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  margin: 6px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+button.diary-work {
+  cursor: pointer;
+}
+
+button.diary-work:hover {
+  border-color: var(--muted);
+}
+
+.diary-work.is-plan {
+  border-style: dashed;
+  background: transparent;
+}
+
+.diary-work-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.diary-work-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.diary-work-date {
+  color: var(--muted);
+}
+
+.diary-work-tag {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.diary-work-lines {
+  color: var(--muted);
+  font-size: 12px;
+}

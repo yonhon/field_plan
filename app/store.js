@@ -307,6 +307,10 @@ export function createSupabaseStore(client, options) {
     async diaryTargetSections(ids) {
       return check(await client.rpc("diary_target_sections", { p_ids: ids }));
     },
+    // 対象（作付か区画）の作業の記録と、まだ終わっていない計画。返り値は { logs, works }（sql/diary.sql の diary_target_works）
+    async diaryTargetWorks(kind, id) {
+      return check(await client.rpc("diary_target_works", { p_kind: kind, p_id: id }));
+    },
     // タグの条件（filters: [{kind, name}] か [{kind: "targets", id}]）にすべて合う節。返り値は { total, sections, photos }
     async diaryTagSections({ filters, oldest, limit, offset }) {
       return check(await client.rpc("diary_tag_sections", { p_filters: filters, p_oldest: oldest, p_limit: limit, p_offset: offset }));
@@ -737,6 +741,28 @@ export function createLocalStore({ strict = false } = {}) {
     },
     async diaryTagNames() {
       return structuredClone(LOCAL_TAG_NAMES);
+    },
+    async diaryTargetWorks(kind, id) {
+      const data = read();
+      const blockOf = new Map((data.beds || []).map((bed) => [bed.id, bed.block_id]));
+      const plantings = kind === "block" ? (data.plantings || []).filter((planting) => blockOf.get(planting.bed_id) === id).map((planting) => planting.id) : [id];
+      const blocks = kind === "block" ? [id] : (data.plantings || []).filter((planting) => planting.id === id).map((planting) => blockOf.get(planting.bed_id));
+      const hits = (target) => plantings.includes(target.planting_id) || (!target.planting_id && blocks.includes(target.block_id));
+      const allLogs = data.workLogs || [];
+      const done = new Set(allLogs.filter((log) => log.finishes).flatMap((log) => (log.targets || []).map((target) => target.work_id)).filter(Boolean));
+      const logs = allLogs
+        .filter((log) => (log.targets || []).some(hits))
+        .sort((a, b) => a.date.localeCompare(b.date) || String(a.created_at).localeCompare(String(b.created_at)))
+        .map(({ id: logId, field_id, date, end_date, work_type, finishes, spec, note, targets, inputs }) => ({
+          id: logId, field_id, date, end_date, work_type, finishes, spec, note,
+          block_work: !(targets || []).some((target) => plantings.includes(target.planting_id)),
+          inputs: inputs || [],
+        }));
+      const works = (data.works || [])
+        .filter((work) => !work.cancelled_on && !done.has(work.id) && (plantings.includes(work.planting_id) || (!work.planting_id && blocks.includes(work.block_id))))
+        .sort((a, b) => String(a.plan_start || "9").localeCompare(String(b.plan_start || "9")) || a.seq - b.seq)
+        .map(({ id: workId, work_type, plan_start, plan_end, note, detail, planting_id }) => ({ id: workId, work_type, plan_start, plan_end, note, detail, block_work: !planting_id }));
+      return { logs, works };
     },
     async diaryTagSections({ filters, oldest, limit, offset }) {
       const diary = read().diary || {};

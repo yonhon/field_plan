@@ -283,6 +283,57 @@ begin
 end;
 $$;
 
+-- 対象（作付か区画）の作業の記録と、まだ終わっていない計画を返す（日記のタグの一覧に、作業を差し挟むため）。
+-- 作付なら、その作付と、その区画の作業（区画の作業）。区画なら、区画の作業と、区画の中の作付の作業。作付の詳細と同じ範囲。
+-- どの圃場を開いていても読めるよう、圃場を問わずに引く。
+--   logs: [{id, field_id, date, end_date, work_type, finishes, spec, note, block_work, inputs}]（block_work は区画の作業）
+--   works: [{id, work_type, plan_start, plan_end, note, detail, block_work}]（取り消した計画と、記録で終えた計画は除く）
+create or replace function field.diary_target_works(p_kind text, p_id text)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  v_plantings text[];
+  v_blocks text[];
+begin
+  if not field.is_owner() then
+    raise exception 'この利用者は日記を読めません。' using errcode = '42501';
+  end if;
+  if p_kind = 'block' then
+    v_blocks := array[p_id];
+    v_plantings := array(select p.id::text from field.plantings p join field.beds b on b.id = p.bed_id where b.block_id::text = p_id);
+  else
+    v_plantings := array[p_id];
+    v_blocks := array(select b.block_id::text from field.plantings p join field.beds b on b.id = p.bed_id where p.id::text = p_id);
+  end if;
+  return jsonb_build_object(
+    'logs', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'id', l.id, 'field_id', l.field_id, 'date', l.date, 'end_date', l.end_date, 'work_type', l.work_type,
+        'finishes', l.finishes, 'spec', l.spec, 'note', l.note,
+        'block_work', not exists (select 1 from field.work_log_targets t where t.log_id = l.id and t.planting_id::text = any(v_plantings)),
+        'inputs', (select coalesce(jsonb_agg(to_jsonb(i) - 'log_id' order by i.seq), '[]') from field.work_log_inputs i where i.log_id = l.id)
+      ) order by l.date, l.created_at), '[]')
+      from field.work_logs l
+      where exists (
+        select 1 from field.work_log_targets t
+        where t.log_id = l.id and (t.planting_id::text = any(v_plantings) or (t.planting_id is null and t.block_id::text = any(v_blocks)))
+      )
+    ),
+    'works', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'id', w.id, 'work_type', w.work_type, 'plan_start', w.plan_start, 'plan_end', w.plan_end, 'note', w.note, 'detail', w.detail,
+        'block_work', w.planting_id is null
+      ) order by w.plan_start nulls last, w.seq), '[]')
+      from field.works w
+      where w.cancelled_on is null
+        and (w.planting_id::text = any(v_plantings) or (w.planting_id is null and w.block_id::text = any(v_blocks)))
+        and not exists (select 1 from field.work_log_targets t join field.work_logs l on l.id = t.log_id where t.work_id = w.id and l.finishes)
+    )
+  );
+end;
+$$;
+
 -- 対象（field_plan の作付か区画）に付いた日記の節を、新しい日から順に返す。p_ids は作付か区画の ID
 create or replace function field.diary_target_sections(p_ids text[])
 returns jsonb
@@ -326,6 +377,7 @@ revoke all on function field.diary_calendar(date, date) from public, anon;
 revoke all on function field.diary_search(text[]) from public, anon;
 revoke all on function field.diary_tag_names() from public, anon;
 revoke all on function field.diary_target_sections(text[]) from public, anon;
+revoke all on function field.diary_target_works(text, text) from public, anon;
 revoke all on function field.diary_tag_sections(jsonb, boolean, int, int) from public, anon;
 revoke all on function field.diary_first_date() from public, anon;
 revoke all on function field.diary_add_photo(text, date, timestamp, text, int, int) from public, anon;
@@ -336,6 +388,7 @@ grant execute on function field.diary_calendar(date, date) to authenticated;
 grant execute on function field.diary_search(text[]) to authenticated;
 grant execute on function field.diary_tag_names() to authenticated;
 grant execute on function field.diary_target_sections(text[]) to authenticated;
+grant execute on function field.diary_target_works(text, text) to authenticated;
 grant execute on function field.diary_tag_sections(jsonb, boolean, int, int) to authenticated;
 grant execute on function field.diary_first_date() to authenticated;
 grant execute on function field.diary_add_photo(text, date, timestamp, text, int, int) to authenticated;
