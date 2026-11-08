@@ -37,6 +37,8 @@ const weather = { key: "", rows: null, loading: false };
 const forecast = { key: "", days: null, error: "", loading: false };
 let stationNames = null;
 let wx = null; // いま描いている作付の気象の表示（作業の表の列で使う）
+// 頭を 2 行（名前の行と、ボタンの行）にしているか。描き直すたびに測り直す（fitHead）
+let stacked = false;
 // この作付（区画）に付いた日記の節。画面を開いたあとで読み、読み終えたら描き直す
 const diary = { key: "", rows: null, error: "" };
 
@@ -131,6 +133,22 @@ function specSummary(spec) {
 
 // ---- 描画 ----
 
+// 頭が 1 行に収まるかを測る。収まらなければ、入力と日記のボタンを名前の下の行に回す（is-stacked）。
+// 1 行の形にしてから測るので、描き直しのたびと、幅が変わったときに呼ぶ（同じ処理の中で切り替えるので、ちらつかない）
+function fitHead() {
+  const head = $("plantingBody").querySelector(".detail-head");
+  if (!head) {
+    return;
+  }
+  head.classList.remove("is-stacked");
+  // はみ出すか、名前と面積・苗数が 1 行に並ばない（折り返した）なら、収まらない
+  const title = head.querySelector(".detail-title");
+  const h2 = head.querySelector(".detail-title h2");
+  const over = head.scrollWidth > head.clientWidth + 1 || (title && h2 && title.getBoundingClientRect().height > h2.getBoundingClientRect().height + 4);
+  stacked = over;
+  head.classList.toggle("is-stacked", over);
+}
+
 export function renderPlantingDetail() {
   if (!ctx || $("plantingView").hidden) {
     return;
@@ -139,8 +157,7 @@ export function renderPlantingDetail() {
   if (!c) {
     draw(
       $("plantingBody"),
-      '<div class="detail-head"><button type="button" class="text-btn" data-act="back">← 工程表に戻る</button></div>' +
-      '<p class="muted">この作付（区画）は、いま開いているプランにはありません。</p>'
+      '<p class="muted">この作付（区画）は、いま開いているプランにはありません。上の「日程」のタブで、工程表に戻れます。</p>'
     );
     return;
   }
@@ -160,6 +177,7 @@ export function renderPlantingDetail() {
     `<section class="panel"><div class="panel-heading"><h2>作業</h2>${tableNote(mode) ? `<span class="muted">${tableNote(mode)}</span>` : ""}</div>${tableHtml(c, mode, actuals, logs)}</section>` +
     `</div><aside class="detail-aside">${asideHtml(c, active)}</aside></div>`
   );
+  fitHead();
 }
 
 // ---- 日記 ----
@@ -481,14 +499,21 @@ function headHtml(c, active) {
   } else {
     title = `${c.block.name}（区画の作業）`;
   }
+  // 前後の作付（区画）へは、日記の「‹ 前の日」「次の日 ›」と同じ、文字だけのボタン
   const go = (item, arrow) =>
-    item ? `<button type="button" class="chip-btn" data-act="go" data-kind="${item.kind}" data-id="${item.id}">${arrow === "prev" ? "← " : ""}${escapeHtml(item.label)}${arrow === "next" ? " →" : ""}</button>` : "";
-  const recordButton = active && c.planting ? '<button type="button" class="primary-btn" data-act="record">＋ この作付の作業を入力する</button>' : "";
-  const diaryButton = diaryButtonHtml(c, active);
+    item
+      ? `<button type="button" class="text-btn detail-go" data-act="go" data-kind="${item.kind}" data-id="${item.id}">${arrow === "prev" ? "‹ " : ""}${escapeHtml(item.label)}${arrow === "next" ? " ›" : ""}</button>`
+      : "";
+  const recordButton = active && c.planting ? '<button type="button" class="primary-btn" data-act="record">＋ 作業を入力</button>' : "";
+  const actions = recordButton + diaryButtonHtml(c, active);
+  // 名前を真ん中に、前後のボタンを両側に置く。入力と日記のボタンは、名前の右隣に置いて 1 行に収まればそこに、
+  // 収まらなければ名前の下の行に置く（fitHead が測って is-stacked を付ける）
   return (
-    `<div class="detail-head"><button type="button" class="text-btn" data-act="back">← 工程表に戻る</button>` +
-    `<h2>${escapeHtml(title)}</h2><span class="muted">${escapeHtml(info)}</span>` +
-    `<div class="detail-nav">${recordButton}${diaryButton}${go(prev, "prev")}${go(next, "next")}</div></div>`
+    `<div class="detail-head${stacked ? " is-stacked" : ""}">` +
+    `<div class="detail-side is-prev">${go(prev, "prev")}</div>` +
+    `<div class="detail-center"><div class="detail-title"><h2>${escapeHtml(title)}</h2>${info ? `<span class="muted detail-info">${escapeHtml(info)}</span>` : ""}</div>` +
+    (actions ? `<div class="detail-actions">${actions}</div>` : "") +
+    `</div><div class="detail-side is-next">${go(next, "next")}</div></div>`
   );
 }
 
@@ -926,9 +951,7 @@ function onClick(event) {
     return;
   }
   const act = el.dataset.act;
-  if (act === "back") {
-    ctx.showView("schedule");
-  } else if (act === "go") {
+  if (act === "go") {
     // 隣の作付へは、履歴を積まずに URL を置き換える（戻るボタンで、日程にすぐ戻れるように）
     history.replaceState({ fieldPlanView: "planting" }, "", `#detail/${el.dataset.kind}/${el.dataset.id}`);
     openPlantingDetail(el.dataset.kind, el.dataset.id);
@@ -951,4 +974,12 @@ function onClick(event) {
 export function initPlantingView(context) {
   ctx = context;
   $("plantingBody").addEventListener("click", onClick);
+  // 幅が変わったら（ウィンドウの大きさ、スマホの向き）、頭が 1 行に収まるかを測り直す
+  let width = 0;
+  new ResizeObserver(([entry]) => {
+    if (Math.round(entry.contentRect.width) !== width) {
+      width = Math.round(entry.contentRect.width);
+      fitHead();
+    }
+  }).observe($("plantingBody"));
 }

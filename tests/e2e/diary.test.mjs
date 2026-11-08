@@ -282,6 +282,10 @@ test("作付の詳細: 頭の「日記 n 節（最新 M/D）」で、その作�
   // 一番下の一覧はやめ、頭に件数と最新の日のボタンを出す
   await page.waitFor(`document.querySelector('#plantingBody .detail-head [data-act="diary"]')?.textContent === "日記 2 節（最新 10/5）"`, "日記のボタン");
   assert.equal(await page.run(`document.querySelectorAll("#plantingBody .detail-diary").length`), 0);
+  // 頭: 「工程表に戻る」はなく、前後の作付は文字だけのボタン。入力のボタンは短い名前
+  assert.equal(await page.run(`document.querySelector('#plantingBody [data-act="back"]')`), null);
+  assert.equal(await page.run(`document.querySelector('#plantingBody [data-act="record"]').textContent`), "＋ 作業を入力");
+  assert.equal(await page.run(`document.querySelector("#plantingBody .detail-side.is-next .detail-go").textContent`), "畝2 試験菜 ›");
   // 押すと、日記の画面で、この作付の対象の札で絞った一覧を、古い順で開く
   await page.click('#plantingBody [data-act="diary"]');
   await page.waitFor(`location.hash === "#diary" && document.querySelectorAll("#diaryMain .diary-day").length === 2`, "この作付の日記の一覧");

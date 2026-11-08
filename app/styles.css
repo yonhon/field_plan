@@ -2004,11 +2004,72 @@ body.plan-busy #scheduleView {
 
 /* ---- 作付の詳細 ---- */
 
+/* 作付の詳細の頭。左右を同じ幅の列にして、名前（と入力・日記のボタン）を真ん中に置き、前後の作付へのボタンを両側に置く。
+   1 行に収まらないときは is-stacked にして、入力・日記のボタンを名前の下の行に回す */
 .detail-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-head:not(.is-stacked) .detail-center,
+.detail-head:not(.is-stacked) .detail-go {
+  white-space: nowrap;
+}
+
+.detail-head:not(.is-stacked) .detail-title {
+  flex-wrap: nowrap;
+}
+
+.detail-head.is-stacked {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr) minmax(0, 1fr);
+}
+
+.detail-side.is-next {
+  text-align: right;
+}
+
+.detail-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 14px;
+}
+
+/* 2 行のとき: 名前は 1 行目の真ん中、入力・日記のボタンは 2 行目に右詰めで置く */
+.detail-head.is-stacked .detail-center {
+  display: contents;
+}
+
+.detail-head.is-stacked .detail-title {
+  grid-column: 2;
+  grid-row: 1;
+  text-align: center;
+}
+
+.detail-head.is-stacked .detail-side.is-prev {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.detail-head.is-stacked .detail-side.is-next {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.detail-head.is-stacked .detail-actions {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-content: flex-end;
+}
+
+.detail-title {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 14px;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2px 10px;
 }
 
 .detail-head h2 {
@@ -2017,11 +2078,23 @@ body.plan-busy #scheduleView {
   font-size: 19px;
 }
 
-.detail-nav {
+.detail-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
-  margin-left: auto;
+}
+
+/* 前後の作付へのボタン。2 行に収まらないときは、畝の番号と品目のあいだで折り返してよい */
+.detail-go {
+  padding: 4px 2px;
+}
+
+/* スマホの幅では、面積・苗数を名前の下の行に回す */
+@media (max-width: 600px) {
+  .detail-info {
+    flex-basis: 100%;
+  }
 }
 
 .detail-modes {
