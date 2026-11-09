@@ -623,13 +623,17 @@ function resultsHtml() {
 
 function editorHtml() {
   const e = view.editing;
-  // 「見出し」と「写真を入れる」は、編集のタブのときだけ、タブと同じ行の右に出す
-  const tools = e.preview
-    ? ""
-    : `<div class="diary-tools">` +
-      `<button type="button" class="chip-btn" data-action="heading">見出し</button>` +
-      `<label class="chip-btn diary-photo-btn${view.uploading ? " is-busy" : ""}"><span id="diaryPhotoLabel">${escapeHtml(view.uploading || "写真を入れる")}</span>` +
-      `<input id="diaryPhotoInput" type="file" accept="image/*" multiple${view.uploading ? " disabled" : ""} /></label></div>`;
+  // タブと同じ行の右に、「見出し」「写真を入れる」「やめる」「保存」の順に並べる。
+  // 「見出し」と「写真を入れる」は、編集のタブのときだけ出す
+  const tools =
+    `<div class="diary-tools">` +
+    (e.preview
+      ? ""
+      : `<button type="button" class="chip-btn" data-action="heading">見出し</button>` +
+        `<label class="chip-btn diary-photo-btn${view.uploading ? " is-busy" : ""}"><span id="diaryPhotoLabel">${escapeHtml(view.uploading || "写真を入れる")}</span>` +
+        `<input id="diaryPhotoInput" type="file" accept="image/*" multiple${view.uploading ? " disabled" : ""} /></label>`) +
+    `<button type="button" class="text-btn" data-action="cancel">やめる</button>` +
+    `<button type="button" class="primary-btn diary-save-btn" data-action="save">保存</button></div>`;
   // 編集とプレビューは、入力欄の真上につなげたタブ。選んでいるタブは、下の入力欄とつながって見える
   const tab = (action, label, on) =>
     `<button type="button" role="tab" aria-selected="${on}" class="diary-tab${on ? " is-on" : ""}" data-action="${action}">${label}</button>`;
@@ -647,9 +651,7 @@ function editorHtml() {
     `<label>題<input id="diaryTitle" type="text" data-field="title" value="${escapeHtml(e.title)}" placeholder="なくてもかまいません" /></label>` +
     bar +
     content +
-    `<p class="muted">写真は、スマホのカメラのアプリで撮ってから、「写真を入れる」でアルバムから選んでください（ここから直接撮ると、Google フォトに残らないことがあります）。短辺 1080 px に縮めて保存します。</p>` +
-    `<div class="row"><button type="button" class="primary-btn" data-action="save">保存</button>` +
-    `<button type="button" class="text-btn" data-action="cancel">やめる</button></div>`
+    `<p class="muted">写真は、スマホのカメラのアプリで撮ってから、「写真を入れる」でアルバムから選んでください（ここから直接撮ると、Google フォトに残らないことがあります）。短辺 1080 px に縮めて保存します。</p>`
   );
 }
 

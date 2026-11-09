@@ -3034,9 +3034,19 @@ h4.diary-heading {
 
 .diary-tools {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+  margin-left: auto;
   margin-bottom: 6px;
+}
+
+/* 並びの中の「保存」は、ほかのボタンと高さをそろえる */
+.diary-tools .diary-save-btn {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: 13px;
 }
 
 /* 「写真を入れる」は label なので、入力欄の label の余白と文字の指定を外し、「見出し」のボタンとそろえる */
