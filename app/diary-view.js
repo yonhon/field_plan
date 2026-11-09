@@ -415,8 +415,7 @@ function tagSectionHtml(section) {
     `<article class="diary-day" data-date="${section.date}">` +
     `<div class="panel-heading"><h3 class="diary-day-title"><a href="#diary" data-action="open-day" data-date="${section.date}">${dateLabel(section.date)}</a> ${escapeHtml(section.title || "")}</h3>` +
     `<button type="button" class="chip-btn" data-action="edit" data-date="${section.date}" data-key="${escapeHtml(key)}">修正</button></div>` +
-    heading +
-    (chunk ? renderMarkdown(chunk.text, photoHtml, { headingBase: 4 }) : "") +
+    `<div class="diary-section">${heading}${chunk ? renderMarkdown(chunk.text, photoHtml, { headingBase: 4 }) : ""}</div>` +
     tagsHtml(tagDay(section.date), section, key) +
     `</article>`
   );
@@ -579,7 +578,7 @@ function dayHtml(day, { single }) {
     const section = at >= 0 ? sections.splice(at, 1)[0] : null;
     const level = Math.min(6, chunk.level + 2);
     const heading = chunk.heading ? `<h${level} class="diary-heading">${escapeHtml(chunk.heading)}</h${level}>` : "";
-    return heading + renderMarkdown(chunk.text, photoHtml, { headingBase: 4 }) + (section ? tagsHtml(day, section, key) : "");
+    return `<div class="diary-section">${heading}${renderMarkdown(chunk.text, photoHtml, { headingBase: 4 })}${section ? tagsHtml(day, section, key) : ""}</div>`;
   });
   const title = `${single ? "" : `<a href="#diary" data-action="open-day" data-date="${day.date}">${dateLabel(day.date)}</a> `}${escapeHtml(day.title)}`;
   const editButton = (extra) => `<button type="button" class="chip-btn${extra}" data-action="edit" data-date="${day.date}">修正</button>`;
@@ -1022,34 +1021,81 @@ async function addPhotos(files) {
   }
 }
 
-// 写真を大きく開く。撮影日時と元のファイル名があれば添える（Google フォトで元の写真を探すため）
-function openPhoto(name) {
-  const meta = view.meta[name] || {};
-  const url = view.urls[photoPath(name)];
+// 写真を大きく開く。撮影日時と元のファイル名があれば添える（Google フォトで元の写真を探すため）。
+// names は同じ見出しの写真の並び。2 枚以上なら、写真の左右の ‹ › と、← → のキー、左右にはらう操作で行き来する（端まで行くと反対の端に戻る）
+function openPhoto(name, names = [name]) {
+  const list = names.includes(name) ? names : [name];
+  let index = list.indexOf(name);
   const dialog = document.createElement("dialog");
   dialog.className = "notice diary-viewer";
-  const facts = [
-    meta.taken_at ? `撮影 ${String(meta.taken_at).replace("T", " ").slice(0, 19)}` : "",
-    meta.original_name ? `元のファイル名 ${meta.original_name}` : "",
-  ].filter(Boolean);
-  // 写真のタグ（Claude Code が写真から付けた推定）
-  const tags = meta.tags || {};
-  const tagNames = [...PHOTO_TAG_KINDS.flatMap(([kind]) => tags[kind] || []), ...(tags.use ? [tags.use] : [])];
-  draw(
-    dialog,
-    (url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(name)}" />` : '<p class="muted">写真を読み込めていません。</p>') +
-      `<p class="muted">${escapeHtml(name)}${facts.length ? `。${escapeHtml(facts.join("、"))}` : ""}</p>` +
-      (tagNames.length ? `<div class="diary-tags">${tagNames.map((tag) => `<span class="diary-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : "") +
-      `<p class="muted">もっと大きい写真が要るときは、撮影日時か元のファイル名で、Google フォトから探してください。</p>` +
-      `<div class="row">${url ? `<a class="chip-btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">別のタブで開く</a>` : ""}<button type="button" class="primary-btn" data-action="close">閉じる</button></div>`
-  );
+
+  const show = () => {
+    const current = list[index];
+    const meta = view.meta[current] || {};
+    const url = view.urls[photoPath(current)];
+    if (!url) {
+      requestUrls([current]);
+    }
+    const facts = [
+      list.length > 1 ? `${index + 1} / ${list.length} 枚目` : "",
+      meta.taken_at ? `撮影 ${String(meta.taken_at).replace("T", " ").slice(0, 19)}` : "",
+      meta.original_name ? `元のファイル名 ${meta.original_name}` : "",
+    ].filter(Boolean);
+    // 写真のタグ（Claude Code が写真から付けた推定）
+    const tags = meta.tags || {};
+    const tagNames = [...PHOTO_TAG_KINDS.flatMap(([kind]) => tags[kind] || []), ...(tags.use ? [tags.use] : [])];
+    const nav =
+      list.length > 1
+        ? '<button type="button" class="diary-viewer-nav is-prev" data-action="prev" aria-label="前の写真">‹</button>' +
+          '<button type="button" class="diary-viewer-nav is-next" data-action="next" aria-label="次の写真">›</button>'
+        : "";
+    draw(
+      dialog,
+      `<div class="diary-viewer-photo">` +
+        (url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(current)}" />` : '<p class="muted">写真を読み込んでいます…</p>') +
+        nav +
+        "</div>" +
+        `<p class="muted">${escapeHtml(current)}${facts.length ? `。${escapeHtml(facts.join("、"))}` : ""}</p>` +
+        (tagNames.length ? `<div class="diary-tags">${tagNames.map((tag) => `<span class="diary-tag">${escapeHtml(tag)}</span>`).join("")}</div>` : "") +
+        `<p class="muted">もっと大きい写真が要るときは、撮影日時か元のファイル名で、Google フォトから探してください。</p>` +
+        `<div class="row">${url ? `<a class="chip-btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">別のタブで開く</a>` : ""}<button type="button" class="primary-btn" data-action="close">閉じる</button></div>`
+    );
+  };
+  const step = (delta) => {
+    if (list.length > 1) {
+      index = (index + delta + list.length) % list.length;
+      show();
+    }
+  };
+
   dialog.addEventListener("click", (event) => {
-    if (event.target.dataset.action === "close" || event.target === dialog) {
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (action === "prev" || action === "next") {
+      step(action === "prev" ? -1 : 1);
+    } else if (action === "close" || event.target === dialog) {
       dialog.close();
     }
   });
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      step(event.key === "ArrowLeft" ? -1 : 1);
+    }
+  });
+  // スマホ: 写真を左右にはらうと、次・前の写真へ
+  let startX = null;
+  dialog.addEventListener("pointerdown", (event) => {
+    startX = event.target.closest(".diary-viewer-photo") ? event.clientX : null;
+  });
+  dialog.addEventListener("pointerup", (event) => {
+    if (startX !== null && Math.abs(event.clientX - startX) > 50) {
+      step(event.clientX < startX ? 1 : -1);
+    }
+    startX = null;
+  });
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
+  show();
   dialog.showModal();
 }
 
@@ -1138,7 +1184,10 @@ export function initDiary(context) {
       area.focus();
       area.setSelectionRange(e.cursor, e.cursor);
     } else if (action === "photo") {
-      openPhoto(target.dataset.photo);
+      // 同じ見出しの中の写真を、本文の順に並べて渡す（プレビューでは、本文全体の写真）
+      const box = target.closest(".diary-section, .diary-preview") || target.parentElement;
+      const names = [...new Set([...box.querySelectorAll('[data-action="photo"]')].map((el) => el.dataset.photo))];
+      openPhoto(target.dataset.photo, names);
     } else if (target.dataset.tagFilter) {
       addTagFilter(target.dataset.tagFilter, target.dataset.tagValue, target.dataset.tagLabel, target.dataset.tagTargetKind);
     } else if (action === "tag-remove") {

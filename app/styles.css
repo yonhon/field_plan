@@ -3138,7 +3138,43 @@ h4.diary-heading {
   display: block;
   max-width: 100%;
   max-height: 72vh;
-  margin: 0 auto 10px;
+  margin: 0 auto;
+}
+
+/* 写真と、左右の ‹ ›（同じ見出しの写真を行き来する）。写真の邪魔にならないよう薄くし、触れると濃くする */
+.diary-viewer-photo {
+  position: relative;
+  margin-bottom: 10px;
+  touch-action: pan-y;
+}
+
+.diary-viewer-nav {
+  position: absolute;
+  top: 50%;
+  width: 40px;
+  height: 56px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.45);
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  transform: translateY(-50%);
+  opacity: 0.6;
+}
+
+.diary-viewer-nav:hover,
+.diary-viewer-nav:focus-visible {
+  opacity: 1;
+}
+
+.diary-viewer-nav.is-prev {
+  left: 4px;
+}
+
+.diary-viewer-nav.is-next {
+  right: 4px;
 }
 
 /* PC は、カレンダーを左に置き、日記を右に並べる。画面はブラウザーの高さちょうどに収め、ページはスクロールさせない。

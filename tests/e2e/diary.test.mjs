@@ -471,3 +471,43 @@ test("日記: 対象の札で絞ると、その作付の作業の記録と予定
   await page.waitFor(`Boolean(document.querySelector("dialog.log-dialog[open]"))`, "作業の記録の窓");
   assert.deepEqual(page.errors, []);
 });
+
+test("日記: 写真の窓の ‹ › で、同じ見出しの写真を行き来し、端では反対の端に戻る", options, async () => {
+  const data = seed();
+  const date = "2026-10-10";
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const names = [1, 2, 3, 4].map((n) => `${date}_0${n}.jpg`);
+  data.diary = {
+    days: { [date]: { date, title: "", body: `## A\n\n| ![](images/${names[0]}) | ![](images/${names[1]}) | ![](images/${names[2]}) |\n| :- | :- | :- |\n\n## B\n\n![](images/${names[3]})`, tags: {}, updated_at: AT } },
+    sections: { [date]: [{ id: `${date}-01`, path: ["A"], crops: [], work: [] }, { id: `${date}-02`, path: ["B"], crops: [], work: [] }] },
+    photos: Object.fromEntries(names.map((name) => [name, { name, date }])),
+    files: Object.fromEntries(names.map((name) => [`2026/photos/${name}`, png])),
+  };
+  await page.loadApp(data);
+  await page.run(`location.hash = "#diary"`);
+  await page.waitFor(`Boolean(document.querySelector('#diaryMonthSelect option[value="2026-10"]'))`, "日記の画面");
+  await page.run(`(() => { const select = document.getElementById("diaryMonthSelect"); select.value = "2026-10"; select.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.click(`#diaryCalendar [data-date="${date}"]`);
+  await page.waitFor(`document.querySelectorAll("#diaryMain .diary-photo img").length === 4`, "写真");
+  const shown = () => page.run(`(() => { const d = document.querySelector("dialog.diary-viewer[open]"); const text = d.querySelector("p.muted").textContent; return d.querySelector(".diary-viewer-photo img")?.alt + " " + (text.split("。")[1] || "").split(" 枚目")[0].split("、")[0]; })()`);
+
+  await page.click(`#diaryMain [data-photo="${names[1]}"]`);
+  await page.waitFor(`Boolean(document.querySelector("dialog.diary-viewer[open]"))`, "写真の窓");
+  assert.equal(await shown(), `${names[1]} 2 / 3`);
+  await page.click('dialog.diary-viewer [data-action="next"]');
+  assert.equal(await shown(), `${names[2]} 3 / 3`);
+  await page.click('dialog.diary-viewer [data-action="next"]');
+  assert.equal(await shown(), `${names[0]} 1 / 3`); // 端から反対の端へ
+  await page.click('dialog.diary-viewer [data-action="prev"]');
+  assert.equal(await shown(), `${names[2]} 3 / 3`);
+  await page.press("ArrowLeft", "ArrowLeft", 37);
+  assert.equal(await shown(), `${names[1]} 2 / 3`);
+  await page.click('dialog.diary-viewer [data-action="close"]');
+
+  // ほかの見出しの写真は 1 枚なので、‹ › は出さない（見出しをまたがない）
+  await page.click(`#diaryMain [data-photo="${names[3]}"]`);
+  await page.waitFor(`Boolean(document.querySelector("dialog.diary-viewer[open]"))`, "写真の窓");
+  assert.equal(await page.run(`document.querySelectorAll("dialog.diary-viewer[open] .diary-viewer-nav").length`), 0);
+  await page.click('dialog.diary-viewer [data-action="close"]');
+  assert.deepEqual(page.errors, []);
+});
