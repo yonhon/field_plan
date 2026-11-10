@@ -23,7 +23,7 @@ $$;
 create table if not exists field.fields (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  outline jsonb not null default '[]',   -- 外形の多角形
+  outline jsonb not null default '[]',   -- 外形。多角形の並び（離れた部分をいくつも持てる）。[[[x, y], …], …]
   base_lat double precision,             -- 基準点（原点）の緯度と経度。分からなければ空
   base_lng double precision,
   note text not null default '',
@@ -359,6 +359,12 @@ create table if not exists field.app_compat (
   min_version int not null default 1
 );
 insert into field.app_compat (id) values (true) on conflict (id) do nothing;
+
+-- 2026-11-10: 圃場の外形を、多角形 1 つ（[[x, y], …]）から、多角形の並び（[[[x, y], …], …]）に変えた。
+-- 版 1 の画面は並びを読めないので、版 2 の画面を公開してから流す（版 2 の画面は、どちらの形も読める）
+update field.fields set outline = jsonb_build_array(outline)
+where jsonb_typeof(outline) = 'array' and jsonb_array_length(outline) > 0 and jsonb_typeof(outline -> 0 -> 0) = 'number';
+update field.app_compat set min_version = 2 where min_version < 2;
 
 -- 圃場ごとだったころのメモの表。中身を dev_notes に写したあと、2026-10-24 に消した
 drop table if exists field.day_notes;

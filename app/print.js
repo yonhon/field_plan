@@ -20,8 +20,10 @@ function clear() {
 }
 
 // name は保存するときのファイル名（拡張子なし）、title は紙の上に出す見出し、
-// body は中身の HTML、landscape は紙を横に使うかどうか
-export function printPage({ name, title, body, landscape }) {
+// body は中身の HTML、landscape は紙を横に使うかどうか。
+// 何枚かの紙に分けて出すときは、title と body の代わりに pages（{ title, body } の並び。1 つが 1 枚）を渡す。
+// 紙の向きは、すべての紙で同じ
+export function printPage({ name, title, body, pages, landscape }) {
   let area = document.getElementById("printArea");
   if (!area) {
     area = document.createElement("div");
@@ -32,7 +34,13 @@ export function printPage({ name, title, body, landscape }) {
     document.head.append(style);
   }
   document.getElementById("printPageStyle").textContent = `@page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 10mm; }`;
-  draw(area, `<h1 class="print-title">${escapeHtml(title)}</h1>${body}`);
+  const sheets = pages || [{ title, body }];
+  draw(
+    area,
+    sheets.length === 1
+      ? `<h1 class="print-title">${escapeHtml(sheets[0].title)}</h1>${sheets[0].body}`
+      : sheets.map((sheet, i) => `<section class="print-sheet" data-sheet="${i}"><h1 class="print-title">${escapeHtml(sheet.title)}</h1>${sheet.body}</section>`).join("")
+  );
   document.body.classList.add("is-printing");
   // ブラウザーは、画面の題名を、保存するファイル名の初めの値にする
   pageTitle ??= document.title;

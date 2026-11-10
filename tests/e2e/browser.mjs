@@ -180,6 +180,18 @@ export async function openBrowser() {
     await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x + dx, y: point.y, button: "left", clickCount: 1 });
   };
 
+  // 圃場図の上の点（圃場の座標。m。x は東、y は北）を、本物のマウスの操作でクリックする
+  const clickMap = async (world) => {
+    const point = await run(`(() => {
+      const map = document.getElementById("map");
+      const p = new DOMPoint(${world[0]}, ${-world[1]}).matrixTransform(map.getScreenCTM());
+      return { x: p.x, y: p.y };
+    })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await page.send("Input.dispatchMouseEvent", { type, ...point, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 });
+    }
+  };
+
   // キーを押して離す（Tab など）。文字を入れるときは type を使う
   const press = async (key, code = key, keyCode = { Tab: 9, Enter: 13 }[key]) => {
     await page.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode });
@@ -238,6 +250,7 @@ export async function openBrowser() {
     run,
     waitFor,
     click,
+    clickMap,
     drag,
     press,
     type,

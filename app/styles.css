@@ -3301,6 +3301,24 @@ h4.diary-heading {
     width: 100%;
   }
 
+  /* 何枚かに分けて出すときの、1 枚ぶん */
+  .print-sheet {
+    break-after: page;
+  }
+
+  .print-sheet:last-child {
+    break-after: auto;
+  }
+
+  /* 全体の紙に書く、分けた紙の範囲 */
+  .print-map .print-tile {
+    fill: none;
+    stroke: var(--muted);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+    vector-effect: non-scaling-stroke;
+  }
+
   .print-map .print-scale {
     stroke: var(--text);
     stroke-width: 2;

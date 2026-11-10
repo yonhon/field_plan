@@ -19,7 +19,7 @@ const LOCAL_TAG_NAMES = {
 };
 // この画面の版。DB の field.app_compat の min_version より古ければ、起動のときに新しい版を読み込み直す。
 // 古い画面では正しく書けない形に DB を変えるときに 1 つ上げ、DB の min_version も同じ値にする（sql/field.sql）
-export const APP_VERSION = 1;
+export const APP_VERSION = 2;
 const LOCAL_KEY = "field_plan_local";
 
 // 下絵の署名付き URL。発行のたびに URL が変わると、ブラウザーのキャッシュが効かず、起動のたびに画像全体を読み直す。

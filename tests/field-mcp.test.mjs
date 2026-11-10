@@ -18,7 +18,7 @@ const work = (id, owner, type, seq, start, end) => ({
 // 圃場 2 は、空のプランが 1 つだけ
 const DATA = {
   fields: [
-    { id: "f1", name: "圃場 1", outline: rect(0, 0, 30, 50), active_plan_id: "plan1" },
+    { id: "f1", name: "圃場 1", outline: [rect(0, 0, 30, 40), rect(100, 0, 10, 30)], active_plan_id: "plan1" }, // 外形は離れた 2 つの部分（合わせて 1500 ㎡）
     { id: "f2", name: "別の圃場", outline: [] },
   ],
   plans: [

@@ -207,20 +207,58 @@ export function gapBetweenPolygons(polygon, other) {
   return best;
 }
 
-// 点にいちばん近い辺の向き（ラジアン）。四角形をその辺に平行に置くために使う。多角形がなければ 0
+// 点にいちばん近い辺の向き（ラジアン）。四角形をその辺に平行に置くために使う。多角形がなければ 0。
+// polygons は多角形の並び（圃場の外形のように、離れた部分がいくつもあるとき）。どの多角形の辺でもよい
 export function nearestEdgeAngle(point, polygon) {
+  return nearestEdgeAngleOf(point, [polygon]);
+}
+
+export function nearestEdgeAngleOf(point, polygons) {
   let nearest = Infinity;
   let angle = 0;
-  for (let i = 0; i < polygon.length; i += 1) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    const d = distanceToSegment(point, a, b);
-    if (d < nearest) {
-      nearest = d;
-      angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  for (const polygon of polygons) {
+    for (let i = 0; i < polygon.length; i += 1) {
+      const a = polygon[i];
+      const b = polygon[(i + 1) % polygon.length];
+      const d = distanceToSegment(point, a, b);
+      if (d < nearest) {
+        nearest = d;
+        angle = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      }
     }
   }
   return angle;
+}
+
+// 圃場の外形を、多角形の並びにそろえる。外形は離れた部分をいくつも持てる（[[[x, y], …], …]）。
+// 1 つしか持てなかったころの形（[[x, y], …]）は、1 つの部分として読む。3 点に満たない部分は捨てる
+export function outlineParts(outline) {
+  if (!Array.isArray(outline) || !outline.length) {
+    return [];
+  }
+  const parts = typeof outline[0]?.[0] === "number" ? [outline] : outline;
+  return parts.filter((part) => Array.isArray(part) && part.length >= 3);
+}
+
+// 範囲 view（SVG の向きの { x, y, w, h }。y は下向き）を、大きさ w × h の紙に分ける。
+// 紙の並びの真ん中を、範囲の真ん中に合わせる。紙は、上の行から順、行の中は左から順
+export function tileView(view, w, h) {
+  const cols = Math.max(1, Math.ceil(view.w / w - 1e-9));
+  const rows = Math.max(1, Math.ceil(view.h / h - 1e-9));
+  const x0 = view.x + view.w / 2 - (cols * w) / 2;
+  const y0 = view.y + view.h / 2 - (rows * h) / 2;
+  const tiles = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      tiles.push({ x: x0 + col * w, y: y0 + row * h, w, h, row, col });
+    }
+  }
+  return { cols, rows, tiles };
+}
+
+// 圃場の外形の面積（㎡）。部分の面積の合計
+export function outlineArea(outline) {
+  return outlineParts(outline).reduce((sum, part) => sum + polygonArea(part), 0);
 }
 
 // 対角の 2 点から、angle の向きに辺をそろえた四角形を作る

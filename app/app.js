@@ -17,6 +17,9 @@ import {
   inheritBackdrop,
   layoutBeds,
   nearestEdgeAngle,
+  nearestEdgeAngleOf,
+  outlineArea,
+  outlineParts,
   pointInPolygon,
   polygonArea,
   polygonInside,
@@ -29,6 +32,7 @@ import {
   scaleBackdropAt,
   scalePoints,
   splitPolygon,
+  tileView,
   translatePoints,
   worldToImage,
 } from "./geometry.js";
@@ -65,7 +69,7 @@ const BLOCK_COLOR = "#b45309";
 const BED_COLOR = "#8a5a2b"; // 品目がまだない畝
 const HINTS = {
   select: "図形をクリックで選択。ドラッグか矢印キーで移動。辺の中ほどの丸をドラッグすると大きさが変わります。辺の長さや、隣までの距離の数字をクリックすると、数値で指定できます。",
-  outline: "圃場の角を順にクリック。最初の点をクリックするか「確定」で閉じます。",
+  outline: "圃場の角を順にクリック。最初の点をクリックするか「確定」で閉じます。外形がもうあるときは、同じ圃場の離れた部分として描き足します。",
   zone: "区域の角を順にクリック。最初の点をクリックするか「確定」で閉じます。",
   rect: "対角の 2 点をドラッグ。四角形は、いちばん近い外形の辺に平行になります。",
   size: "寸法を入れて、置く場所をクリック。置いたあとはドラッグで動かせます。",
@@ -122,7 +126,7 @@ const state = {
   notes: [], // 日ごとのメモ
   viewDate: localToday(), // 圃場図に出す日。区画と畝は、この日にあるものだけを描く（圃場を開くときに、その圃場で覚えた日にする）
   mode: "select",
-  selected: null, // "outline" か、区域・区画・畝の ID
+  selected: null, // 圃場の外形の部分（"outline:0" など）か、区域・区画・畝の ID
   selectedVertex: null,
   draft: [],
   gaps: [], // 選択中の図形から、囲んでいる図形の辺と、隣の図形までのすき間
@@ -157,7 +161,7 @@ function zoomAt(world, factor) {
 }
 
 function fitView() {
-  let points = state.field.outline;
+  let points = outlinePoints();
   if (points.length < 2 && state.backdrop && state.backdrop.size) {
     const [width, height] = state.backdrop.size;
     points = [[0, 0], [width, 0], [width, height], [0, height]].map((p) => imageToWorld(state.backdrop, p));
@@ -178,46 +182,110 @@ function fitView() {
 
 // ---- PDF 出力 ----
 
-// 圃場の全体を、下絵なし、選択の印なしで描いて、印刷に回す。
-// 範囲は、圃場の外形（なければ区域）がちょうど入る四角形に、3% の余白を足したもの。向きは画面と同じ（上が北）
+const PRINT_BED_PX = 11; // PDF の部分ごとの紙では、いちばん狭い畝の幅をこの px（約 3 mm）以上にする。畝の番号と品目（9 px 以上の文字）が読める
+const PRINT_MAX_TILES = 16; // 1 つの部分を分ける紙の数の上限。超えるときは、縮めて収める
+
+// 点の並びがちょうど入る四角形に、3% の余白を足した範囲（SVG の向き。y は下向き）
+function printView(points) {
+  const box = boundingBox(points);
+  const margin = Math.max(box.maxX - box.minX, box.maxY - box.minY) * 0.03;
+  return { x: box.minX - margin, y: -box.maxY - margin, w: box.maxX - box.minX + margin * 2, h: box.maxY - box.minY + margin * 2 };
+}
+
+const viewRect = (view) => [[view.x, -view.y], [view.x + view.w, -view.y], [view.x + view.w, -(view.y + view.h)], [view.x, -(view.y + view.h)]];
+
+// 圃場図を、下絵なし、選択の印なしで描いて、印刷に回す。向きは画面と同じ（上が北）。
+// 1 枚目は全体（外形のすべての部分。外形がなければ区域）を 1 枚に収める。
+// 外形が離れた部分に分かれているときは、続けて部分ごとの紙を出す。部分は、いちばん狭い畝が読める大きさで描き、
+// 1 枚に収まらなければ、何枚かの紙に分ける（全体の紙に、分けた紙の範囲と番号を点線で書く）。
+// 部分が 1 つでも、全体の紙で畝が読めないときは、分けた紙を足す
 function printMap() {
-  const points = state.field.outline.length >= 3 ? state.field.outline : state.zones.flatMap((zone) => zone.shape);
-  if (points.length < 3) {
+  // 外形がなければ、区域のすべてが入る四角形を 1 つの部分とみなす
+  const areas = state.field.outline.length ? state.field.outline : state.zones.length ? [viewRect(printView(state.zones.flatMap((zone) => zone.shape)))] : [];
+  if (!areas.length) {
     notify("圃場の外形か区域を描くと、PDF にできます。");
     return;
   }
-  const box = boundingBox(points);
-  const margin = Math.max(box.maxX - box.minX, box.maxY - box.minY) * 0.03;
-  const view = { x: box.minX - margin, y: -box.maxY - margin, w: box.maxX - box.minX + margin * 2, h: box.maxY - box.minY + margin * 2 };
-  const landscape = view.w >= view.h;
+  const whole = printView(areas.flat());
+  const landscape = whole.w >= whole.h;
   const [pageWidth, pageHeight] = PAGE_PX[landscape ? "landscape" : "portrait"];
-  const z = Math.min(pageWidth / view.w, pageHeight / view.h);
+  const fit = (view) => Math.min(pageWidth / view.w, pageHeight / view.h);
+  const beds = visibleBeds();
+  const several = state.field.outline.length > 1;
+
+  // 部分ごとの紙。{ view, z, label（全体の紙に書く番号）, name（見出し） }
+  const sheets = [];
+  areas.forEach((area, index) => {
+    const view = printView(area);
+    const inside = beds.filter((bed) => pointInPolygon(centroid(bed.shape), area));
+    const narrowest = Math.min(...inside.map((bed) => rectSize(bed.shape).width));
+    const readable = Number.isFinite(narrowest) && narrowest > 0 ? PRINT_BED_PX / narrowest : 0;
+    let z = Math.max(fit(view), readable);
+    let grid = tileView(view, pageWidth / z, pageHeight / z);
+    while (grid.tiles.length > PRINT_MAX_TILES) {
+      z *= Math.sqrt(PRINT_MAX_TILES / grid.tiles.length) * 0.98;
+      grid = tileView(view, pageWidth / z, pageHeight / z);
+    }
+    const partName = several ? `外形 ${index + 1}` : "拡大";
+    if (grid.tiles.length === 1) {
+      // 1 枚に収まる部分は、紙いっぱいに描く。部分が 1 つなら、全体の紙と同じなので出さない
+      if (several) {
+        sheets.push({ view, z: fit(view), label: "", name: partName });
+      }
+      return;
+    }
+    // 部分にかからない紙（L 字の部分の角など）は出さない
+    const tiles = grid.tiles.filter((tile) => polygonsOverlap(viewRect(tile), area));
+    tiles.forEach((tile, i) => {
+      const label = several ? `${index + 1}-${i + 1}` : String(i + 1);
+      sheets.push({ view: tile, z, label, name: `${partName}　${i + 1}/${tiles.length} 枚目（${label}）` });
+    });
+  });
 
   const kept = { selected: state.selected, vertex: state.selectedVertex, backdrop: state.backdropVisible, draft: state.draft };
   Object.assign(state, { selected: null, selectedVertex: null, backdropVisible: false, draft: [] });
-  renderMap(z);
-  const shapes = map.innerHTML;
+  const drawn = new Map(); // 倍率ごとに描いた図形（同じ倍率の紙は、描いたものを使い回す）
+  const shapesAt = (z) => {
+    if (!drawn.has(z)) {
+      renderMap(z);
+      drawn.set(z, map.innerHTML);
+    }
+    return drawn.get(z);
+  };
+  const title = `圃場図　${state.field.name}　プラン: ${state.plan.name}　表示日: ${formatDate(state.viewDate)}`;
+  const page = ({ view, z, name }, overlay = "") => {
+    // 縮尺の線と、北の印を、紙の隅に書く
+    const meters = [100, 50, 20, 10, 5, 2, 1].find((value) => value <= view.w * 0.2) || 1;
+    const pad = 10 / z;
+    const bottom = view.y + view.h - pad;
+    const left = view.x + pad;
+    const text = (x, y, value, anchor) =>
+      `<text class="map-label" x="${x}" y="${y}" font-size="${11 / z}" stroke-width="${3 / z}" style="text-anchor:${anchor}">${escapeHtml(value)}</text>`;
+    const extras =
+      `<line class="print-scale" x1="${left}" y1="${bottom}" x2="${left + meters}" y2="${bottom}" />` +
+      text(left + meters + 6 / z, bottom, `${meters} m`, "start") +
+      text(view.x + view.w - pad, view.y + pad * 1.4, "↑ 北", "end");
+    return {
+      title: name ? `${title}　${name}` : title,
+      body:
+        `<svg class="print-map" xmlns="http://www.w3.org/2000/svg" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" ` +
+        `style="height:${pxToMm(Math.min(pageHeight, (pageWidth / view.w) * view.h)).toFixed(1)}mm">${shapesAt(z)}${overlay}${extras}</svg>`,
+    };
+  };
+  // 全体の紙には、分けた紙の範囲と番号を書く
+  const wholeZ = fit(whole);
+  const overlay = sheets
+    .filter((sheet) => sheet.label)
+    .map(
+      ({ view, label }) =>
+        `<rect class="print-tile" x="${view.x}" y="${view.y}" width="${view.w}" height="${view.h}" />` +
+        `<text class="map-label" x="${view.x + 4 / wholeZ}" y="${view.y + 13 / wholeZ}" font-size="${11 / wholeZ}" stroke-width="${3 / wholeZ}">${label}</text>`
+    )
+    .join("");
+  const pages = [page({ view: whole, z: wholeZ, name: sheets.length ? "全体" : "" }, overlay), ...sheets.map((sheet) => page(sheet))];
   Object.assign(state, { selected: kept.selected, selectedVertex: kept.vertex, backdropVisible: kept.backdrop, draft: kept.draft });
   renderMap();
-
-  // 縮尺の線と、北の印を、余白の帯に書く
-  const meters = [100, 50, 20, 10, 5, 2, 1].find((value) => value <= view.w * 0.2) || 1;
-  const bottom = view.y + view.h - margin * 0.4;
-  const left = view.x + margin * 0.4;
-  const text = (x, y, value, anchor) =>
-    `<text class="map-label" x="${x}" y="${y}" font-size="${11 / z}" stroke-width="${3 / z}" style="text-anchor:${anchor}">${value}</text>`;
-  const extras =
-    `<line class="print-scale" x1="${left}" y1="${bottom}" x2="${left + meters}" y2="${bottom}" />` +
-    text(left + meters + 6 / z, bottom, `${meters} m`, "start") +
-    text(view.x + view.w - margin * 0.4, view.y + margin * 0.5, "↑ 北", "end");
-  printPage({
-    name: "圃場図",
-    title: `圃場図　${state.field.name}　プラン: ${state.plan.name}　表示日: ${formatDate(state.viewDate)}`,
-    body:
-      `<svg class="print-map" xmlns="http://www.w3.org/2000/svg" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" ` +
-      `style="height:${pxToMm(Math.min(pageHeight, (pageWidth / view.w) * view.h)).toFixed(1)}mm">${shapes}${extras}</svg>`,
-    landscape,
-  });
+  printPage({ name: "圃場図", pages, landscape });
 }
 
 // ---- 図形 ----
@@ -233,16 +301,26 @@ function findShape(id) {
   return null;
 }
 
+// 圃場の外形は、離れた部分をいくつも持てる（state.field.outline は多角形の並び）。
+// 部分は「outline:0」「outline:1」… の名前で選ぶ。番号は描いた順
+const OUTLINE_KEY = "outline:";
+const outlineKey = (index) => `${OUTLINE_KEY}${index}`;
+const isOutline = (key) => typeof key === "string" && key.startsWith(OUTLINE_KEY);
+const outlineIndex = (key) => Number(key.slice(OUTLINE_KEY.length));
+const outlinePoints = () => state.field.outline.flat(); // すべての部分の頂点
+// 部分の呼び名。1 つだけなら番号を付けない
+const outlineLabel = (index) => (state.field.outline.length > 1 ? `圃場の外形 ${index + 1}` : "圃場の外形");
+
 function shapePoints(key) {
-  if (key === "outline") {
-    return state.field.outline;
+  if (isOutline(key)) {
+    return state.field.outline[outlineIndex(key)] || null;
   }
   return findShape(key)?.item.shape || null;
 }
 
 function setShapePoints(key, points) {
-  if (key === "outline") {
-    state.field.outline = points;
+  if (isOutline(key)) {
+    state.field.outline[outlineIndex(key)] = points;
     queueSave("field");
     return;
   }
@@ -291,20 +369,39 @@ function edgeOutward(points, i) {
 
 const edgeSide = (points, i) => `${compassOf(edgeOutward(points, i))}側`;
 const viewDirs = () => (state.field.view_dirs?.length === 2 ? state.field.view_dirs : DEFAULT_VIEW_DIRS);
-// 視点 k（0 か 1）が立っている、外形の辺。辺に合っていなければ -1
-const viewEdge = (k) => state.field.outline.findIndex((_, i) => turnGap(edgeOutward(state.field.outline, i) + 180, viewDirs()[k]) < 1);
+// 視点は向きだけを持つ。圃場の外形のどの部分の辺でも選べ、その向きで、すべての区画の畝を並べる。
+// 視点 k（0 か 1）が立っている、外形の辺 { part, edge }。どの辺にも合っていなければ null。
+// prefer の部分（選んでいる部分）の辺を先に探す
+function viewEdge(k, prefer = -1) {
+  const parts = state.field.outline;
+  const order = [...parts.keys()].sort((a, b) => (b === prefer) - (a === prefer));
+  for (const part of order) {
+    const edge = parts[part].findIndex((_, i) => turnGap(edgeOutward(parts[part], i) + 180, viewDirs()[k]) < 1);
+    if (edge >= 0) {
+      return { part, edge };
+    }
+  }
+  return null;
+}
 
-function setViewEdge(k, index) {
-  const outline = state.field.outline;
+// 外形の辺の呼び名。部分が 1 つなら「辺 1 → 2」、いくつもあれば「外形 2 の辺 1 → 2」
+function edgeName(part, index) {
+  const points = state.field.outline[part];
+  const edge = `辺 ${index + 1} → ${((index + 1) % points.length) + 1}`;
+  return state.field.outline.length > 1 ? `外形 ${part + 1} の${edge}` : edge;
+}
+
+function setViewEdge(k, part, index) {
+  const points = state.field.outline[part];
   const dirs = [...viewDirs()];
-  dirs[k] = Math.round((((edgeOutward(outline, index) + 180) % 360) + 360) % 360 * 100) / 100;
+  dirs[k] = Math.round((((edgeOutward(points, index) + 180) % 360) + 360) % 360 * 100) / 100;
   state.field.view_dirs = dirs;
   queueSave("field");
   state.blocks.forEach((block) => renumberBlock(block.id));
   record({
     kind: "field.view",
     plan: false,
-    text: `視点 ${k + 1} を、圃場の外形の辺 ${index + 1} → ${((index + 1) % outline.length) + 1}（${edgeSide(outline, index)}）に変更。畝の番号は、視点から見て左から順`,
+    text: `視点 ${k + 1} を、圃場の${edgeName(part, index)}（${edgeSide(points, index)}）に変更。畝の番号は、視点から見て左から順`,
   });
   render();
   renderSchedule();
@@ -319,7 +416,7 @@ const tillableZoneAt = (point) => state.zones.find((zone) => zone.kind === "till
 
 // 選んだ図形が属する区域。圃場の外形を選んでいるときや、選んでいないときは null
 function frontZoneId() {
-  const found = state.selected && state.selected !== "outline" ? findShape(state.selected) : null;
+  const found = state.selected && !isOutline(state.selected) ? findShape(state.selected) : null;
   if (!found) {
     return null;
   }
@@ -386,11 +483,12 @@ function formatDate(iso) {
 
 // 入れ物からはみ出している図形を探す。圃場の外形 ⊇ 区域 ⊇ 耕起対象区画 ⊇ 畝 の順に入っているはず。
 // 区画と畝は、表示日にあるものだけを見る
+// 外形が離れた部分をいくつも持つときは、区域はどれか 1 つの部分に入っているはず
 function findOutside() {
-  const outline = state.field.outline;
+  const parts = state.field.outline;
   const zoneOf = (block) => state.zones.find((zone) => zone.id === block.zone_id);
   return {
-    zones: outline.length >= 3 ? state.zones.filter((zone) => !polygonInside(zone.shape, outline)) : [],
+    zones: parts.length ? state.zones.filter((zone) => !parts.some((part) => polygonInside(zone.shape, part))) : [],
     blocks: visibleBlocks().filter((block) => !polygonInside(block.shape, zoneOf(block).shape)),
     beds: visibleBeds().filter((bed) => !polygonInside(bed.shape, blockOf(bed).shape)),
   };
@@ -398,8 +496,8 @@ function findOutside() {
 
 // 変更の記録に書く、図形の呼び名と大きさ
 function shapeName(key) {
-  if (key === "outline") {
-    return "圃場の外形";
+  if (isOutline(key)) {
+    return outlineLabel(outlineIndex(key));
   }
   const { kind, item } = findShape(key);
   return kind === "zone" ? `区域「${zoneLabel(item)}」` : kind === "block" ? item.name : `${blockOf(item).name} 畝${item.seq}`;
@@ -413,11 +511,11 @@ function recordMove(key) {
 }
 
 function recordShape(key, was) {
-  const kind = key === "outline" ? "outline" : findShape(key).kind;
+  const kind = isOutline(key) ? "outline" : findShape(key).kind;
   record({
     kind: `${kind}.shape`,
-    target: key === "outline" ? [] : [kind, key],
-    plan: key === "outline" ? false : undefined,
+    target: isOutline(key) ? [] : [kind, key],
+    plan: isOutline(key) ? false : undefined,
     text: `${shapeName(key)}の大きさを変更`,
     before: was,
     after: sizeText(key),
@@ -427,21 +525,23 @@ function recordShape(key, was) {
 // 選択中の図形から、それを囲んでいる図形の各辺と、隣の図形までのすき間を求める。
 // 区域は圃場の外形とほかの区域、区画は有効圃場とほかの区画、畝は区画とほかの畝が相手
 function selectedGaps() {
-  const found = state.selected && state.selected !== "outline" ? findShape(state.selected) : null;
+  const found = state.selected && !isOutline(state.selected) ? findShape(state.selected) : null;
   if (!found) {
     return [];
   }
   const { kind, item } = found;
-  let frame = state.field.outline;
+  let frames = state.field.outline; // 区域は、外形のどの部分の辺までも測る
   let neighbours = state.zones;
   if (kind === "block") {
-    frame = state.zones.find((zone) => zone.id === item.zone_id)?.shape || [];
+    frames = [state.zones.find((zone) => zone.id === item.zone_id)?.shape || []];
     neighbours = visibleBlocks().filter((block) => block.zone_id === item.zone_id);
   } else if (kind === "bed") {
-    frame = blockOf(item).shape;
+    frames = [blockOf(item).shape];
     neighbours = visibleBeds().filter((bed) => bed.block_id === item.block_id);
   }
-  const toFrame = frame.length >= 3 ? frame.map((point, i) => gapToSegment(item.shape, point, frame[(i + 1) % frame.length])) : [];
+  const toFrame = frames
+    .filter((frame) => frame.length >= 3)
+    .flatMap((frame) => frame.map((point, i) => gapToSegment(item.shape, point, frame[(i + 1) % frame.length])));
   const toNeighbours = neighbours.filter((other) => other.id !== item.id).map((other) => gapBetweenPolygons(item.shape, other.shape));
   // 重なっているか接しているものは、線を引けないので出さない
   const nearest = (gaps, count) =>
@@ -482,16 +582,15 @@ function renderMap(scale) {
   // 選択の印と、入れ物からはみ出している印
   const selectedClass = (id) => `${state.selected === id ? " is-selected" : ""}${strays.has(id) ? " is-outside" : ""}`;
 
-  const outline = state.field.outline;
-  if (outline.length >= 3) {
+  state.field.outline.forEach((points, index) => {
     parts.push(
-      `<polygon class="shape${selectedClass("outline")}" data-shape="outline" ` +
-        `points="${svgPoints(outline)}" fill="${OUTLINE_COLOR}" fill-opacity="0.08" stroke="${OUTLINE_COLOR}" />`
+      `<polygon class="shape${selectedClass(outlineKey(index))}" data-shape="${outlineKey(index)}" ` +
+        `points="${svgPoints(points)}" fill="${OUTLINE_COLOR}" fill-opacity="0.08" stroke="${OUTLINE_COLOR}" />`
     );
-  }
+  });
   // PDF では、圃場の外形と有効圃場の各辺の長さを、辺の外側に、辺に沿って書く
   if (printing) {
-    for (const points of [outline, ...state.zones.filter((zone) => zone.kind === "tillable").map((zone) => zone.shape)]) {
+    for (const points of [...state.field.outline, ...state.zones.filter((zone) => zone.kind === "tillable").map((zone) => zone.shape)]) {
       points.forEach((point, i) => {
         const next = points[(i + 1) % points.length];
         const length = distance(point, next);
@@ -560,7 +659,7 @@ function renderMap(scale) {
   drawGroup(state.zones.filter((zone) => zone.id === front), allBlocks.filter(inFront), beds.filter(bedInFront));
 
   const selectedPoints = state.selected ? shapePoints(state.selected) : null;
-  const selectedKind = state.selected === "outline" ? "outline" : state.selected ? findShape(state.selected)?.kind : null;
+  const selectedKind = isOutline(state.selected) ? "outline" : state.selected ? findShape(state.selected)?.kind : null;
   // 畝は四角形のまま扱うので、頂点は動かさない
   if (selectedPoints && selectedKind !== "bed") {
     const lengths = edgeLengths(selectedPoints);
@@ -597,17 +696,20 @@ function renderMap(scale) {
       parts.push(label([point[0] + ((point[0] - center[0]) / out) * (16 / z), point[1] + ((point[1] - center[1]) / out) * (16 / z)], String(i + 1), fontSize * 1.15, 'font-weight="700"'));
     });
   }
-  // 視点の矢印。立つ場所から、見る向きへ
+  // 視点の矢印。立つ場所から、見る向きへ。辺を選んだ視点は、その辺（ほかの部分の辺でもよい）に立つ
   if (selectedKind === "outline") {
     viewDirs().forEach((degrees, k) => {
       const dir = [Math.cos((degrees * Math.PI) / 180), Math.sin((degrees * Math.PI) / 180)];
-      const edge = viewEdge(k);
+      const found = viewEdge(k, outlineIndex(state.selected));
       const center = centroid(selectedPoints);
       const reach = Math.max(...selectedPoints.map((point) => (center[0] - point[0]) * dir[0] + (center[1] - point[1]) * dir[1]));
-      const foot =
-        edge >= 0
-          ? [(selectedPoints[edge][0] + selectedPoints[(edge + 1) % selectedPoints.length][0]) / 2, (selectedPoints[edge][1] + selectedPoints[(edge + 1) % selectedPoints.length][1]) / 2]
-          : [center[0] - dir[0] * reach, center[1] - dir[1] * reach];
+      const edgePoints = found ? state.field.outline[found.part] : null;
+      const foot = found
+        ? [
+            (edgePoints[found.edge][0] + edgePoints[(found.edge + 1) % edgePoints.length][0]) / 2,
+            (edgePoints[found.edge][1] + edgePoints[(found.edge + 1) % edgePoints.length][1]) / 2,
+          ]
+        : [center[0] - dir[0] * reach, center[1] - dir[1] * reach];
       const at = (back, side = 0) => [foot[0] - dir[0] * (back / z) - dir[1] * (side / z), foot[1] - dir[1] * (back / z) + dir[0] * (side / z)];
       const [from, tip, left, right] = [at(54), at(18), at(30, 7), at(30, -7)];
       parts.push(`<line class="view-line" x1="${from[0]}" y1="${-from[1]}" x2="${at(28)[0]}" y2="${-at(28)[1]}" />`);
@@ -706,10 +808,9 @@ function treeRows(outside, beds) {
         `<span>${toggle}<span class="swatch" style="background:${color}"></span>${escapeHtml(name)}${extra}${mark(id)}</span>` +
         `<span>${detail}</span>`,
     });
-  const outline = state.field.outline;
-  if (outline.length >= 3) {
-    add("outline", 0, OUTLINE_COLOR, "圃場の外形", `${polygonArea(outline).toFixed(1)} ㎡`);
-  }
+  state.field.outline.forEach((points, index) => {
+    add(outlineKey(index), 0, OUTLINE_COLOR, outlineLabel(index), `${polygonArea(points).toFixed(1)} ㎡`);
+  });
   for (const zone of state.zones) {
     add(zone.id, 0, ZONE_KINDS[zone.kind].color, zoneLabel(zone), `${polygonArea(zone.shape).toFixed(1)} ㎡`);
     for (const block of state.blocks.filter((item) => item.zone_id === zone.id)) {
@@ -790,8 +891,7 @@ function revealSelection() {
 }
 
 function renderPanel() {
-  const outline = state.field.outline;
-  const fieldArea = outline.length >= 3 ? polygonArea(outline) : 0;
+  const fieldArea = outlineArea(state.field.outline); // 離れた部分の合計
   const sumArea = (items) => items.reduce((sum, item) => sum + polygonArea(item.shape), 0);
   const tillable = state.zones.filter((zone) => zone.kind === "tillable");
   const others = state.zones.filter((zone) => zone.kind !== "tillable");
@@ -832,7 +932,7 @@ function renderSelection() {
   if (!points) {
     return;
   }
-  const found = state.selected === "outline" ? { kind: "outline" } : findShape(state.selected);
+  const found = isOutline(state.selected) ? { kind: "outline" } : findShape(state.selected);
   const { kind, item } = found;
   $("zoneFields").hidden = kind !== "zone";
   $("outlineFields").hidden = kind !== "outline";
@@ -846,19 +946,27 @@ function renderSelection() {
   $("shapeInfo").textContent = "";
 
   if (kind === "outline") {
-    $("selectionTitle").textContent = "選択中: 圃場の外形";
+    const selectedPart = outlineIndex(state.selected);
+    $("selectionTitle").textContent = `選択中: ${outlineLabel(selectedPart)}`;
+    // 視点の辺は、外形のどの部分の辺からでも選べる（2 つの視点が、すべての区画の畝の並びを決める）
     [0, 1].forEach((k) => {
-      const edge = viewEdge(k);
-      const options = points.map((_, i) => `<option value="${i}">辺 ${i + 1} → ${((i + 1) % points.length) + 1}（${edgeSide(points, i)}、${formatLength(edgeLengths(points)[i])}）</option>`);
-      if (edge < 0) {
+      const found = viewEdge(k, selectedPart);
+      const options = state.field.outline.flatMap((partPoints, part) =>
+        partPoints.map(
+          (_, i) =>
+            `<option value="${part}:${i}">${edgeName(part, i)}（${edgeSide(partPoints, i)}、${formatLength(edgeLengths(partPoints)[i])}）</option>`
+        )
+      );
+      if (!found) {
         options.unshift(`<option value="">${compassOf(viewDirs()[k] + 180)}側から（辺を選んでいません）</option>`);
       }
       draw($(`viewEdge${k + 1}`), options.join(""));
-      $(`viewEdge${k + 1}`).value = edge < 0 ? "" : String(edge);
+      $(`viewEdge${k + 1}`).value = found ? `${found.part}:${found.edge}` : "";
     });
     const square = turnGap(viewDirs()[0], viewDirs()[1]);
     $("viewNote").textContent =
       "その辺の外に立って、圃場を見ます。図に矢印が出ます。畝の長い辺が視点 1 の見る向きに近ければ視点 1 から、直角に近ければ視点 2 から見ます。日程の「区画と畝」の図の左右、畝の手前と奥、畝の番号（左から順）が、この視点で決まります。" +
+      (state.field.outline.length > 1 ? " 外形が離れた部分に分かれているときは、どの部分の辺でも選べ、2 つの視点がすべての部分の畝の並びを決めます。" : "") +
       (square < 45 || square > 135 ? " いまの 2 つの視点は向きが近すぎます。視点 2 には、視点 1 と直角の辺を選んでください。" : "");
   } else if (kind === "zone") {
     $("selectionTitle").textContent = `選択中: ${zoneLabel(item)}`;
@@ -1010,15 +1118,8 @@ async function persist(action) {
 
 // ---- 操作 ----
 
+// 「外形を描く」は、外形に部分を描き足す。いまの外形は置き換えない（描き直すときは、部分を選んで削除してから描く）
 function setMode(mode) {
-  if (mode === "outline" && state.field.outline.length >= 3) {
-    confirmAction({ message: "外形を描き直します。いまの外形は置き換わります。", name: "圃場の外形", action: "描き直す" }).then((ok) => {
-      if (ok) {
-        enterMode(mode);
-      }
-    });
-    return;
-  }
   enterMode(mode);
 }
 
@@ -1052,11 +1153,17 @@ function finishDraft() {
   }
   const points = state.draft;
   if (state.mode === "outline") {
-    state.field.outline = points;
+    state.field.outline = [...state.field.outline, points];
     queueSave("field");
     setMode("select");
-    record({ kind: "outline.draw", plan: false, text: "圃場の外形を描いた", after: sizeText("outline") });
-    select("outline");
+    const key = outlineKey(state.field.outline.length - 1);
+    record({
+      kind: "outline.draw",
+      plan: false,
+      text: state.field.outline.length > 1 ? `${shapeName(key)}を描き足した（離れた部分）` : "圃場の外形を描いた",
+      after: sizeText(key),
+    });
+    select(key);
   } else {
     addZone(points);
   }
@@ -1087,12 +1194,12 @@ function sizeInputs() {
 
 function sizedRect(center) {
   const size = sizeInputs();
-  return size ? rectCentered(center, size.along, size.depth, nearestEdgeAngle(center, state.field.outline)) : null;
+  return size ? rectCentered(center, size.along, size.depth, nearestEdgeAngleOf(center, state.field.outline)) : null;
 }
 
 // 外形と、すべてのプランの区域・区画・畝に、同じ変換をかける（縮尺と向きの合わせ直しで使う）
 async function transformShapes(change) {
-  state.field.outline = change(state.field.outline);
+  state.field.outline = state.field.outline.map(change);
   queueSave("field");
   for (const [kind, list] of [["zone", state.zones], ["block", state.blocks], ["bed", state.beds]]) {
     for (const item of list) {
@@ -1159,7 +1266,7 @@ function setBackdrop(backdrop) {
 
 // 圃場に図形が 1 つでもあるか（外形か、どれかのプランの区域・区画・畝）
 async function fieldHasShapes() {
-  if (state.field.outline.length >= 3 || state.zones.length || state.blocks.length || state.beds.length) {
+  if (state.field.outline.length || state.zones.length || state.blocks.length || state.beds.length) {
     return true;
   }
   for (const plan of state.plans.filter((other) => other.id !== state.plan.id)) {
@@ -1236,15 +1343,16 @@ async function fitShapesToBackdrop() {
 
 
 async function scaleByArea() {
-  if (state.field.outline.length < 3) {
+  if (!state.field.outline.length) {
     notify("先に圃場の外形を描いてください。");
     return;
   }
-  const actual = askNumber("圃場の実際の面積（㎡）");
+  const several = state.field.outline.length > 1;
+  const actual = askNumber(several ? "圃場の実際の面積（㎡）。外形の部分の合計" : "圃場の実際の面積（㎡）");
   if (!actual) {
     return;
   }
-  const factor = Math.sqrt(actual / polygonArea(state.field.outline));
+  const factor = Math.sqrt(actual / outlineArea(state.field.outline));
   if (!state.backdrop?.fitted) {
     applyScale(factor);
     return;
@@ -1340,8 +1448,8 @@ function setEdgeLength(index) {
 function nudgeSelected(arrow, step) {
   const { kind, item } = findShape(state.selected);
   const frame =
-    kind === "bed" ? blockOf(item).shape : kind === "block" ? state.zones.find((zone) => zone.id === item.zone_id).shape : state.field.outline;
-  const angle = nearestEdgeAngle(centroid(item.shape), frame);
+    kind === "bed" ? [blockOf(item).shape] : kind === "block" ? [state.zones.find((zone) => zone.id === item.zone_id).shape] : state.field.outline;
+  const angle = nearestEdgeAngleOf(centroid(item.shape), frame);
   const u = [Math.cos(angle), Math.sin(angle)];
   const axes = [u, [-u[0], -u[1]], [-u[1], u[0]], [u[1], -u[0]]];
   const best = axes.reduce((a, b) => (b[0] * arrow[0] + b[1] * arrow[1] > a[0] * arrow[0] + a[1] * arrow[1] ? b : a));
@@ -1381,11 +1489,15 @@ async function deleteSelectedShape() {
     return;
   }
   const id = state.selected;
-  if (id === "outline") {
-    if ((await confirmDelete("圃場の外形を削除します。", "圃場の外形")) && state.selected === id) {
-      state.field.outline = [];
+  if (isOutline(id)) {
+    // 外形の部分を 1 つ消す。ほかの部分は残る（番号は詰まる）
+    const name = shapeName(id);
+    const rest = state.field.outline.length - 1;
+    const message = rest ? `${name}を削除します。ほかの ${rest} つの部分は残ります。` : "圃場の外形を削除します。";
+    if ((await confirmDelete(message, name)) && state.selected === id && shapePoints(id)) {
+      state.field.outline = state.field.outline.filter((_, i) => i !== outlineIndex(id));
       queueSave("field");
-      record({ kind: "outline.delete", plan: false, text: "圃場の外形を削除" });
+      record({ kind: "outline.delete", plan: false, text: `${name}を削除` });
       select(null);
     }
     return;
@@ -1824,6 +1936,8 @@ async function loadFieldData(field, pending = fetchFieldData(field.id)) {
     plans = [plan];
     tables = await loadTables(PLAN_TABLES, plan.id);
   }
+  // 外形は多角形の並びで持つ。1 つしか持てなかったころの形も、ここで並びに直す
+  field.outline = outlineParts(field.outline);
   // 表示日は、前にその圃場で見ていた日。覚えていなければ今日
   Object.assign(state, { field, plans, backdrop, backdropUrl, logs, viewDate: savedViewDate(field.id), alignment: null });
   setPlanData(plan, tables);
@@ -1839,7 +1953,7 @@ function measureBackdrop(backdrop, url) {
   imageSize(url)
     .then((size) => {
       backdrop.size = size;
-      if (state.backdrop === backdrop && state.field.outline.length < 2) {
+      if (state.backdrop === backdrop && !state.field.outline.length) {
         fitView();
         renderMap();
       }
@@ -2193,7 +2307,7 @@ let gesture = null; // { kind: "pan" | "vertex" | "rect" | "move" | "pinch", ...
 // 距離と長さの数字は、押すと値を入れる窓が開くので除く。外形と畝は、図の上では動かさない
 function pressedSelected(event) {
   const { gap, edge } = event.target.dataset;
-  const points = state.selected && state.selected !== "outline" && !isBed(state.selected) ? shapePoints(state.selected) : null;
+  const points = state.selected && !isOutline(state.selected) && !isBed(state.selected) ? shapePoints(state.selected) : null;
   return Boolean(points) && gap === undefined && edge === undefined && pointInPolygon(clientToWorld(event), points);
 }
 
@@ -2209,7 +2323,7 @@ map.addEventListener("pointerdown", (event) => {
     state.selectedVertex = Number(target.dataset.vertex);
     gesture = { kind: "vertex", index: state.selectedVertex, moved: false, was: sizeText(state.selected) };
     render();
-  } else if (state.mode === "select" && target.dataset.mid !== undefined && state.selected !== "outline") {
+  } else if (state.mode === "select" && target.dataset.mid !== undefined && !isOutline(state.selected)) {
     // 区域と区画: 辺を平行に動かして、大きさを変える
     gesture = { kind: "edge", index: Number(target.dataset.mid), last: clientToWorld(event), was: sizeText(state.selected) };
   } else if (state.mode === "select" && target.dataset.mid !== undefined) {
@@ -2225,8 +2339,8 @@ map.addEventListener("pointerdown", (event) => {
     // 区域は圃場の外形の辺に、区画は有効圃場の辺に平行に描く
     const start = clientToWorld(event);
     const zone = state.mode === "blockrect" ? tillableZoneAt(start) : null;
-    const frame = zone ? zone.shape : state.field.outline;
-    gesture = { kind: "rect", start, zone, angle: nearestEdgeAngle(start, frame), origin: [event.clientX, event.clientY] };
+    const frames = zone ? [zone.shape] : state.field.outline;
+    gesture = { kind: "rect", start, zone, angle: nearestEdgeAngleOf(start, frames), origin: [event.clientX, event.clientY] };
   } else if (state.mode === "select" && pressedSelected(event)) {
     // 選択中の図形は、ドラッグでそのまま動かせる。動かさずに離したら、押した図形を選ぶ
     gesture = { kind: "move", moved: false, start: [event.clientX, event.clientY], last: clientToWorld(event), shape: target.dataset.shape };
@@ -2431,7 +2545,7 @@ document.addEventListener("keydown", (event) => {
     render();
   } else if (event.key === "Delete" && state.mode === "select") {
     deleteSelectedVertex();
-  } else if (ARROWS[event.key] && state.mode === "select" && state.selected && state.selected !== "outline" && !isBed(state.selected)) {
+  } else if (ARROWS[event.key] && state.mode === "select" && state.selected && !isOutline(state.selected) && !isBed(state.selected)) {
     event.preventDefault();
     nudgeSelected(ARROWS[event.key], event.shiftKey ? NUDGE_M * 10 : NUDGE_M);
   }
@@ -2475,7 +2589,7 @@ $("viewDate").addEventListener("change", (event) => {
   event.target.value = state.viewDate;
   savePref(state.field.id, "viewDate", state.viewDate);
   // 表示日に存在しない畝を選んだままにしない
-  const found = state.selected && state.selected !== "outline" ? findShape(state.selected) : null;
+  const found = state.selected && !isOutline(state.selected) ? findShape(state.selected) : null;
   if (found && found.kind === "bed" && !bedExists(found.item)) {
     state.selected = null;
   }
@@ -2517,7 +2631,8 @@ $("zoneKindEdit").addEventListener("change", (event) => {
 [0, 1].forEach((k) => {
   $(`viewEdge${k + 1}`).addEventListener("change", (event) => {
     if (event.target.value !== "") {
-      setViewEdge(k, Number(event.target.value));
+      const [part, edge] = event.target.value.split(":").map(Number);
+      setViewEdge(k, part, edge);
     }
   });
 });
@@ -2835,7 +2950,7 @@ async function startApp() {
     },
     // データを入れ替えたあと、どの画面も描き直す。なくなった図形を選んだままにしない
     refresh: () => {
-      if (state.selected && state.selected !== "outline" && !findShape(state.selected)) {
+      if (state.selected && !shapePoints(state.selected)) {
         state.selected = null;
       }
       state.selectedVertex = null;

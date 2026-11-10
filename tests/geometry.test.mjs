@@ -20,6 +20,10 @@ import {
   inheritBackdrop,
   layoutBeds,
   nearestEdgeAngle,
+  nearestEdgeAngleOf,
+  outlineArea,
+  outlineParts,
+  tileView,
   pointInPolygon,
   polygonArea,
   polygonInside,
@@ -262,4 +266,33 @@ test("inheritBackdrop: 解像度だけを変えた画像に、縮尺と基準点
   assert.ok(Math.abs(corner[0] - after[0]) < 0.1 && Math.abs(corner[1] - after[1]) < 0.1);
   // 縦横の比が違えば、同じ範囲とはみなさない
   assert.equal(inheritBackdrop(previous, [2261, 3165], [768, 1024]), null);
+});
+
+test("圃場の外形は、離れた部分の並び。前の形（多角形 1 つ）も読める", () => {
+  const far = [[100, 0], [110, 0], [110, 10], [100, 10]];
+  assert.deepEqual(outlineParts([]), []);
+  assert.deepEqual(outlineParts(null), []);
+  assert.deepEqual(outlineParts(rect), [rect]);
+  assert.deepEqual(outlineParts([rect, far]), [rect, far]);
+  // 3 点に満たない部分は捨てる
+  assert.deepEqual(outlineParts([rect, [[0, 0], [1, 1]]]), [rect]);
+  near(outlineArea(rect), 1500);
+  near(outlineArea([rect, far]), 1600);
+  near(outlineArea([]), 0);
+});
+
+test("いちばん近い辺の向きは、離れた部分の辺からも探す", () => {
+  const tilted = [[100, 0], [110, 10], [100, 20], [90, 10]];
+  near(nearestEdgeAngleOf([1, 25], [rect, tilted]), -Math.PI / 2); // rect の西の辺（北から南へ）
+  near(nearestEdgeAngleOf([106, 4], [rect, tilted]), Math.PI / 4);
+  near(nearestEdgeAngleOf([1, 25], []), 0);
+});
+
+test("範囲を紙に分ける。並びの真ん中を範囲の真ん中に合わせ、上の行の左から順", () => {
+  const { cols, rows, tiles } = tileView({ x: 0, y: -50, w: 25, h: 50 }, 10, 30);
+  assert.deepEqual([cols, rows, tiles.length], [3, 2, 6]);
+  assert.deepEqual(tiles[0], { x: -2.5, y: -55, w: 10, h: 30, row: 0, col: 0 });
+  assert.deepEqual(tiles[5], { x: 17.5, y: -25, w: 10, h: 30, row: 1, col: 2 });
+  // ちょうど収まるときは 1 枚
+  assert.equal(tileView({ x: 0, y: 0, w: 10, h: 30 }, 10, 30).tiles.length, 1);
 });

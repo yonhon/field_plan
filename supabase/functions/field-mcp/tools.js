@@ -2,7 +2,7 @@
 // 圃場はいくつもある。品目と肥料のほかは、どの圃場の話かを毎回 field で選ぶ。
 // 面積、苗数、肥料の量、日程の無理、農薬の使用回数は、画面と同じ部品（lib/）で計算する。
 import { plantingNumbers, plantingSpec, summarize, cropLabel } from "./lib/crops.js";
-import { polygonArea, rectSize } from "./lib/geometry.js";
+import { outlineArea, outlineParts, polygonArea, rectSize } from "./lib/geometry.js";
 import { firstHarvestDay, inputText, logEnd, specText, usageTable } from "./lib/logs.js";
 import { productCodes } from "./lib/rac.js";
 import { harvestEnd, isManagement, planProblems, workName, worksRange } from "./lib/schedule.js";
@@ -123,7 +123,8 @@ const activePlanOf = (data) => data.plans.find((plan) => plan.id === data.field.
 // 文字の絞り込み。省いたときは何でも通す。一部が合えばよい
 const matchText = (value, query) => query == null || query === "" || String(value || "").includes(String(query));
 
-const fieldArea = (field) => (field.outline?.length >= 3 ? round(polygonArea(field.outline)) : null);
+// 外形は離れた部分をいくつも持てる。面積は部分の合計
+const fieldArea = (field) => (outlineParts(field.outline).length ? round(outlineArea(field.outline)) : null);
 
 // どのプランの話か。名前（一部でもよい）で選ぶ。省いたときは、最後に変更のあったプラン。それもなければ先頭
 function pickPlan(data, name) {
