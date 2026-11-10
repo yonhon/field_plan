@@ -764,13 +764,19 @@ body.plan-busy #scheduleView {
   font-size: 12px;
 }
 
-/* 区域 ⊃ 区画 ⊃ 畝 の木。選んだ行のすぐ下に、その内容が開く */
+/* 外形の部分 ⊃ 区域 ⊃ 区画 ⊃ 畝 の木。選んだ行のすぐ下に、その内容が開く */
 .shape-tree > li.depth-1 {
   padding-left: 20px;
 }
 
 .shape-tree > li.depth-2 {
   padding-left: 44px;
+  font-size: 13px;
+}
+
+/* 外形の部分の下の、区画の畝 */
+.shape-tree > li.depth-3 {
+  padding-left: 68px;
   font-size: 13px;
 }
 

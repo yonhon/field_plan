@@ -64,6 +64,9 @@ test("外形: 離れた部分を描き足すと、面積は合計になり、区
   assert.equal(outline[1].length, 4);
 
   assert.equal(await text("areaField"), "1,280 ㎡（12.8 a）"); // 800 + 480
+  // 一覧では、区域は入っている部分の下に、1 段下げて並ぶ
+  const tree = await page.run(`[...document.querySelectorAll("#shapeTree > li[data-shape]")].map((li) => li.dataset.shape + ":" + li.className.match(/depth-\\d/)[0])`);
+  assert.deepEqual(tree, ["outline:0:depth-0", "z1:depth-1", "outline:1:depth-0", "z2:depth-1"]);
   assert.equal(await badge(), "");
   assert.match(await text("selectionTitle"), /圃場の外形 2/);
 

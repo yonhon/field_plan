@@ -494,6 +494,13 @@ function findOutside() {
   };
 }
 
+// 区域が入っている、外形の部分の番号。収まっている部分がなければ、重心のある部分。どちらもなければ -1
+function zonePart(zone) {
+  const parts = state.field.outline;
+  const inside = parts.findIndex((part) => polygonInside(zone.shape, part));
+  return inside >= 0 ? inside : parts.findIndex((part) => pointInPolygon(centroid(zone.shape), part));
+}
+
 // 変更の記録に書く、図形の呼び名と大きさ
 function shapeName(key) {
   if (isOutline(key)) {
@@ -808,16 +815,14 @@ function treeRows(outside, beds) {
         `<span>${toggle}<span class="swatch" style="background:${color}"></span>${escapeHtml(name)}${extra}${mark(id)}</span>` +
         `<span>${detail}</span>`,
     });
-  state.field.outline.forEach((points, index) => {
-    add(outlineKey(index), 0, OUTLINE_COLOR, outlineLabel(index), `${polygonArea(points).toFixed(1)} ㎡`);
-  });
-  for (const zone of state.zones) {
-    add(zone.id, 0, ZONE_KINDS[zone.kind].color, zoneLabel(zone), `${polygonArea(zone.shape).toFixed(1)} ㎡`);
+  // 区域とその中身。base は区域の行の深さ
+  const addZone = (zone, base) => {
+    add(zone.id, base, ZONE_KINDS[zone.kind].color, zoneLabel(zone), `${polygonArea(zone.shape).toFixed(1)} ㎡`);
     for (const block of state.blocks.filter((item) => item.zone_id === zone.id)) {
       const active = blockActive(block);
       const own = beds.filter((bed) => bed.block_id === block.id).sort((p, q) => p.seq - q.seq);
       const open = own.length > 0 && (openBlocks.has(block.id) || own.some((bed) => bed.id === state.selected));
-      add(block.id, 1, BLOCK_COLOR, block.name, active ? `${polygonArea(block.shape).toFixed(1)} ㎡${own.length ? ` / 畝 ${own.length} 本` : ""}` : `表示日にはない（${blockPeriod(block)}）`, {
+      add(block.id, base + 1, BLOCK_COLOR, block.name, active ? `${polygonArea(block.shape).toFixed(1)} ㎡${own.length ? ` / 畝 ${own.length} 本` : ""}` : `表示日にはない（${blockPeriod(block)}）`, {
         away: !active,
         toggle: own.length
           ? `<button type="button" class="tree-toggle" data-toggle="${block.id}" aria-expanded="${open}" title="畝を${open ? "たたむ" : "開く"}">${open ? "▾" : "▸"}</button>`
@@ -826,12 +831,21 @@ function treeRows(outside, beds) {
       for (const bed of open ? own : []) {
         const size = rectSize(bed.shape);
         const crop = plantingOn(bed)?.crop_name;
-        add(bed.id, 2, BED_COLOR, `畝${bed.seq}`, `${Math.round(size.width * 100)} cm × ${size.length.toFixed(1)} m`, {
+        add(bed.id, base + 2, BED_COLOR, `畝${bed.seq}`, `${Math.round(size.width * 100)} cm × ${size.length.toFixed(1)} m`, {
           extra: crop ? `<span class="tree-crop">${escapeHtml(crop)}</span>` : "",
         });
       }
     }
-  }
+  };
+  // 外形があれば、外形の部分 ⊃ 区域 ⊃ 区画 ⊃ 畝 の木にする。区域は、入っている部分の下に置く。
+  // どの部分にも入っていない区域は、最後に、外形と同じ深さで並べる（はみ出しの印が付く）
+  const parts = state.field.outline;
+  const partOf = new Map(state.zones.map((zone) => [zone.id, zonePart(zone)]));
+  parts.forEach((points, index) => {
+    add(outlineKey(index), 0, OUTLINE_COLOR, outlineLabel(index), `${polygonArea(points).toFixed(1)} ㎡`);
+    state.zones.filter((zone) => partOf.get(zone.id) === index).forEach((zone) => addZone(zone, 1));
+  });
+  state.zones.filter((zone) => partOf.get(zone.id) < 0).forEach((zone) => addZone(zone, 0));
   if (!rows.length) {
     rows.push({ id: "empty", plain: true, className: "empty", html: "まだありません" });
   }
