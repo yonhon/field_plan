@@ -240,22 +240,6 @@ export function outlineParts(outline) {
   return parts.filter((part) => Array.isArray(part) && part.length >= 3);
 }
 
-// 範囲 view（SVG の向きの { x, y, w, h }。y は下向き）を、大きさ w × h の紙に分ける。
-// 紙の並びの真ん中を、範囲の真ん中に合わせる。紙は、上の行から順、行の中は左から順
-export function tileView(view, w, h) {
-  const cols = Math.max(1, Math.ceil(view.w / w - 1e-9));
-  const rows = Math.max(1, Math.ceil(view.h / h - 1e-9));
-  const x0 = view.x + view.w / 2 - (cols * w) / 2;
-  const y0 = view.y + view.h / 2 - (rows * h) / 2;
-  const tiles = [];
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      tiles.push({ x: x0 + col * w, y: y0 + row * h, w, h, row, col });
-    }
-  }
-  return { cols, rows, tiles };
-}
-
 // 圃場の外形の面積（㎡）。部分の面積の合計
 export function outlineArea(outline) {
   return outlineParts(outline).reduce((sum, part) => sum + polygonArea(part), 0);

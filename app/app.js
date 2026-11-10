@@ -32,7 +32,6 @@ import {
   scaleBackdropAt,
   scalePoints,
   splitPolygon,
-  tileView,
   translatePoints,
   worldToImage,
 } from "./geometry.js";
@@ -182,9 +181,6 @@ function fitView() {
 
 // ---- PDF 出力 ----
 
-const PRINT_BED_PX = 11; // PDF の部分ごとの紙では、いちばん狭い畝の幅をこの px（約 3 mm）以上にする。畝の番号と品目（9 px 以上の文字）が読める
-const PRINT_MAX_TILES = 16; // 1 つの部分を分ける紙の数の上限。超えるときは、縮めて収める
-
 // 点の並びがちょうど入る四角形に、3% の余白を足した範囲（SVG の向き。y は下向き）
 function printView(points) {
   const box = boundingBox(points);
@@ -192,55 +188,27 @@ function printView(points) {
   return { x: box.minX - margin, y: -box.maxY - margin, w: box.maxX - box.minX + margin * 2, h: box.maxY - box.minY + margin * 2 };
 }
 
-const viewRect = (view) => [[view.x, -view.y], [view.x + view.w, -view.y], [view.x + view.w, -(view.y + view.h)], [view.x, -(view.y + view.h)]];
-
 // 圃場図を、下絵なし、選択の印なしで描いて、印刷に回す。向きは画面と同じ（上が北）。
 // 1 枚目は全体（外形のすべての部分。外形がなければ区域）を 1 枚に収める。
-// 外形が離れた部分に分かれているときは、続けて部分ごとの紙を出す。部分は、いちばん狭い畝が読める大きさで描き、
-// 1 枚に収まらなければ、何枚かの紙に分ける（全体の紙に、分けた紙の範囲と番号を点線で書く）。
-// 部分が 1 つでも、全体の紙で畝が読めないときは、分けた紙を足す
+// 外形が離れた部分に分かれているときは、続けて、部分ごとに 1 枚ずつ、その部分を紙いっぱいに描く
 function printMap() {
-  // 外形がなければ、区域のすべてが入る四角形を 1 つの部分とみなす
-  const areas = state.field.outline.length ? state.field.outline : state.zones.length ? [viewRect(printView(state.zones.flatMap((zone) => zone.shape)))] : [];
-  if (!areas.length) {
+  const points = state.field.outline.length ? state.field.outline.flat() : state.zones.flatMap((zone) => zone.shape);
+  if (points.length < 3) {
     notify("圃場の外形か区域を描くと、PDF にできます。");
     return;
   }
-  const whole = printView(areas.flat());
+  const whole = printView(points);
   const landscape = whole.w >= whole.h;
   const [pageWidth, pageHeight] = PAGE_PX[landscape ? "landscape" : "portrait"];
   const fit = (view) => Math.min(pageWidth / view.w, pageHeight / view.h);
-  const beds = visibleBeds();
-  const several = state.field.outline.length > 1;
-
-  // 部分ごとの紙。{ view, z, label（全体の紙に書く番号）, name（見出し） }
-  const sheets = [];
-  areas.forEach((area, index) => {
-    const view = printView(area);
-    const inside = beds.filter((bed) => pointInPolygon(centroid(bed.shape), area));
-    const narrowest = Math.min(...inside.map((bed) => rectSize(bed.shape).width));
-    const readable = Number.isFinite(narrowest) && narrowest > 0 ? PRINT_BED_PX / narrowest : 0;
-    let z = Math.max(fit(view), readable);
-    let grid = tileView(view, pageWidth / z, pageHeight / z);
-    while (grid.tiles.length > PRINT_MAX_TILES) {
-      z *= Math.sqrt(PRINT_MAX_TILES / grid.tiles.length) * 0.98;
-      grid = tileView(view, pageWidth / z, pageHeight / z);
-    }
-    const partName = several ? `外形 ${index + 1}` : "拡大";
-    if (grid.tiles.length === 1) {
-      // 1 枚に収まる部分は、紙いっぱいに描く。部分が 1 つなら、全体の紙と同じなので出さない
-      if (several) {
-        sheets.push({ view, z: fit(view), label: "", name: partName });
-      }
-      return;
-    }
-    // 部分にかからない紙（L 字の部分の角など）は出さない
-    const tiles = grid.tiles.filter((tile) => polygonsOverlap(viewRect(tile), area));
-    tiles.forEach((tile, i) => {
-      const label = several ? `${index + 1}-${i + 1}` : String(i + 1);
-      sheets.push({ view: tile, z, label, name: `${partName}　${i + 1}/${tiles.length} 枚目（${label}）` });
-    });
-  });
+  // 部分ごとの紙。{ view, z, name（見出し） }
+  const sheets =
+    state.field.outline.length > 1
+      ? state.field.outline.map((area, index) => {
+          const view = printView(area);
+          return { view, z: fit(view), name: `外形 ${index + 1}` };
+        })
+      : [];
 
   const kept = { selected: state.selected, vertex: state.selectedVertex, backdrop: state.backdropVisible, draft: state.draft };
   Object.assign(state, { selected: null, selectedVertex: null, backdropVisible: false, draft: [] });
@@ -253,7 +221,7 @@ function printMap() {
     return drawn.get(z);
   };
   const title = `圃場図　${state.field.name}　プラン: ${state.plan.name}　表示日: ${formatDate(state.viewDate)}`;
-  const page = ({ view, z, name }, overlay = "") => {
+  const page = ({ view, z, name }) => {
     // 縮尺の線と、北の印を、紙の隅に書く
     const meters = [100, 50, 20, 10, 5, 2, 1].find((value) => value <= view.w * 0.2) || 1;
     const pad = 10 / z;
@@ -269,20 +237,11 @@ function printMap() {
       title: name ? `${title}　${name}` : title,
       body:
         `<svg class="print-map" xmlns="http://www.w3.org/2000/svg" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" ` +
-        `style="height:${pxToMm(Math.min(pageHeight, (pageWidth / view.w) * view.h)).toFixed(1)}mm">${shapesAt(z)}${overlay}${extras}</svg>`,
+        `style="height:${pxToMm(Math.min(pageHeight, (pageWidth / view.w) * view.h)).toFixed(1)}mm">${shapesAt(z)}${extras}</svg>`,
     };
   };
-  // 全体の紙には、分けた紙の範囲と番号を書く
   const wholeZ = fit(whole);
-  const overlay = sheets
-    .filter((sheet) => sheet.label)
-    .map(
-      ({ view, label }) =>
-        `<rect class="print-tile" x="${view.x}" y="${view.y}" width="${view.w}" height="${view.h}" />` +
-        `<text class="map-label" x="${view.x + 4 / wholeZ}" y="${view.y + 13 / wholeZ}" font-size="${11 / wholeZ}" stroke-width="${3 / wholeZ}">${label}</text>`
-    )
-    .join("");
-  const pages = [page({ view: whole, z: wholeZ, name: sheets.length ? "全体" : "" }, overlay), ...sheets.map((sheet) => page(sheet))];
+  const pages = [page({ view: whole, z: wholeZ, name: sheets.length ? "全体" : "" }), ...sheets.map((sheet) => page(sheet))];
   Object.assign(state, { selected: kept.selected, selectedVertex: kept.vertex, backdropVisible: kept.backdrop, draft: kept.draft });
   renderMap();
   printPage({ name: "圃場図", pages, landscape });

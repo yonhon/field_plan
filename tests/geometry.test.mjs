@@ -23,7 +23,6 @@ import {
   nearestEdgeAngleOf,
   outlineArea,
   outlineParts,
-  tileView,
   pointInPolygon,
   polygonArea,
   polygonInside,
@@ -286,13 +285,4 @@ test("いちばん近い辺の向きは、離れた部分の辺からも探す",
   near(nearestEdgeAngleOf([1, 25], [rect, tilted]), -Math.PI / 2); // rect の西の辺（北から南へ）
   near(nearestEdgeAngleOf([106, 4], [rect, tilted]), Math.PI / 4);
   near(nearestEdgeAngleOf([1, 25], []), 0);
-});
-
-test("範囲を紙に分ける。並びの真ん中を範囲の真ん中に合わせ、上の行の左から順", () => {
-  const { cols, rows, tiles } = tileView({ x: 0, y: -50, w: 25, h: 50 }, 10, 30);
-  assert.deepEqual([cols, rows, tiles.length], [3, 2, 6]);
-  assert.deepEqual(tiles[0], { x: -2.5, y: -55, w: 10, h: 30, row: 0, col: 0 });
-  assert.deepEqual(tiles[5], { x: 17.5, y: -25, w: 10, h: 30, row: 1, col: 2 });
-  // ちょうど収まるときは 1 枚
-  assert.equal(tileView({ x: 0, y: 0, w: 10, h: 30 }, 10, 30).tiles.length, 1);
 });

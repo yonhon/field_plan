@@ -88,8 +88,8 @@ test("外形: 離れた部分を描き足すと、面積は合計になり、区
   assert.deepEqual(page.errors, []);
 });
 
-test("PDF: 全体の紙と部分ごとの紙。畝が読める大きさで 1 枚に収まらない部分は、何枚かに分ける", options, async () => {
-  // 部分 1 は畝がなく 1 枚。部分 2 は 120 m × 60 m に幅 70 cm の畝があり、2 × 2 枚に分かれる
+test("PDF: 全体の紙のあとに、外形の部分ごとに 1 枚ずつ。部分は分けない", options, async () => {
+  // 部分 2 は 120 m × 60 m に幅 70 cm の畝があるが、1 枚に収める
   const beds = Array.from({ length: 20 }, (_, i) => ({
     id: `bed${i + 1}`,
     plan_id: "p1",
@@ -111,14 +111,16 @@ test("PDF: 全体の紙と部分ごとの紙。畝が読める大きさで 1 枚
   await page.waitFor(`window.printed === 1`, "印刷");
   const sheets = await page.run(`[...document.querySelectorAll("#printArea .print-sheet")].map((sheet) => ({
     title: sheet.querySelector(".print-title").textContent,
-    tiles: sheet.querySelectorAll(".print-tile").length,
+    viewBox: sheet.querySelector("svg").getAttribute("viewBox"),
     beds: sheet.querySelectorAll('[data-shape^="bed"]').length,
   }))`);
   assert.deepEqual(
     sheets.map((sheet) => sheet.title.split("　").at(-1)),
-    ["全体", "外形 1", "1/4 枚目（2-1）", "2/4 枚目（2-2）", "3/4 枚目（2-3）", "4/4 枚目（2-4）"]
+    ["全体", "外形 1", "外形 2"]
   );
-  assert.equal(sheets[0].tiles, 4); // 全体の紙に、分けた紙の範囲
-  assert.ok(sheets.slice(2).every((sheet) => sheet.beds === 20));
+  // 部分の紙の範囲は、その部分がちょうど入る四角形に 3% の余白を足したもの
+  assert.deepEqual(sheets[2].viewBox.split(" ").map(Number), [196.4, -63.6, 127.2, 67.2]);
+  assert.equal(sheets[2].beds, 20);
+  assert.equal(await page.run(`document.querySelectorAll("#printArea .print-tile").length`), 0);
   assert.deepEqual(page.errors, []);
 });
