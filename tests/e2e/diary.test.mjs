@@ -511,3 +511,34 @@ test("日記: 写真の窓の ‹ › で、同じ見出しの写真を行き来
   await page.click('dialog.diary-viewer [data-action="close"]');
   assert.deepEqual(page.errors, []);
 });
+
+test("日記: 小見出しのボタンで ### を付け、小見出しは下げて出し、タグは見出しの節にまとめる。空の行を続けると空白の行になる", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="diary"]');
+  await page.click('#diaryMain [data-action="edit"]');
+  // 並びは「見出し」「小見出し」「写真を入れる」「やめる」「保存」
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("#diaryMain .diary-tools > *")].map((el) => el.textContent.trim())`), ["見出し", "小見出し", "写真を入れる", "やめる", "保存"]);
+  await page.click("#diaryBody");
+  await page.type("島にんじん");
+  await page.click('#diaryMain [data-action="heading"]');
+  const NL = String.fromCharCode(10);
+  await page.type(`${NL}発芽を見た。${NL}${NL}${NL}${NL}次の段落。${NL}除草`);
+  await page.click('#diaryMain [data-action="subheading"]');
+  await page.type(`${NL}草を抜いた。`);
+  assert.equal(await page.run(`document.getElementById("diaryBody").value`), `## 島にんじん${NL}発芽を見た。${NL}${NL}${NL}${NL}次の段落。${NL}### 除草${NL}草を抜いた。`);
+  // プレビュー: 小見出しは下げ、空の行を 3 つ続けたところは空白の行が 2 つ
+  await page.click('#diaryMain [data-action="preview-mode"]');
+  assert.equal(await page.run(`document.querySelectorAll("#diaryMain .diary-preview .diary-blank").length`), 2);
+  assert.equal(await page.run(`document.querySelector("#diaryMain .diary-preview .diary-sub-1 .diary-heading").textContent`), "除草");
+  assert.ok((await page.run(`parseFloat(getComputedStyle(document.querySelector("#diaryMain .diary-preview .diary-sub-1")).marginLeft)`)) > 0);
+  await page.click('#diaryMain [data-action="save"]');
+  await saved();
+  // 節は見出しの 1 つだけで、小見出しの行も本文に入る
+  const stored = await diary();
+  assert.deepEqual(stored.sections[TODAY].map((section) => section.path), [["島にんじん"]]);
+  // 日の表示でも、小見出しは下げ、札は見出しのまとまりの一番下に 1 組だけ出す
+  await page.waitFor(`Boolean(document.querySelector("#diaryMain .diary-section .diary-sub-1"))`, "日の表示");
+  assert.equal(await page.run(`document.querySelectorAll("#diaryMain .diary-section .diary-tags").length`), 1);
+  assert.equal(await page.run(`document.querySelector("#diaryMain .diary-section").lastElementChild.classList.contains("diary-tags")`), true);
+  assert.deepEqual(page.errors, []);
+});

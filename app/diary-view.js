@@ -8,7 +8,6 @@ import {
   PHOTO_TAG_KINDS,
   PHOTO_QUALITY,
   WEEKDAYS,
-  bodyChunks,
   calendarDays,
   dateLabel,
   monthChoices,
@@ -20,6 +19,7 @@ import {
   periodOf,
   photoMarkdown,
   photoNames,
+  sectionBlocks,
   photoPath,
   photoSize,
   renderMarkdown,
@@ -406,16 +406,37 @@ export function refreshDiaryWorks() {
 const tagViewKey = (t) => `tags:${JSON.stringify(t.filters)}:${t.oldest}`;
 
 // 節の部分を、その日の本文から見出しで切り出して描く（節の本文には写真の書き込みが入らないため）
+// 見出し（##）のまとまりを描く。見出しの下の文に続けて、小見出し（### 以下）とその文を、段の深さだけ下げて並べる。
+// tags はまとまりの一番下に出す札（節のタグ）。base は ## を画面の何番目の見出しにするか
+function blockHtml(block, tags, base = 4) {
+  const headingHtml = (chunk) => {
+    if (!chunk.heading) {
+      return "";
+    }
+    const level = Math.min(6, base + chunk.level - (block.level || 2));
+    return `<h${level} class="diary-heading">${escapeHtml(chunk.heading)}</h${level}>`;
+  };
+  const [first, ...subs] = block.chunks;
+  // 最初の見出しより前に何も書いていなければ、何も出さない
+  if (!first.heading && !first.text.trim() && !subs.length && !tags) {
+    return "";
+  }
+  // 節を始めた見出しの段（見出しのない部分は、その下の小見出しを 1 段下げる）
+  const top = block.level || 1;
+  const subHtml = subs
+    .map((chunk) => `<div class="diary-sub diary-sub-${Math.max(1, Math.min(4, chunk.level - top))}">${headingHtml(chunk)}${renderMarkdown(chunk.text, photoHtml, { headingBase: base })}</div>`)
+    .join("");
+  return `<div class="diary-section">${headingHtml(first)}${renderMarkdown(first.text, photoHtml, { headingBase: base })}${subHtml}${tags}</div>`;
+}
+
 function tagSectionHtml(section) {
   const key = pathKey(section.path);
-  const chunk = bodyChunks(section.day_body || "").find((item) => pathKey(item.path) === key);
-  const level = chunk ? Math.min(6, chunk.level + 2) : 4;
-  const heading = chunk?.heading ? `<h${level} class="diary-heading">${escapeHtml(chunk.heading)}</h${level}>` : "";
+  const block = sectionBlocks(section.day_body || "").find((item) => item.key === key);
   return (
     `<article class="diary-day" data-date="${section.date}">` +
     `<div class="panel-heading"><h3 class="diary-day-title"><a href="#diary" data-action="open-day" data-date="${section.date}">${dateLabel(section.date)}</a> ${escapeHtml(section.title || "")}</h3>` +
     `<button type="button" class="chip-btn" data-action="edit" data-date="${section.date}" data-key="${escapeHtml(key)}">修正</button></div>` +
-    `<div class="diary-section">${heading}${chunk ? renderMarkdown(chunk.text, photoHtml, { headingBase: 4 }) : ""}</div>` +
+    (block ? blockHtml(block, "") : "") +
     tagsHtml(tagDay(section.date), section, key) +
     `</article>`
   );
@@ -572,13 +593,10 @@ function addTagFilter(kind, value, label, targetKind) {
 // 1 日分。見出しごとに、本文と、節の作物・作業の種類を並べる
 function dayHtml(day, { single }) {
   const sections = [...(day.sections || [])];
-  const parts = bodyChunks(day.body).map((chunk) => {
-    const key = pathKey(chunk.path);
-    const at = sections.findIndex((section) => pathKey(section.path) === key);
+  const parts = sectionBlocks(day.body).map((block) => {
+    const at = sections.findIndex((section) => pathKey(section.path) === block.key);
     const section = at >= 0 ? sections.splice(at, 1)[0] : null;
-    const level = Math.min(6, chunk.level + 2);
-    const heading = chunk.heading ? `<h${level} class="diary-heading">${escapeHtml(chunk.heading)}</h${level}>` : "";
-    return `<div class="diary-section">${heading}${renderMarkdown(chunk.text, photoHtml, { headingBase: 4 })}${section ? tagsHtml(day, section, key) : ""}</div>`;
+    return blockHtml(block, section ? tagsHtml(day, section, block.key) : "");
   });
   const title = `${single ? "" : `<a href="#diary" data-action="open-day" data-date="${day.date}">${dateLabel(day.date)}</a> `}${escapeHtml(day.title)}`;
   const editButton = (extra) => `<button type="button" class="chip-btn${extra}" data-action="edit" data-date="${day.date}">修正</button>`;
@@ -623,13 +641,14 @@ function resultsHtml() {
 
 function editorHtml() {
   const e = view.editing;
-  // タブと同じ行の右に、「見出し」「写真を入れる」「やめる」「保存」の順に並べる。
-  // 「見出し」と「写真を入れる」は、編集のタブのときだけ出す
+  // タブと同じ行の右に、「見出し」「小見出し」「写真を入れる」「やめる」「保存」の順に並べる。
+  // 「見出し」「小見出し」「写真を入れる」は、編集のタブのときだけ出す
   const tools =
     `<div class="diary-tools">` +
     (e.preview
       ? ""
       : `<button type="button" class="chip-btn" data-action="heading">見出し</button>` +
+        `<button type="button" class="chip-btn" data-action="subheading">小見出し</button>` +
         `<label class="chip-btn diary-photo-btn${view.uploading ? " is-busy" : ""}"><span id="diaryPhotoLabel">${escapeHtml(view.uploading || "写真を入れる")}</span>` +
         `<input id="diaryPhotoInput" type="file" accept="image/*" multiple${view.uploading ? " disabled" : ""} /></label>`) +
     `<button type="button" class="text-btn" data-action="cancel">やめる</button>` +
@@ -643,7 +662,7 @@ function editorHtml() {
     tab("preview-mode", "プレビュー", e.preview) +
     `</div>${tools}</div>`;
   const content = e.preview
-    ? `<div class="diary-preview">${e.body.trim() ? renderMarkdown(e.body, photoHtml, { headingBase: 3 }) : '<p class="muted">まだ何も書いていません。</p>'}</div>`
+    ? `<div class="diary-preview">${e.body.trim() ? sectionBlocks(e.body).map((block) => blockHtml(block, "", 3)).join("") : '<p class="muted">まだ何も書いていません。</p>'}</div>`
     : `<textarea id="diaryBody" data-field="body" rows="16" placeholder="作業の内容を書きます。「見出し」で作物や作業ごとに見出しを付けると、あとで探しやすくなります。">${escapeHtml(e.body)}</textarea>`;
   return (
     `<h2>${escapeHtml(dateLabel(e.date))}の日記</h2>` +
@@ -1175,9 +1194,9 @@ export function initDiary(context) {
     } else if (action === "edit-mode" || action === "preview-mode") {
       view.editing.preview = action === "preview-mode";
       drawMain();
-    } else if (action === "heading") {
+    } else if (action === "heading" || action === "subheading") {
       const e = view.editing;
-      const next = toggleHeading(e.body, Math.min(e.cursor, e.body.length));
+      const next = toggleHeading(e.body, Math.min(e.cursor, e.body.length), action === "subheading" ? 3 : 2);
       e.body = next.body;
       e.cursor = next.pos;
       keepDraft();
@@ -1187,8 +1206,9 @@ export function initDiary(context) {
       area.setSelectionRange(e.cursor, e.cursor);
     } else if (action === "photo") {
       // 同じ見出しの中の写真を、本文の順に並べて渡す（プレビューでは、本文全体の写真）
-      const box = target.closest(".diary-section, .diary-preview") || target.parentElement;
-      const names = [...new Set([...box.querySelectorAll('[data-action="photo"]')].map((el) => el.dataset.photo))];
+      const scope = ".diary-sub, .diary-section, .diary-preview";
+      const box = target.closest(scope) || target.parentElement;
+      const names = [...new Set([...box.querySelectorAll('[data-action="photo"]')].filter((el) => el.closest(scope) === box).map((el) => el.dataset.photo))];
       openPhoto(target.dataset.photo, names);
     } else if (target.dataset.tagFilter) {
       addTagFilter(target.dataset.tagFilter, target.dataset.tagValue, target.dataset.tagLabel, target.dataset.tagTargetKind);

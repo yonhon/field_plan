@@ -27,39 +27,38 @@ function splitLines(text) {
 // 節の見出しを、直した種類（diary.days.tags）の鍵にする。見出しのない最初の節は ""
 export const pathKey = (path) => path.join(" > ");
 
-// 1 日分の本文を、見出しごとの節 [{path, body, images}] に分ける。path は上位の見出しを含む。
-// 本文の写真は images に移し、本文からは抜く。下位の節を束ねるだけの見出しと、空の最初の節は作らない。
-// 第 1 階層の見出しは、その日の題として扱い、節にしない（build_sections.py と同じ）
+// 1 日分の本文を、見出しごとの節 [{path, body, images}] に分ける（タグを付ける単位）。
+// 新しい節を始めるのは、いまの節を始めた見出しと同じか、それより上の段の見出しが来たときだけ。より深い段の見出し（小見出し）は
+// 節を分けず、その行も含めていまの節の本文に入れる（## と ### で書けば、### は ## の節に入る。### を一番上に使う日は ### ごとの節）。
+// 最初の見出しより前は、見出しのない節（path は []）。
+// 本文の写真は images に移し、本文からは抜く。中身のない、見出しのない最初の節は作らない。
+// 第 1 階層の見出し（#）は、その日の題として扱い、節にしない（inoo_farm の scripts/diary_text.py の split_sections と同じ）
 export function splitSections(body) {
-  const sections = [{ path: [], lines: [] }];
-  let path = [];
+  const sections = [{ path: [], lines: [], level: 0 }];
   let current = sections[0];
   for (const line of splitLines(body)) {
     const heading = HEADING.exec(line);
-    if (!heading) {
-      current.lines.push(line);
-      continue;
-    }
-    const level = heading[1].length;
+    const level = heading ? heading[1].length : 0;
     if (level === 1) {
       continue;
     }
-    path = [...path.filter(([depth]) => depth < level), [level, heading[2].trim()]];
-    current = { path: path.map(([, text]) => text), lines: [] };
-    sections.push(current);
+    if (level && (!current.level || level <= current.level)) {
+      current = { path: [heading[2].trim()], lines: [], level };
+      sections.push(current);
+      continue;
+    }
+    current.lines.push(line);
   }
   const result = [];
-  sections.forEach((section, i) => {
+  for (const section of sections) {
     const text = section.lines.join("\n");
     const images = [...text.matchAll(IMAGE)].map((match) => match[1]);
     const stripped = text.replace(IMAGE, "").replace(/\n{3,}/g, "\n\n").trim();
-    const later = sections[i + 1]?.path || [];
-    const hasChildren = later.length > section.path.length && section.path.every((part, k) => later[k] === part);
-    if (!stripped && !images.length && (hasChildren || !section.path.length)) {
-      return;
+    if (!stripped && !images.length && !section.path.length) {
+      continue;
     }
     result.push({ path: section.path, body: stripped, images });
-  });
+  }
   return result;
 }
 
@@ -79,6 +78,21 @@ export function bodyChunks(body) {
     chunks.push({ path: path.map(([, text]) => text), heading: heading[2].trim(), level, lines: [] });
   }
   return chunks.map(({ lines, ...chunk }) => ({ ...chunk, text: lines.join("\n") }));
+}
+
+// 表示のまとまりを、節ごとに束ねる [{key, level, chunks}]（splitSections と同じ分け方）。節を始めたまとまりに、
+// その下の小見出しのまとまりを続ける。key は節の鍵（見出しのない部分は ""）、level は節を始めた見出しの段（見出しのない部分は 0）
+export function sectionBlocks(body) {
+  const blocks = [];
+  for (const chunk of bodyChunks(body)) {
+    const current = blocks[blocks.length - 1];
+    if (!current || (chunk.level && (!current.level || chunk.level <= current.level))) {
+      blocks.push({ key: chunk.heading || "", level: chunk.level, chunks: [chunk] });
+    } else {
+      current.chunks.push(chunk);
+    }
+  }
+  return blocks;
 }
 
 // 節のタグの種類（inoo_farm の docs/diary-tags.md）。Claude Code が本文の意味と写真の中身から付ける（推定）。
@@ -194,13 +208,15 @@ export function insertBlock(body, pos, text) {
 }
 
 // カーソルのある行を見出しにする。もう見出しなら、見出しの印を外す
-export function toggleHeading(body, pos) {
+// level は見出しの段（2 なら見出し ##、3 なら小見出し ###）。同じ段の見出しなら印を外し、違う段の見出しならその段に変える
+export function toggleHeading(body, pos, level = 2) {
   const start = body.lastIndexOf("\n", pos - 1) + 1;
   const endAt = body.indexOf("\n", pos);
   const end = endAt < 0 ? body.length : endAt;
   const line = body.slice(start, end);
-  const heading = /^#{1,6}\s+/.exec(line);
-  const next = heading ? line.slice(heading[0].length) : `## ${line}`;
+  const heading = /^(#{1,6})\s+/.exec(line);
+  const text = heading ? line.slice(heading[0].length) : line;
+  const next = heading && heading[1].length === level ? text : `${"#".repeat(level)} ${text}`;
   return { body: body.slice(0, start) + next + body.slice(end), pos: start + next.length };
 }
 
@@ -430,7 +446,17 @@ export function renderMarkdown(body, photo, { headingBase = 3 } = {}) {
     const line = lines[i];
     const heading = HEADING.exec(line);
     if (!line.trim()) {
-      i += 1;
+      // 空の行 1 つは段落の区切り。2 つ以上続けたら、増えた分だけ空白の行を出す（書いた見た目に近くする。文と文のあいだだけ）
+      let blank = 0;
+      while (i < lines.length && !lines[i].trim()) {
+        blank += 1;
+        i += 1;
+      }
+      if (html.length && i < lines.length) {
+        for (let k = 1; k < blank; k += 1) {
+          html.push('<div class="diary-blank" aria-hidden="true"></div>');
+        }
+      }
     } else if (heading) {
       const level = Math.min(6, headingBase + Math.max(0, heading[1].length - 2));
       html.push(`<h${level} class="diary-heading">${inline(heading[2].trim(), photo)}</h${level}>`);

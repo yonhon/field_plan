@@ -19,6 +19,7 @@ import {
   renderMarkdown,
   replacePlaceholder,
   searchWords,
+  sectionBlocks,
   pickLabels,
   renameTagKeys,
   renamedHeadings,
@@ -30,7 +31,7 @@ import {
 import { createLocalStore } from "../app/store.js";
 
 
-test("本文を見出しごとの節に分け、写真を本文から抜く（build_sections.py と同じ）", () => {
+test("本文を見出し（##）ごとの節に分け、小見出しは親の節に含め、写真を本文から抜く（diary_text.py と同じ）", () => {
   const body = [
     "# 2026-11-08 題の行",
     "朝の見回り。",
@@ -51,21 +52,43 @@ test("本文を見出しごとの節に分け、写真を本文から抜く（bu
   ].join("\n");
   assert.deepEqual(splitSections(body), [
     { path: [], body: "朝の見回り。", images: [] },
-    { path: ["畑A", "オクラ"], body: "収穫した。\n\nまだ実が多い。", images: ["images/2026-11-08_01.jpg"] },
-    { path: ["畑A", "トマト"], body: "|  |  |\n| :---- | :---- |", images: ["images/2026-11-08_02.jpg", "images/2026-11-08_03.jpg"] },
-    // 中身のない見出しでも、下位の節を束ねていなければ節にする
+    {
+      path: ["畑A"],
+      body: "### オクラ\n収穫した。\n\nまだ実が多い。\n### トマト\n|  |  |\n| :---- | :---- |",
+      images: ["images/2026-11-08_01.jpg", "images/2026-11-08_02.jpg", "images/2026-11-08_03.jpg"],
+    },
+    // 中身のない見出しも節にする
     { path: ["まとめ"], body: "", images: [] },
   ]);
 });
 
-test("中身のない最初の節と、束ねるだけの見出しは節にしない", () => {
-  assert.deepEqual(splitSections("\n## 親\n### 子\n本文"), [{ path: ["親", "子"], body: "本文", images: [] }]);
+test("中身のない最初の節は節にしない。節を始めた見出しより深い段の見出しだけが、小見出しとして節に入る", () => {
+  assert.deepEqual(splitSections("\n## 親\n### 子\n本文"), [{ path: ["親"], body: "### 子\n本文", images: [] }]);
   assert.deepEqual(splitSections(""), []);
-  // 見出しの階層が戻ったら、上位の見出しを入れ替える
-  assert.deepEqual(
-    splitSections("## A\n### B\nb\n## C\nc").map((s) => s.path),
-    [["A", "B"], ["C"]]
-  );
+  assert.deepEqual(splitSections("## A\n### B\nb\n## C\nc").map((s) => s.path), [["A"], ["C"]]);
+  // ### を一番上に使う日は ### ごとの節。あとから ## が来れば、そこから新しい節で、その下の ### は小見出し
+  assert.deepEqual(splitSections("### 子\na\n## C\nc\n### D\nd").map((s) => [s.path, s.body]), [[["子"], "a"], [["C"], "c\n### D\nd"]]);
+  assert.deepEqual(splitSections("### A\na\n### B\nb\n#### C\nc").map((s) => [s.path, s.body]), [[["A"], "a"], [["B"], "b\n#### C\nc"]]);
+});
+
+test("表示のまとまりは、節ごとに、小見出しのまとまりを束ねる", () => {
+  const blocks = sectionBlocks("前置き\n## A\na\n### B\nb\n#### C\nc\n## D\nd");
+  assert.deepEqual(blocks.map((block) => [block.key, block.chunks.map((chunk) => chunk.level)]), [["", [0]], ["A", [2, 3, 4]], ["D", [2]]]);
+  assert.deepEqual(sectionBlocks("### A\na\n#### B\nb\n### C").map((block) => [block.key, block.level, block.chunks.length]), [["", 0, 1], ["A", 3, 2], ["C", 3, 1]]);
+});
+
+test("見出しと小見出しのボタンは、同じ段なら印を外し、違う段ならその段に変える", () => {
+  assert.equal(toggleHeading("a", 0, 3).body, "### a");
+  assert.equal(toggleHeading("### a", 0, 3).body, "a");
+  assert.equal(toggleHeading("## a", 0, 3).body, "### a");
+  assert.equal(toggleHeading("### a", 0).body, "## a");
+});
+
+test("空の行を 2 つ以上続けると、増えた分だけ空白の行を出す（文と文のあいだだけ）", () => {
+  const blank = '<div class="diary-blank" aria-hidden="true"></div>';
+  assert.equal(renderMarkdown("A\n\nB", (n) => n), "<p>A</p><p>B</p>");
+  assert.equal(renderMarkdown("A\n\n\n\nB", (n) => n), `<p>A</p>${blank}${blank}<p>B</p>`);
+  assert.equal(renderMarkdown("\n\n\nA\n\n\n", (n) => n), "<p>A</p>");
 });
 
 test("CRLF の改行でも同じ節になる", () => {

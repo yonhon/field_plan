@@ -3151,6 +3151,46 @@ h4.diary-heading {
   margin: 0 auto;
 }
 
+/* 小見出し（### 以下）とその文を、段の深さだけ下げる。線や印は付けず、下げるだけで見分ける */
+.diary-sub-1 {
+  margin-left: 16px;
+}
+
+.diary-sub-2 {
+  margin-left: 32px;
+}
+
+.diary-sub-3 {
+  margin-left: 48px;
+}
+
+.diary-sub-4 {
+  margin-left: 64px;
+}
+
+@media (max-width: 600px) {
+  .diary-sub-1 {
+    margin-left: 8px;
+  }
+
+  .diary-sub-2 {
+    margin-left: 16px;
+  }
+
+  .diary-sub-3 {
+    margin-left: 24px;
+  }
+
+  .diary-sub-4 {
+    margin-left: 32px;
+  }
+}
+
+/* 空の行を 2 つ以上続けたときの、空白の行（1 行分） */
+.diary-blank {
+  height: 1.6em;
+}
+
 /* 写真と、左右の ‹ ›（同じ見出しの写真を行き来する）。写真の邪魔にならないよう薄くし、触れると濃くする */
 .diary-viewer-photo {
   position: relative;
