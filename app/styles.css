@@ -521,6 +521,27 @@ h3 {
   box-shadow: 0 8px 30px rgba(19, 38, 42, 0.25);
 }
 
+/* 計画を直す窓のメモ欄。日程の作業の表のメモと同じ文字にする（docs/design-rules.md の「メモの文字」）。
+   指定しないと、ブラウザーの初めの等幅の書体になる */
+.plan-edit textarea {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+@media (max-width: 800px) {
+  .plan-edit textarea {
+    font-size: 16px; /* これより小さいと、iPhone で入力のたびに画面が拡大される */
+  }
+}
+
 .notice::backdrop {
   background: rgba(19, 38, 42, 0.3);
 }
@@ -1788,6 +1809,11 @@ body.plan-busy #scheduleView {
   background: var(--surface);
   font: inherit;
   color: var(--text);
+}
+
+/* メモ欄は、日程の作業の表のメモと同じ大きさ（docs/design-rules.md の「メモの文字」） */
+.log-body textarea {
+  font-size: 13px;
 }
 
 .log-section {
