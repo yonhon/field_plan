@@ -957,6 +957,30 @@ function setUploading(text) {
 
 // 本文を書き換える。入力欄があれば値を入れ直し、打っている人のカーソルは、ずれた分だけ動かして保つ。
 // プレビューを開いていれば、描き直す
+// 入力欄の start〜end を text に入れ替え、カーソルを caret に置く。表示位置（入力欄と日記の枠のスクロール）は動かさない。
+// ブラウザーの「文字を打った」扱い（insertText）にして、Ctrl+Z で取り消せるようにする。使えないブラウザーでは setRangeText で入れ替える。
+// 入力欄の中身を丸ごと入れ直すと、カーソルが最後に移り、注目を戻したときに一番下まで送られてしまうため
+function replaceInArea(area, start, end, text, caret) {
+  const top = area.scrollTop;
+  const outer = $("diaryMain").scrollTop;
+  const page = window.scrollY;
+  area.focus({ preventScroll: true });
+  area.setSelectionRange(start, end);
+  let done = false;
+  try {
+    done = text ? document.execCommand("insertText", false, text) : start === end || document.execCommand("delete");
+  } catch {
+    done = false;
+  }
+  if (!done || area.value.slice(start, start + text.length) !== text) {
+    area.setRangeText(text, start, end, "end");
+  }
+  area.setSelectionRange(caret, caret);
+  area.scrollTop = top;
+  $("diaryMain").scrollTop = outer;
+  window.scrollTo(window.scrollX, page);
+}
+
 function changeBody(e, change) {
   // 上げているあいだに書く欄を閉じていたら、本文には入れない（写真は、使っていない写真として保存のときに片付く）
   if (view.editing !== e) {
@@ -969,8 +993,11 @@ function changeBody(e, change) {
   const area = $("diaryBody");
   if (area) {
     const [start, end] = [shift(area.selectionStart), shift(area.selectionEnd)];
+    // 中身を入れ直すとカーソルが最後に移り、表示が動くことがあるので、表示位置を覚えて戻す
+    const top = area.scrollTop;
     area.value = e.body;
     area.setSelectionRange(start, end);
+    area.scrollTop = top;
   } else if (e.preview) {
     drawMain();
   }
@@ -1197,13 +1224,15 @@ export function initDiary(context) {
     } else if (action === "heading" || action === "subheading") {
       const e = view.editing;
       const next = toggleHeading(e.body, Math.min(e.cursor, e.body.length), action === "subheading" ? 3 : 2);
-      e.body = next.body;
+      const area = $("diaryBody");
+      if (area && area.value === e.body) {
+        replaceInArea(area, next.start, next.end, next.line, next.pos);
+        e.body = area.value;
+      } else {
+        e.body = next.body;
+      }
       e.cursor = next.pos;
       keepDraft();
-      const area = $("diaryBody");
-      area.value = e.body;
-      area.focus();
-      area.setSelectionRange(e.cursor, e.cursor);
     } else if (action === "photo") {
       // 同じ見出しの中の写真を、本文の順に並べて渡す（プレビューでは、本文全体の写真）
       const scope = ".diary-sub, .diary-section, .diary-preview";

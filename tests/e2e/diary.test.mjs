@@ -542,3 +542,32 @@ test("日記: 小見出しのボタンで ### を付け、小見出しは下げ�
   assert.equal(await page.run(`document.querySelector("#diaryMain .diary-section").lastElementChild.classList.contains("diary-tags")`), true);
   assert.deepEqual(page.errors, []);
 });
+
+test("日記: 見出し・小見出しのボタンを押しても、入力欄の表示位置は動かず、取り消し（Ctrl+Z）で戻せる", options, async () => {
+  const NL = String.fromCharCode(10);
+  const body = Array.from({ length: 80 }, (_, i) => (i % 5 === 0 ? `## 見出し${i}` : `${i} 行目の文。それなりに長い文を書いておく。`)).join(NL);
+  const data = seed();
+  data.diary = { days: { [TODAY]: { date: TODAY, title: "", body, tags: {}, updated_at: AT } }, sections: {}, photos: {}, files: {} };
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="diary"]');
+  await page.waitFor(`Boolean(document.querySelector('#diaryMain [data-action="edit"]'))`, "日の表示");
+  await page.click('#diaryMain [data-action="edit"]');
+  await page.waitFor(`Boolean(document.getElementById("diaryBody"))`, "修正の画面");
+  // 41 行目にカーソルを置き、入力欄を中ほどまで送る
+  await page.run(`(() => { const a = document.getElementById("diaryBody"); const pos = a.value.indexOf("41 行目"); a.focus(); a.setSelectionRange(pos, pos); a.dispatchEvent(new Event("click", { bubbles: true })); a.scrollTop = 900; })()`);
+  const top = await page.run(`document.getElementById("diaryBody").scrollTop`);
+  assert.ok(top > 0);
+  const line = () => page.run(`(() => { const a = document.getElementById("diaryBody"); const v = a.value; return v.slice(v.lastIndexOf(String.fromCharCode(10), a.selectionStart - 1) + 1, a.selectionStart); })()`);
+  await page.click('#diaryMain [data-action="subheading"]');
+  assert.equal(await page.run(`document.getElementById("diaryBody").scrollTop`), top);
+  assert.equal(await line(), "### 41 行目の文。それなりに長い文を書いておく。");
+  await page.click('#diaryMain [data-action="heading"]');
+  assert.equal(await page.run(`document.getElementById("diaryBody").scrollTop`), top);
+  assert.equal(await line(), "## 41 行目の文。それなりに長い文を書いておく。");
+  // 書きかけにも入っている
+  assert.match(await page.run(`localStorage.getItem("field_plan_diary_drafts")`), /## 41 行目/);
+  // 取り消すと、1 つ前（小見出し）に戻る
+  await page.run(`document.execCommand("undo")`);
+  assert.match(await page.run(`document.getElementById("diaryBody").value`), new RegExp(`### 41 行目`));
+  assert.deepEqual(page.errors, []);
+});

@@ -217,7 +217,8 @@ export function toggleHeading(body, pos, level = 2) {
   const heading = /^(#{1,6})\s+/.exec(line);
   const text = heading ? line.slice(heading[0].length) : line;
   const next = heading && heading[1].length === level ? text : `${"#".repeat(level)} ${text}`;
-  return { body: body.slice(0, start) + next + body.slice(end), pos: start + next.length };
+  // start〜end は元の行の範囲、line は新しい行（入力欄の、その行だけを入れ替えるため）
+  return { body: body.slice(0, start) + next + body.slice(end), pos: start + next.length, start, end, line: next };
 }
 
 // ---- 日付 ----
