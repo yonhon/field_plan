@@ -7,6 +7,7 @@ import { record } from "./journal.js";
 import { SPEC_FIELDS, formatAmount, logEnd, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
 import { draw } from "./draw.js";
+import { holesOf } from "./crops.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -37,6 +38,57 @@ const inputKind = (code) => (code === "spray" ? "pesticide" : FERTILIZER_TYPES.h
 const num = (value) => (value === "" || value === null || value === undefined || !Number.isFinite(Number(value)) ? null : Number(value));
 const round = (value, digits) => (value === null ? null : Math.round(value * 10 ** digits) / 10 ** digits);
 const fmt = (value, digits = 1) => (value === null ? "-" : value.toFixed(digits));
+
+// ---- 1 穴あたりの量 ----
+// 追肥の肥料や、植え穴に入れる粒剤などは、1 穴あたりの量を入れると、選んだ畝の穴の数（苗数）を掛けて量を出す。
+// 記録の量は、いつも使った合計（1 穴あたりの量は、per_hole に残す）。区画には穴がないので、畝を選ぶときだけ使う
+const perHoleUsable = (input) => draft.mode === "crops" && (input.kind === "pesticide" || input.kind === "fertilizer");
+const perHole = (input) => (perHoleUsable(input) ? num(input.per_hole) : null);
+const pickedHoles = () => holesOf(pickedItems(), data, state().logs || []);
+
+// 1 穴あたりの量を入れた資材の量を、選んだ畝の穴の数から決める。畝を選んでいないか、苗数が分からない畝があれば、量は空
+function applyPerHole() {
+  if (!draft.inputs.some((input) => perHole(input) !== null)) {
+    return null;
+  }
+  const holes = pickedHoles();
+  for (const input of draft.inputs) {
+    const rate = perHole(input);
+    if (rate !== null) {
+      input.amount = holes.missing.length || !holes.total ? null : Math.round(rate * holes.total * 1000) / 1000;
+    }
+  }
+  return holes;
+}
+
+// 量をどう出したかの文。例: 1 穴 2 g × 1,234 穴 = 2,468 g（2.47 kg）
+function perHoleText(input, holes) {
+  const rate = perHole(input);
+  if (rate === null || !holes) {
+    return "";
+  }
+  if (holes.missing.length) {
+    return `苗数が分からない畝があるので、量を出せません: ${holes.missing.join("、")}（品目の株間と条数を決めてください）`;
+  }
+  if (!holes.total) {
+    return "対象の畝を選ぶと、穴の数を掛けて量を出します。";
+  }
+  const number = (value) => value.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+  const total = rate * holes.total;
+  const larger = { g: "kg", mL: "L" }[input.unit];
+  return `1 穴 ${number(rate)} ${input.unit} × ${number(holes.total)} 穴 = ${number(total)} ${input.unit}${larger && total >= 1000 ? `（${number(total / 1000)} ${larger}）` : ""}`;
+}
+
+// 1 穴あたりの量を入れたのに、量を出せないときの知らせ。出せれば null
+function perHoleError() {
+  const holes = applyPerHole();
+  if (!holes) {
+    return null;
+  }
+  return holes.missing.length
+    ? `1 穴あたりの量から量を出すには、選んだ畝の苗数が要ります。苗数が分からない畝: ${holes.missing.join("、")}（品目の株間と条数を決めてください）`
+    : null;
+}
 
 function formatDay(iso) {
   const [year, month, day] = iso.split("-").map(Number);
@@ -359,7 +411,7 @@ function defaultInputs(type) {
 }
 
 function blankInput(kind) {
-  return { kind, name: "", method: kind === "pesticide" ? METHODS[0] : "", dilution: null, amount: null, unit: kind === "pesticide" ? "mL" : "kg", fertilizer_id: null };
+  return { kind, name: "", method: kind === "pesticide" ? METHODS[0] : "", dilution: null, amount: null, unit: kind === "pesticide" ? "mL" : "kg", fertilizer_id: null, per_hole: null };
 }
 
 function currentChoices() {
@@ -444,6 +496,7 @@ export function handleLogDialogPop() {
 }
 
 function renderDialog() {
+  applyPerHole();
   const choices = currentChoices();
   const items = pickedItems(choices);
   const area = items.reduce((sum, item) => sum + (item.area_m2 || 0), 0);
@@ -653,6 +706,11 @@ function inputRow(input, i) {
   const unitSelect = (units) =>
     `<label>単位<select data-in="${i}" data-k="unit">${units.map((unit) => `<option${input.unit === unit ? " selected" : ""}>${unit}</option>`).join("")}</select></label>`;
   const remove = `<button type="button" class="text-btn danger" data-act="removeInput" data-i="${i}">外す</button>`;
+  // 1 穴あたりの量を入れたら、量の欄は、穴の数を掛けて出した値を見せるだけにする
+  const byHole = perHole(input) !== null;
+  const perHoleField = perHoleUsable(input) ? field("per_hole", `1 穴あたり（${escapeHtml(input.unit || "")}）`, input.per_hole, numberAttrs) : "";
+  const amountField = (label) => field("amount", byHole ? `${label}（1 穴あたりから）` : label, input.amount, `${numberAttrs}${byHole ? " disabled" : ""}`);
+  const holeHint = perHoleUsable(input) ? `<p class="muted" data-hole="${i}">${escapeHtml(perHoleText(input, byHole ? pickedHoles() : null))}</p>` : "";
   if (input.kind === "pesticide") {
     // 使用基準の使い方（FAMIC の使用方法）を選んだときは、それを使い方として持つ
     const methodList = input.method && !METHODS.includes(input.method) ? [input.method, ...METHODS] : METHODS;
@@ -667,9 +725,10 @@ function inputRow(input, i) {
       (withFamic ? "" : field("name", "農薬の名前", input.name, 'type="text"')) +
       `<label>使い方<select data-in="${i}" data-k="method">${methods}</select></label>` +
       (dosed ? "" : field("dilution", "希釈倍率（倍）", input.dilution, numberAttrs)) +
-      field("amount", dosed ? "使った製品の量" : "製品の量", input.amount, numberAttrs) +
+      perHoleField +
+      amountField(dosed ? "使った製品の量" : "製品の量") +
       unitSelect(["mL", "g", "kg", "L"]) +
-      `</div>${dosed ? "" : `<p class="muted" data-hint="${i}"></p>`}${remove}</div>`
+      `</div>${holeHint}${dosed ? "" : `<p class="muted" data-hint="${i}"></p>`}${remove}</div>`
     );
   }
   if (input.kind === "fertilizer") {
@@ -680,9 +739,10 @@ function inputRow(input, i) {
       `<div class="log-input"><div class="form-grid">` +
       `<label>肥料<select data-in="${i}" data-k="fertilizer_id"><option value="">（一覧にない肥料）</option>${options}</select></label>` +
       (input.fertilizer_id ? "" : field("name", "肥料の名前", input.name, 'type="text"')) +
-      field("amount", "量", input.amount, numberAttrs) +
+      perHoleField +
+      amountField("量") +
       unitSelect(["kg", "g", "L"]) +
-      `</div>${remove}</div>`
+      `</div>${holeHint}${remove}</div>`
     );
   }
   return (
@@ -829,6 +889,18 @@ function updateTotals() {
   if (!dialog || !draft) {
     return;
   }
+  // 1 穴あたりの量から出した量は、欄と文を、描き直さずに入れ替える（打っている欄を作り直さないため）
+  const holes = applyPerHole();
+  draft.inputs.forEach((input, i) => {
+    const hint = dialog.querySelector(`[data-hole="${i}"]`);
+    if (hint) {
+      hint.textContent = perHoleText(input, holes);
+    }
+    const amount = dialog.querySelector(`[data-in="${i}"][data-k="amount"]`);
+    if (amount && perHole(input) !== null) {
+      amount.value = input.amount ?? "";
+    }
+  });
   const keys = new Set(pickedItems().map((item) => item.group));
   const total = [...keys].reduce((sum, key) => sum + (num(draft.spray[key]) || 0), 0);
   const totalBox = dialog.querySelector("#logSprayTotal");
@@ -1138,11 +1210,15 @@ function onChange(event) {
     applySuggestedDilution(input);
     renderDialog();
     updateTotals();
+  } else if (el.dataset.in !== undefined && el.dataset.k === "per_hole") {
+    // 1 穴あたりの量を入れた、または消した: 量の欄を、計算の欄と入れる欄で切り替える
+    renderDialog();
+    updateTotals();
   } else if (el.dataset.in !== undefined && el.tagName === "SELECT") {
     const input = draft.inputs[Number(el.dataset.in)];
     input[el.dataset.k] = el.value || null;
-    if (el.dataset.k === "fertilizer_id") {
-      // 一覧の肥料を選んだら、名前の欄は要らない
+    // 一覧の肥料を選んだら、名前の欄は要らない。単位を変えたら、1 穴あたりの欄の見出しの単位も変える
+    if (el.dataset.k === "fertilizer_id" || (el.dataset.k === "unit" && perHoleUsable(input))) {
       renderDialog();
     }
     updateTotals();
@@ -1249,8 +1325,9 @@ function buildLog() {
       target.spray_l = null;
     });
   }
+  applyPerHole();
   const inputs = draft.inputs
-    .filter((input) => (input.name || "").trim() || input.fertilizer_id || input.amount !== null || input.dilution !== null)
+    .filter((input) => (input.name || "").trim() || input.fertilizer_id || input.amount !== null || input.dilution !== null || perHole(input) !== null)
     .map((input, seq) => {
       const fertilizer = state().fertilizers.find((item) => item.id === input.fertilizer_id);
       return {
@@ -1265,6 +1342,7 @@ function buildLog() {
         dilution: dosed(input) ? null : num(input.dilution),
         amount: num(input.amount),
         unit: input.unit || "",
+        per_hole: perHole(input),
       };
     });
   const linked = targets.some((target) => target.work_id);
@@ -1300,6 +1378,11 @@ async function save() {
   const { log, targets, inputs } = buildLog();
   if (!targets.length) {
     showError("対象の畝か区画を選んでください。");
+    return;
+  }
+  const holesError = perHoleError();
+  if (holesError) {
+    showError(holesError);
     return;
   }
   // 登録番号のある農薬は、まとまりごとに作物名と使い方を選ばないと保存しない（当てはまる作物名がなければ使えない農薬）
@@ -1379,6 +1462,11 @@ async function savePlan() {
   const items = pickedItems();
   if (!items.length) {
     showError("対象の畝か区画を選んでください。");
+    return;
+  }
+  const holesError = perHoleError();
+  if (holesError) {
+    showError(holesError);
     return;
   }
   const fields = planFields();

@@ -274,6 +274,9 @@ create table if not exists field.work_log_inputs (
   unit text not null default ''
 );
 
+-- 1 穴あたりの量（unit の単位）。入れたときは、amount は対象の畝の穴の数（苗数）を掛けた合計
+alter table field.work_log_inputs add column if not exists per_hole numeric;
+
 create index if not exists work_log_inputs_log_idx on field.work_log_inputs (log_id);
 
 -- 記録を 1 件、対象と資材ごと保存する。対象と資材は、渡したもので置き換える。
@@ -302,11 +305,12 @@ begin
   from jsonb_array_elements(coalesce(targets, '[]'::jsonb)) as t;
 
   delete from field.work_log_inputs where log_id = new_id;
-  insert into field.work_log_inputs (id, log_id, seq, kind, reg_no, standard, fertilizer_id, name, method, dilution, amount, unit)
+  insert into field.work_log_inputs (id, log_id, seq, kind, reg_no, standard, fertilizer_id, name, method, dilution, amount, unit, per_hole)
   select
     coalesce((i ->> 'id')::uuid, gen_random_uuid()), new_id, coalesce((i ->> 'seq')::int, 0), i ->> 'kind',
     i ->> 'reg_no', i -> 'standard', (i ->> 'fertilizer_id')::uuid, coalesce(i ->> 'name', ''),
-    coalesce(i ->> 'method', ''), (i ->> 'dilution')::numeric, (i ->> 'amount')::numeric, coalesce(i ->> 'unit', '')
+    coalesce(i ->> 'method', ''), (i ->> 'dilution')::numeric, (i ->> 'amount')::numeric, coalesce(i ->> 'unit', ''),
+    (i ->> 'per_hole')::numeric
   from jsonb_array_elements(coalesce(inputs, '[]'::jsonb)) as i;
 
   return new_id;

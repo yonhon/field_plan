@@ -426,7 +426,7 @@ export const TOOLS = [
     name: "get_records",
     title: "作業の記録",
     description:
-      "実際に行った作業の記録を、新しい日から順に返す。記録ごとに、作業をした日、作業、対象の畝（記録した時点の名前、品目、畝＋通路の面積）、仕様（株間など）、資材（農薬、肥料など）、メモ、つながる計画の作業。期間、品目、作業、場所で絞れる。取りやめた計画の作業も返す。",
+      "実際に行った作業の記録を、新しい日から順に返す。記録ごとに、作業をした日、作業、対象の畝（記録した時点の名前、品目、畝＋通路の面積）、仕様（株間など）、資材（農薬、肥料など。amount は使った合計の量。1 穴あたりの量で決めたものは、per_hole にその量（unit の単位）がある）、メモ、つながる計画の作業。期間、品目、作業、場所で絞れる。取りやめた計画の作業も返す。",
     inputSchema: {
       type: "object",
       required: ["field"],
@@ -504,6 +504,7 @@ export const TOOLS = [
                     text: inputText(input),
                     ...(input.kind === "pesticide" && rac.product(input.reg_no) ? { rac: rac.product(input.reg_no) } : {}),
                     ...(input.amount != null ? { amount: Number(input.amount), unit: input.unit } : {}),
+                    ...(input.per_hole != null ? { per_hole: Number(input.per_hole) } : {}),
                   })),
                 }
               : {}),

@@ -221,3 +221,61 @@ test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴
   await page.waitFor(`document.querySelector(".tab-btn.is-active").dataset.view === "map"`, "戻るで圃場図へ");
   assert.deepEqual(page.errors, []);
 });
+
+test("1 穴あたりの量: 選んだ畝の穴の数を掛けた量で記録し、1 穴の量も残す", options, async () => {
+  const data = seed();
+  // 畝は 16 m。株間 20 cm・2 条なら 80 株 × 2 条 = 160 穴。12 本で 1,920 穴
+  Object.assign(data.crops[0], { plant_gap_cm: 20, row_count: 2 });
+  data.fertilizers = [{ id: "fe1", name: "試験の肥料", n_pct: 10, p_pct: 10, k_pct: 10 }];
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.click("#logAddBtn");
+  await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
+  await page.click('dialog.log-dialog [data-act="type"][data-code="topdress"]');
+  await page.click('dialog.log-dialog [data-act="group"]');
+  await page.setValue('dialog.log-dialog select[data-in="0"][data-k="fertilizer_id"]', "fe1");
+  await page.setValue('dialog.log-dialog select[data-in="0"][data-k="unit"]', "g");
+  const PER_HOLE = 'dialog.log-dialog [data-in="0"][data-k="per_hole"]';
+  const AMOUNT = 'dialog.log-dialog [data-in="0"][data-k="amount"]';
+  await page.run(`(() => {
+    const el = document.querySelector(${JSON.stringify(PER_HOLE)});
+    el.value = "2";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await page.waitFor(`document.querySelector(${JSON.stringify(AMOUNT)}).disabled`, "量の欄が計算の欄になる");
+  assert.equal(await page.run(`document.querySelector(${JSON.stringify(AMOUNT)}).value`), "3840");
+  assert.equal(await page.run(`document.querySelector('dialog.log-dialog [data-hole="0"]').textContent`), "1 穴 2 g × 1,920 穴 = 3,840 g（3.84 kg）");
+  await page.click('dialog.log-dialog [data-act="save"]');
+  await page.waitFor(`!document.querySelector("dialog.log-dialog[open]")`, "窓が閉じる");
+  const input = (await page.saved()).workLogs[0].inputs[0];
+  assert.deepEqual([input.name, input.amount, input.unit, input.per_hole], ["試験の肥料", 3840, "g", 2]);
+
+  // 区画で選ぶときは、1 穴あたりの欄を出さない
+  await page.click("#logAddBtn");
+  await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
+  await page.click('dialog.log-dialog [data-act="type"][data-code="topdress"]');
+  assert.equal(await page.run(`Boolean(document.querySelector(${JSON.stringify(PER_HOLE)}))`), true);
+  await page.click('dialog.log-dialog [data-act="mode"][data-mode="blocks"]');
+  assert.equal(await page.run(`Boolean(document.querySelector(${JSON.stringify(PER_HOLE)}))`), false);
+  assert.deepEqual(page.errors, []);
+});
+
+test("1 穴あたりの量: 苗数が分からない畝があれば、保存せずに知らせる", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.click("#logAddBtn");
+  await page.click('dialog.log-dialog [data-act="type"][data-code="topdress"]');
+  await page.click('dialog.log-dialog [data-act="group"]');
+  await page.run(`(() => {
+    const el = document.querySelector('dialog.log-dialog [data-in="0"][data-k="per_hole"]');
+    el.value = "2";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await page.click('dialog.log-dialog [data-act="save"]');
+  assert.match(await page.run(`document.getElementById("logError").textContent`), /苗数が分からない畝: A 畝1 試験菜/);
+  assert.equal(await page.run(`Boolean(document.querySelector("dialog.log-dialog[open]"))`), true);
+  assert.deepEqual((await page.saved()).works, []);
+  assert.deepEqual(page.errors, []);
+});

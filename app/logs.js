@@ -324,12 +324,14 @@ export function specText(type, spec = {}) {
     .join("・");
 }
 
-// 記録の資材を短い文にする。例: テスト乳剤 2000 倍 散布
+// 記録の資材を短い文にする。例: テスト乳剤 2000 倍 散布、化成肥料 2468 g（1 穴 2 g）
 export function inputText(input) {
+  const perHole = input.per_hole !== null && input.per_hole !== undefined ? `1 穴 ${Number(input.per_hole)} ${input.unit}` : "";
   if (input.kind === "pesticide") {
-    return [input.name || "農薬", input.dilution ? `${input.dilution} 倍` : "", input.method].filter(Boolean).join(" ");
+    return [input.name || "農薬", input.dilution ? `${input.dilution} 倍` : "", input.method, perHole].filter(Boolean).join(" ");
   }
-  return [input.name, input.amount !== null && input.amount !== undefined ? `${input.amount} ${input.unit}` : ""].filter(Boolean).join(" ");
+  const amount = input.amount !== null && input.amount !== undefined ? `${input.amount} ${input.unit}${perHole ? `（${perHole}）` : ""}` : "";
+  return [input.name, amount].filter(Boolean).join(" ");
 }
 
 // ---- 農薬 ----

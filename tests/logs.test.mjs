@@ -8,6 +8,7 @@ import {
   defaultDilution,
   firstHarvestDay,
   formatAmount,
+  inputText,
   parseUsage,
   usageRange,
   usageWarnings,
@@ -453,4 +454,12 @@ test("工程表の帯の置き方。上下に分けるのは、1 日の作業ど
   assert.equal(layoutBars([{ start: "2027-06-01", end: "2027-06-02" }, { start: "2027-06-01", end: "2027-06-01" }, { start: "2027-06-02", end: "2027-06-02" }]).every((bar) => bar.start === "2027-06-01" || bar.lanes >= 1), true);
   assert.equal(layoutBars([{ start: "2027-06-01", end: "2027-06-02" }, { start: "2027-06-01", end: "2027-06-01" }, { start: "2027-06-02", end: "2027-06-02" }]).length, 3);
   assert.deepEqual(layoutBars([]), []);
+});
+
+test("資材の文: 1 穴あたりの量で決めたものは、1 穴の量も書く", () => {
+  assert.equal(inputText({ kind: "fertilizer", name: "化成肥料", amount: 2468, unit: "g", per_hole: 2 }), "化成肥料 2468 g（1 穴 2 g）");
+  assert.equal(inputText({ kind: "fertilizer", name: "化成肥料", amount: 20, unit: "kg", per_hole: null }), "化成肥料 20 kg");
+  assert.equal(inputText({ kind: "fertilizer", name: "化成肥料", amount: 20, unit: "kg" }), "化成肥料 20 kg");
+  // DB の数は文字で届くことがある
+  assert.equal(inputText({ kind: "pesticide", name: "試験粒剤", method: "植穴処理", amount: 2468, unit: "g", per_hole: "2.0" }), "試験粒剤 植穴処理 1 穴 2 g");
 });

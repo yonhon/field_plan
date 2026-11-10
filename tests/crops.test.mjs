@@ -1,7 +1,7 @@
 // 苗数と施肥量の計算（app/crops.js）と、品目ごとの日数（app/schedule.js）のテスト。実行: node --test "tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cropLabel, plantingNumbers, plantingSpec, summarize } from "../app/crops.js";
+import { cropLabel, holesOf, plantingNumbers, plantingSpec, summarize } from "../app/crops.js";
 import { DEFAULT_WORK_TYPES as types, TEMPLATES, planProblems, scheduleForward, typesForCrop } from "../app/schedule.js";
 
 const near = (actual, expected, digits = 6) => assert.ok(Math.abs(actual - expected) < 10 ** -digits, `${actual} != ${expected}`);
@@ -98,6 +98,26 @@ test("株間と条数: 定植の実績、作付の値、品目の設定値の順
   // 集計も、実績の株間と条数で数える
   const summary = summarize({ beds: [{ id: "b1", shape: bed(70, 24) }], plantings: [{ ...planting, bed_id: "b1" }], crops: [{ ...crop, name: "試験菜" }], fertilizers: [], logs });
   assert.equal(summary.crops[0].seedlings, 360);
+});
+
+test("選んだ畝の穴の数: 苗数を足す。苗数が分からない畝は、名前を返して数えない", () => {
+  const data = {
+    beds: [{ id: "b1", shape: bed(70, 24) }, { id: "b2", shape: bed(70, 24) }, { id: "b3", shape: bed(70, 24) }],
+    plantings: [
+      { id: "p1", bed_id: "b1", crop_id: "c1" },
+      { id: "p2", bed_id: "b2", crop_id: "c1" },
+      { id: "p3", bed_id: "b3", crop_id: "c2" },
+    ],
+    crops: [{ id: "c1", plant_gap_cm: 15, row_count: 3 }, { id: "c2", name: "株間なし" }],
+  };
+  const item = (n) => ({ planting_id: `p${n}`, bed_id: `b${n}`, label: `畝${n}` });
+  // 24 ÷ 0.15 = 160 株 × 3 条 = 480 穴ずつ
+  assert.deepEqual(holesOf([item(1), item(2)], data), { total: 960, missing: [] });
+  assert.deepEqual(holesOf([item(1), item(3)], data), { total: 480, missing: ["畝3"] });
+  // 定植の実績の株間と条数で数える: 24 ÷ 0.2 = 120 株 × 2 条
+  const logs = [{ id: "l1", date: "2026-10-01", work_type: "plant", spec: { plant_gap_cm: 20, row_count: 2 }, targets: [{ planting_id: "p1" }] }];
+  assert.deepEqual(holesOf([item(1), item(2)], data, logs), { total: 720, missing: [] });
+  assert.deepEqual(holesOf([], data), { total: 0, missing: [] });
 });
 
 test("品目の日数で、収穫までの間隔と収穫の日数が決まる", () => {

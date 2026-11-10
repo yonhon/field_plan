@@ -45,6 +45,25 @@ export function plantingNumbers(bedShape, crop, fertilizer, spec = crop) {
   return result;
 }
 
+// 記録の対象に選んだ畝の、穴の数（苗数）の合計。items は対象の畝（planting_id、bed_id、label）。
+// 苗数が分からない畝（品目を登録していない、株間か条数がない）は、missing に名前を入れ、合計に数えない
+export function holesOf(items, { beds, plantings, crops }, logs = []) {
+  let total = 0;
+  const missing = [];
+  for (const item of items) {
+    const planting = plantings.find((row) => row.id === item.planting_id);
+    const bed = beds.find((row) => row.id === item.bed_id);
+    const crop = planting && crops.find((row) => row.id === planting.crop_id);
+    const seedlings = bed && crop ? plantingNumbers(bed.shape, crop, null, plantingSpec(planting, crop, logs)).seedlings : null;
+    if (seedlings === null) {
+      missing.push(item.label);
+    } else {
+      total += seedlings;
+    }
+  }
+  return { total, missing };
+}
+
 // プラン全体の集計。品目ごとの作付の数、面積、苗数と、肥料ごとの量。
 // 品目を登録していない作付は、名前ごとに面積だけを数える。苗数は、定植・播種の実績があればその値で数える（plantingSpec）
 export function summarize({ beds, plantings, crops, fertilizers, logs = [] }) {
