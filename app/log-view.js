@@ -527,8 +527,10 @@ function renderDialog() {
     `</span></label>` +
     `<p class="muted log-date-note">${dateNote()}</p>` +
     typeSection() +
+    // 株の手入れとその他は、中身を作業の種類のすぐ下に出す。ほかの種類の仕様は対象の下
+    (WORK_ITEMS[draft.work_type] ? specSection() : "") +
     targetSection(choices, area) +
-    specSection() +
+    (WORK_ITEMS[draft.work_type] ? "" : specSection()) +
     inputSection(items) +
     linkSection(items) +
     `<label>メモ<textarea data-f="note" rows="2">${escapeHtml(draft.note)}</textarea></label>` +

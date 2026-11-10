@@ -222,6 +222,21 @@ test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴
   assert.deepEqual(page.errors, []);
 });
 
+test("株の手入れ・その他の中身は、作業の種類のすぐ下（対象の上）に出る", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.click("#logAddBtn");
+  await page.click('dialog.log-dialog [data-act="type"][data-code="care"]');
+  const headings = () => page.run('[...document.querySelectorAll("dialog.log-dialog .log-section > h3, dialog.log-dialog .log-section-head > h3")].map((h) => h.textContent)');
+  const order = await headings();
+  assert.deepEqual(order.slice(order.indexOf("作業の種類"), order.indexOf("作業の種類") + 3), ["作業の種類", "中身", "対象"]);
+  assert.ok(await page.run('Boolean(document.querySelector(\'dialog.log-dialog [data-act="item"][data-item="鉢上げ"]\'))'), "鉢上げを選べる");
+  // 閉じると履歴を 1 つ戻す。戻り終わるのを待ってから次のテストへ
+  await page.click('dialog.log-dialog [data-act="close"]');
+  await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
+  assert.deepEqual(page.errors, []);
+});
+
 test("1 穴あたりの量: 選んだ畝の穴の数を掛けた量で記録し、1 穴の量も残す", options, async () => {
   const data = seed();
   // 畝は 16 m。株間 20 cm・2 条なら 80 株 × 2 条 = 160 穴。12 本で 1,920 穴
