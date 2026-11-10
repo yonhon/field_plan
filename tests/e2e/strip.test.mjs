@@ -336,3 +336,41 @@ test("作付を保存できないとき: 窓で知らせ、ほかの保存が終
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).beds.length === 2`, "畝の保存");
   assert.match(await page.run(`document.getElementById("saveStatus").textContent`), /保存に失敗しました/);
 });
+
+test("株の並びと苗数: 定植の実績に株間と条数があれば、その値で描く", options, async () => {
+  const data = seed(2);
+  data.fields[0].active_plan_id = "p1";
+  Object.assign(data.crops[0], { plant_gap_cm: 15, row_gap_cm: 15, row_count: 4 });
+  data.plantings = [1, 2].map((seq) => ({ id: `pl${seq}`, plan_id: "p1", bed_id: `bed${seq}`, seq: 1, crop_id: "c1", crop_name: "試験菜" }));
+  // 畝 1 だけ、株間 20 cm・条間 20 cm・3 条で植えた
+  data.workLogs = [
+    {
+      id: "l1",
+      field_id: "f1",
+      date: "2026-01-02",
+      end_date: null,
+      work_type: "plant",
+      finishes: true,
+      spec: { plant_gap_cm: 20, row_gap_cm: 20, row_count: 3 },
+      note: "",
+      created_at: AT,
+      targets: [{ id: "t1", log_id: "l1", planting_id: "pl1", bed_id: "bed1", block_id: "b1", work_id: null, label: "A 畝1 試験菜", crop_name: "試験菜", area_m2: 16, spray_l: null }],
+      inputs: [],
+    },
+  ];
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(`document.querySelectorAll("#strip .strip-bed").length === 2`, "図に畝が 2 本出る");
+  const box = (id) =>
+    page.run(`(() => {
+      const box = document.querySelector('#strip .strip-bed[data-bed="${id}"]');
+      return { plants: box.querySelectorAll(".strip-plant").length, spacing: box.querySelector(".strip-spacing")?.innerHTML };
+    })()`);
+  // 〇は条の数 × 2 株
+  assert.deepEqual(await box("bed1"), { plants: 6, spacing: "条間20cm<br>株間20cm" });
+  assert.deepEqual(await box("bed2"), { plants: 8, spacing: "条間15cm<br>株間15cm" });
+  // 苗数: 16 m ÷ 0.2 m = 80 株 × 3 条、16 m ÷ 0.15 m = 106 株 × 4 条
+  const numbers = await page.run(`[...document.querySelectorAll("#strip .strip-numbers")].map((line) => line.textContent).join("/")`);
+  assert.equal(numbers, "苗 240/苗 424");
+  assert.deepEqual(page.errors, []);
+});
