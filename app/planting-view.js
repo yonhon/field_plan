@@ -639,7 +639,12 @@ function tableHtml(c, mode, actuals, logs) {
     if (!showPlan && !actual && !work.cancelled_on) {
       continue;
     }
-    entries.push({ work, linked, actual, key: (showPlan ? work.plan_start : actual?.start) || work.plan_start || "9999-12-31", end: work.plan_end || work.plan_start });
+    // 並べる日は、実績があれば実績の日、なければ計画の日（実績の行と、計画にない実績の行が、日付の順に並ぶように）。
+    // 実績を出さない表示（計画だけ）では、計画の日
+    const done = showActual ? actual : null;
+    const key = done?.start || work.plan_start || "9999-12-31";
+    const end = done ? done.end || done.last : work.plan_end || work.plan_start;
+    entries.push({ work, linked, actual, key, end });
   }
   if (showActual) {
     for (const log of logs) {

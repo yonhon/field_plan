@@ -1790,11 +1790,14 @@ function appendBeds(blockId, widthCm, aisleCm, count, side = "long") {
   }
   const along = (point) => point[0] * Math.cos(angle) + point[1] * Math.sin(angle);
   const start = Math.min(...last.shape.map(along));
+  const end = Math.max(...last.shape.map(along));
+  // 前と後ろの隙間は、最後の畝のとおりに別々に取る（畝が区画の片側に寄っていても入るように）
   return addBedsToBlock(block, {
     ...sizes,
     angle,
     endGap: Math.max(start - Math.min(...block.shape.map(along)), 0),
-    length: Math.max(...last.shape.map(along)) - start,
+    tailGap: Math.max(Math.max(...block.shape.map(along)) - end, 0),
+    length: end - start,
   });
 }
 

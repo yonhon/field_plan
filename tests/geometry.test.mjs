@@ -172,6 +172,14 @@ test("区画の中に畝を並べる", () => {
   assert.equal(short.beds.length, 6);
   near(rectSize(short.beds[0]).length, 6);
 
+  // 前と後ろの隙間が違う（畝が片側に寄っている）: 前 3.9 m・後ろ 0.5 m なら、長さ 15.6 m の畝が入る。
+  // 前の隙間を後ろにも取ると、20 - 3.9 * 2 = 12.2 m しかなく入らない
+  const shifted = layoutBeds(block, { ...options, endGap: 3.9, tailGap: 0.5, length: 15.6, count: 1 });
+  assert.equal(shifted.beds.length, 1);
+  assert.equal(shifted.outside, 0);
+  near(rectSize(shifted.beds[0]).length, 15.6);
+  assert.equal(layoutBeds(block, { ...options, endGap: 3.9, length: 15.6, count: 1 }).beds.length, 0);
+
   // 入らない寸法では 1 本も並ばない
   assert.equal(layoutBeds(block, { ...options, width: 12 }).beds.length, 0);
 });

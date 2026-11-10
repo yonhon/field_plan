@@ -370,11 +370,12 @@ export function polygonInside(inner, outer) {
 
 // 区画の中に、畝の四角形を並べる。
 //   angle   畝の長い辺の向き
-//   width   畝幅、aisle 左右の隙間、endGap 前後の隙間、length 畝の長さ（null なら入るだけ）
+//   width   畝幅、aisle 左右の隙間、endGap 前の隙間（と、縦に並ぶ畝どうしの隙間）、tailGap 後ろの隙間（省くと endGap と同じ）
+//   length  畝の長さ（null なら入るだけ）
 //   count   並べる本数（null なら入るだけ）
 //   existing いまある畝。その続きから並べる
 // 戻り値の strips は並べた本数（列の数）、outside は区画からはみ出した畝の数
-export function layoutBeds(block, { angle, width, aisle, endGap, length = null, count = null, existing = [] }) {
+export function layoutBeds(block, { angle, width, aisle, endGap, tailGap = endGap, length = null, count = null, existing = [] }) {
   const { u, v } = frame(angle);
   const pu = (p) => p[0] * u[0] + p[1] * u[1];
   const pv = (p) => p[0] * v[0] + p[1] * v[1];
@@ -383,7 +384,7 @@ export function layoutBeds(block, { angle, width, aisle, endGap, length = null, 
   const vs = block.map(pv);
   const u0 = Math.min(...us);
   const v1 = Math.max(...vs);
-  const room = Math.max(...us) - u0 - endGap * 2;
+  const room = Math.max(...us) - u0 - endGap - tailGap;
   const bedLength = length ?? room;
   const perStrip = length ? Math.floor((room + endGap + 1e-6) / (length + endGap)) : 1;
   const beds = [];
