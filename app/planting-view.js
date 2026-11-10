@@ -700,7 +700,7 @@ function workRow(c, { work, linked, actual }, mode, today) {
   const planLines = [work.note, work.work_type === "plant" && c.planting ? plannedSpecText(c.planting) : ""].filter(Boolean);
   const planCell = showPlan
     ? `<td class="detail-plan" data-plan="${work.id}"><a href="#" data-plan-edit="${work.id}">${work.plan_start ? rangeText(work.plan_start, work.plan_end) : "日付なし"}</a>` +
-      planLines.map((line) => `<br><span class="muted">${escapeHtml(line)}</span>`).join("") +
+      planLines.map((line) => `<br><span class="detail-line">${escapeHtml(line)}</span>`).join("") +
       "</td>"
     : "";
   let actualCell = "";
