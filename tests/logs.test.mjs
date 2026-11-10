@@ -458,6 +458,9 @@ test("工程表の帯の置き方。上下に分けるのは、1 日の作業ど
 
 test("資材の文: 1 穴あたりの量で決めたものは、1 穴の量も書く", () => {
   assert.equal(inputText({ kind: "fertilizer", name: "化成肥料", amount: 2468, unit: "g", per_hole: 2 }), "化成肥料 2468 g（1 穴 2 g）");
+  // 量が kg なら 1 穴は g、L なら mL
+  assert.equal(inputText({ kind: "fertilizer", name: "化成肥料", amount: 2.468, unit: "kg", per_hole: 2 }), "化成肥料 2.468 kg（1 穴 2 g）");
+  assert.equal(inputText({ kind: "fertilizer", name: "液肥", amount: 1.5, unit: "L", per_hole: 5 }), "液肥 1.5 L（1 穴 5 mL）");
   assert.equal(inputText({ kind: "fertilizer", name: "化成肥料", amount: 20, unit: "kg", per_hole: null }), "化成肥料 20 kg");
   assert.equal(inputText({ kind: "fertilizer", name: "化成肥料", amount: 20, unit: "kg" }), "化成肥料 20 kg");
   // DB の数は文字で届くことがある

@@ -324,9 +324,14 @@ export function specText(type, spec = {}) {
     .join("・");
 }
 
-// 記録の資材を短い文にする。例: テスト乳剤 2000 倍 散布、化成肥料 2468 g（1 穴 2 g）
+// 1 穴あたりの量の単位。量の単位が kg なら g、L なら mL（1 穴あたりは小さい量なので）
+export const perHoleUnit = (unit) => ({ kg: "g", L: "mL" })[unit] || unit;
+// 1 穴あたりの量の単位で数えた量を、量の単位に直すときに割る数
+export const perHoleScale = (unit) => (unit === "kg" || unit === "L" ? 1000 : 1);
+
+// 記録の資材を短い文にする。例: テスト乳剤 2000 倍 散布、化成肥料 3.84 kg（1 穴 2 g）
 export function inputText(input) {
-  const perHole = input.per_hole !== null && input.per_hole !== undefined ? `1 穴 ${Number(input.per_hole)} ${input.unit}` : "";
+  const perHole = input.per_hole !== null && input.per_hole !== undefined ? `1 穴 ${Number(input.per_hole)} ${perHoleUnit(input.unit)}` : "";
   if (input.kind === "pesticide") {
     return [input.name || "農薬", input.dilution ? `${input.dilution} 倍` : "", input.method, perHole].filter(Boolean).join(" ");
   }

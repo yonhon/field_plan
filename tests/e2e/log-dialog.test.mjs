@@ -234,7 +234,6 @@ test("1 穴あたりの量: 選んだ畝の穴の数を掛けた量で記録し�
   await page.click('dialog.log-dialog [data-act="type"][data-code="topdress"]');
   await page.click('dialog.log-dialog [data-act="group"]');
   await page.setValue('dialog.log-dialog select[data-in="0"][data-k="fertilizer_id"]', "fe1");
-  await page.setValue('dialog.log-dialog select[data-in="0"][data-k="unit"]', "g");
   const PER_HOLE = 'dialog.log-dialog [data-in="0"][data-k="per_hole"]';
   const AMOUNT = 'dialog.log-dialog [data-in="0"][data-k="amount"]';
   await page.run(`(() => {
@@ -243,13 +242,22 @@ test("1 穴あたりの量: 選んだ畝の穴の数を掛けた量で記録し�
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
   })()`);
+  // 量の単位は kg のまま。1 穴あたりは g で入れ、量は kg に直す
   await page.waitFor(`document.querySelector(${JSON.stringify(AMOUNT)}).disabled`, "量の欄が計算の欄になる");
-  assert.equal(await page.run(`document.querySelector(${JSON.stringify(AMOUNT)}).value`), "3840");
-  assert.equal(await page.run(`document.querySelector('dialog.log-dialog [data-hole="0"]').textContent`), "1 穴 2 g × 1,920 穴 = 3,840 g（3.84 kg）");
+  assert.equal(await page.run(`document.querySelector(${JSON.stringify(PER_HOLE)}).closest("label").firstChild.textContent`), "1 穴あたり（g）");
+  assert.equal(await page.run(`document.querySelector(${JSON.stringify(AMOUNT)}).value`), "3.84");
+  const HOLE = 'dialog.log-dialog [data-hole="0"]';
+  assert.equal(await page.run(`document.querySelector(${JSON.stringify(HOLE)}).textContent`), "1 穴 2 g × 1,920 穴 = 3,840 g（3.84 kg）");
+  // 量の単位を g にすると、1 穴あたりは g のままで、量は g で入る
+  await page.setValue('dialog.log-dialog select[data-in="0"][data-k="unit"]', "g");
+  await page.waitFor(`document.querySelector(${JSON.stringify(AMOUNT)}).value === "3840"`, "量を g で出す");
+  assert.equal(await page.run(`document.querySelector(${JSON.stringify(HOLE)}).textContent`), "1 穴 2 g × 1,920 穴 = 3,840 g（3.84 kg）");
+  await page.setValue('dialog.log-dialog select[data-in="0"][data-k="unit"]', "kg");
+  await page.waitFor(`document.querySelector(${JSON.stringify(AMOUNT)}).value === "3.84"`, "量を kg で出す");
   await page.click('dialog.log-dialog [data-act="save"]');
   await page.waitFor(`!document.querySelector("dialog.log-dialog[open]")`, "窓が閉じる");
   const input = (await page.saved()).workLogs[0].inputs[0];
-  assert.deepEqual([input.name, input.amount, input.unit, input.per_hole], ["試験の肥料", 3840, "g", 2]);
+  assert.deepEqual([input.name, input.amount, input.unit, input.per_hole], ["試験の肥料", 3.84, "kg", 2]);
 
   // 区画で選ぶときは、1 穴あたりの欄を出さない
   await page.click("#logAddBtn");

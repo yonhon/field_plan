@@ -4,7 +4,7 @@ import { WORK_COLORS, WORK_ITEMS, addDays, diffDays, isManagement, localToday, w
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { noteChange } from "./history.js";
 import { record } from "./journal.js";
-import { SPEC_FIELDS, formatAmount, logEnd, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
+import { SPEC_FIELDS, formatAmount, logEnd, perHoleScale, perHoleUnit, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
 import { draw } from "./draw.js";
 import { holesOf } from "./crops.js";
@@ -41,7 +41,8 @@ const fmt = (value, digits = 1) => (value === null ? "-" : value.toFixed(digits)
 
 // ---- 1 穴あたりの量 ----
 // 追肥の肥料や、植え穴に入れる粒剤などは、1 穴あたりの量を入れると、選んだ畝の穴の数（苗数）を掛けて量を出す。
-// 記録の量は、いつも使った合計（1 穴あたりの量は、per_hole に残す）。区画には穴がないので、畝を選ぶときだけ使う
+// 記録の量は、いつも使った合計（1 穴あたりの量は、per_hole に残す）。区画には穴がないので、畝を選ぶときだけ使う。
+// 1 穴あたりは、量の単位が kg なら g、L なら mL で入れる（perHoleUnit）
 const perHoleUsable = (input) => draft.mode === "crops" && (input.kind === "pesticide" || input.kind === "fertilizer");
 const perHole = (input) => (perHoleUsable(input) ? num(input.per_hole) : null);
 const pickedHoles = () => holesOf(pickedItems(), data, state().logs || []);
@@ -55,13 +56,13 @@ function applyPerHole() {
   for (const input of draft.inputs) {
     const rate = perHole(input);
     if (rate !== null) {
-      input.amount = holes.missing.length || !holes.total ? null : Math.round(rate * holes.total * 1000) / 1000;
+      input.amount = holes.missing.length || !holes.total ? null : Math.round((rate * holes.total * 1000) / perHoleScale(input.unit)) / 1000;
     }
   }
   return holes;
 }
 
-// 量をどう出したかの文。例: 1 穴 2 g × 1,234 穴 = 2,468 g（2.47 kg）
+// 量をどう出したかの文。例: 1 穴 2 g × 1,234 穴 = 2,468 g（2.47 kg）。kg・L で入れるときは、いつも kg・L の量も書く
 function perHoleText(input, holes) {
   const rate = perHole(input);
   if (rate === null || !holes) {
@@ -74,9 +75,11 @@ function perHoleText(input, holes) {
     return "対象の畝を選ぶと、穴の数を掛けて量を出します。";
   }
   const number = (value) => value.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+  const unit = perHoleUnit(input.unit);
   const total = rate * holes.total;
-  const larger = { g: "kg", mL: "L" }[input.unit];
-  return `1 穴 ${number(rate)} ${input.unit} × ${number(holes.total)} 穴 = ${number(total)} ${input.unit}${larger && total >= 1000 ? `（${number(total / 1000)} ${larger}）` : ""}`;
+  const larger = { g: "kg", mL: "L" }[unit];
+  const showLarger = larger && (perHoleScale(input.unit) > 1 || total >= 1000);
+  return `1 穴 ${number(rate)} ${unit} × ${number(holes.total)} 穴 = ${number(total)} ${unit}${showLarger ? `（${number(total / 1000)} ${larger}）` : ""}`;
 }
 
 // 1 穴あたりの量を入れたのに、量を出せないときの知らせ。出せれば null
@@ -708,7 +711,7 @@ function inputRow(input, i) {
   const remove = `<button type="button" class="text-btn danger" data-act="removeInput" data-i="${i}">外す</button>`;
   // 1 穴あたりの量を入れたら、量の欄は、穴の数を掛けて出した値を見せるだけにする
   const byHole = perHole(input) !== null;
-  const perHoleField = perHoleUsable(input) ? field("per_hole", `1 穴あたり（${escapeHtml(input.unit || "")}）`, input.per_hole, numberAttrs) : "";
+  const perHoleField = perHoleUsable(input) ? field("per_hole", `1 穴あたり（${escapeHtml(perHoleUnit(input.unit || ""))}）`, input.per_hole, numberAttrs) : "";
   const amountField = (label) => field("amount", byHole ? `${label}（1 穴あたりから）` : label, input.amount, `${numberAttrs}${byHole ? " disabled" : ""}`);
   const holeHint = perHoleUsable(input) ? `<p class="muted" data-hole="${i}">${escapeHtml(perHoleText(input, byHole ? pickedHoles() : null))}</p>` : "";
   if (input.kind === "pesticide") {

@@ -274,7 +274,7 @@ create table if not exists field.work_log_inputs (
   unit text not null default ''
 );
 
--- 1 穴あたりの量（unit の単位）。入れたときは、amount は対象の畝の穴の数（苗数）を掛けた合計
+-- 1 穴あたりの量。unit が kg なら g、L なら mL、ほかは unit の単位。入れたときは、amount は対象の畝の穴の数（苗数）を掛けた合計
 alter table field.work_log_inputs add column if not exists per_hole numeric;
 
 create index if not exists work_log_inputs_log_idx on field.work_log_inputs (log_id);
