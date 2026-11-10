@@ -1,6 +1,6 @@
 // 日程の画面の「区画と畝」。区画を畝の端の側から見た横長の図で、畝の下に、その畝の作業を縦に並べる。
 // 横は実寸に比例する。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わる。
-import { cropLabel, plantingNumbers } from "./crops.js";
+import { cropLabel, plantingNumbers, plantingSpec } from "./crops.js";
 import { notify } from "./dialog.js";
 import { bedAngle, edgeAngles, rectSize, viewAxes } from "./geometry.js";
 import { record } from "./journal.js";
@@ -68,7 +68,7 @@ function numbersLine(bed, planting) {
     return "";
   }
   const fertilizer = ctx.state.fertilizers.find((item) => item.id === crop.fertilizer_id);
-  const numbers = plantingNumbers(bed.shape, crop, fertilizer);
+  const numbers = plantingNumbers(bed.shape, crop, fertilizer, plantingSpec(planting, crop, ctx.state.logs || []));
   const parts = [];
   if (numbers.seedlings !== null) {
     parts.push(`苗 ${numbers.seedlings.toLocaleString("ja-JP")}`);

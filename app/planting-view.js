@@ -1,6 +1,6 @@
 // 「作付の詳細」の画面。作付 1 つ（または区画 1 つ）について、計画と実績を 1 つの画面で見る。
 // 工程表の行の名前から開く。表示（計画／実績／計画と実績）は工程表と共有する
-import { plantingNumbers } from "./crops.js";
+import { plantingNumbers, plantingSpec } from "./crops.js";
 import { confirmAction, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { openLogEditor, openPlanEditor, uncancelWork } from "./log-view.js";
@@ -491,9 +491,10 @@ function headHtml(c, active) {
     const live = state().beds.filter((bed) => bed.block_id === c.block.id && existsOn(bed.start_date, bed.removed_on, today));
     const area = bedAreas(c.block, live.some((bed) => bed.id === c.bed.id) ? live : [c.bed]).get(c.bed.id);
     const end = harvestEnd(c.ownWorks);
-    // 苗数は、「区画と畝」の図と同じく、畝の寸法と品目の設定値から計算する（品目を登録していない作付には出さない）
+    // 苗数は、「区画と畝」の図と同じく、畝の寸法と株間・条数から計算する。株間・条数は、定植・播種の実績があればその値
+    // （品目を登録していない作付には出さない）
     const fertilizer = crop && state().fertilizers.find((item) => item.id === crop.fertilizer_id);
-    const seedlings = crop ? plantingNumbers(c.bed.shape, crop, fertilizer).seedlings : null;
+    const seedlings = crop ? plantingNumbers(c.bed.shape, crop, fertilizer, plantingSpec(c.planting, crop, state().logs || [])).seedlings : null;
     info = [
       mulch ? "マルチ" : "裸地",
       area ? `畝＋通路 ${area.toFixed(1)} ㎡` : "",

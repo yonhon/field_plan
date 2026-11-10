@@ -20,7 +20,7 @@ import {
   workName,
   worksRange,
 } from "./schedule.js";
-import { cropLabel, plantingNumbers, summarize } from "./crops.js";
+import { cropLabel, plantingNumbers, plantingSpec, summarize } from "./crops.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor } from "./log-view.js";
@@ -630,7 +630,7 @@ function numbersText(planting) {
   const bed = state().beds.find((item) => item.id === planting.bed_id);
   const crop = cropOf(planting);
   const fertilizer = state().fertilizers.find((item) => item.id === crop?.fertilizer_id);
-  const numbers = plantingNumbers(bed.shape, crop, fertilizer);
+  const numbers = plantingNumbers(bed.shape, crop, fertilizer, plantingSpec(planting, crop, state().logs || []));
   const parts = [`畝 ${Math.round(numbers.width * 100)} cm × ${numbers.length.toFixed(1)} m（${numbers.area.toFixed(1)} ㎡）`];
   if (numbers.seedlings !== null) {
     parts.push(`苗 ${numbers.seedlings.toLocaleString("ja-JP")}`);
@@ -646,7 +646,7 @@ function numbersText(planting) {
 
 // プラン全体の、品目ごとの苗数と、肥料ごとの量
 function renderSummary() {
-  const summary = summarize(state());
+  const summary = summarize({ ...state(), logs: state().logs || [] });
   $("summaryPanel").hidden = summary.crops.length === 0;
   const number = (value, digits = 0) => value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   draw(

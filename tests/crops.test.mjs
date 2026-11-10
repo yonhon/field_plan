@@ -1,7 +1,7 @@
 // 苗数と施肥量の計算（app/crops.js）と、品目ごとの日数（app/schedule.js）のテスト。実行: node --test "tests/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cropLabel, plantingNumbers, summarize } from "../app/crops.js";
+import { cropLabel, plantingNumbers, plantingSpec, summarize } from "../app/crops.js";
 import { DEFAULT_WORK_TYPES as types, TEMPLATES, planProblems, scheduleForward, typesForCrop } from "../app/schedule.js";
 
 const near = (actual, expected, digits = 6) => assert.ok(Math.abs(actual - expected) < 10 ** -digits, `${actual} != ${expected}`);
@@ -69,6 +69,35 @@ test("プラン全体の集計", () => {
   assert.equal(rows["未登録の品目"].registered, false);
   assert.equal(rows["未登録の品目"].seedlings, 0);
   assert.deepEqual(summary.fertilizers.map((row) => row.name), ["化成 15", "被覆 18"]);
+});
+
+test("株間と条数: 定植の実績、作付の値、品目の設定値の順に探す", () => {
+  const crop = { id: "c1", plant_gap_cm: 15, row_gap_cm: 20, row_count: 4, staggered: false };
+  const planting = { id: "p1", crop_id: "c1" };
+  const plant = (id, date, spec, plantingId = "p1", workType = "plant") => ({ id, date, work_type: workType, spec, targets: [{ planting_id: plantingId }] });
+  // 実績がなければ、品目の設定値
+  assert.deepEqual(plantingSpec(planting, crop, []), { plant_gap_cm: 15, row_gap_cm: 20, row_count: 4, staggered: false });
+  // 作付の値は、品目の設定値より先
+  assert.equal(plantingSpec({ ...planting, row_count: 2 }, crop, []).row_count, 2);
+  // 実績の値は、作付の値より先。実績にない項目は、作付か品目の値
+  const logs = [plant("a", "2026-10-15", { plant_gap_cm: 20, row_count: 3, seeds: 4 })];
+  assert.deepEqual(plantingSpec({ ...planting, row_count: 2, row_gap_cm: 25 }, crop, logs), { plant_gap_cm: 20, row_gap_cm: 25, row_count: 3, staggered: false });
+  // いちばん新しい実績。株間などを記録していない実績、ほかの作付や、定植でない記録は見ない
+  const more = [
+    ...logs,
+    plant("b", "2026-10-20", { plant_gap_cm: 25, row_count: 2 }),
+    plant("c", "2026-10-25", { seeds: 2 }),
+    plant("d", "2026-10-26", { plant_gap_cm: 40, row_count: 1 }, "p2"),
+    plant("e", "2026-10-27", { plant_gap_cm: 50, row_count: 1 }, "p1", "spray"),
+  ];
+  assert.deepEqual([plantingSpec(planting, crop, more).plant_gap_cm, plantingSpec(planting, crop, more).row_count], [25, 2]);
+
+  // 苗数は、渡した株間と条数で数える: 24 ÷ 0.2 = 120 株 × 3 条
+  assert.equal(plantingNumbers(bed(70, 24), crop, null, plantingSpec(planting, crop, logs)).seedlings, 360);
+  assert.equal(plantingNumbers(bed(70, 24), crop, null).seedlings, 640);
+  // 集計も、実績の株間と条数で数える
+  const summary = summarize({ beds: [{ id: "b1", shape: bed(70, 24) }], plantings: [{ ...planting, bed_id: "b1" }], crops: [{ ...crop, name: "試験菜" }], fertilizers: [], logs });
+  assert.equal(summary.crops[0].seedlings, 360);
 });
 
 test("品目の日数で、収穫までの間隔と収穫の日数が決まる", () => {

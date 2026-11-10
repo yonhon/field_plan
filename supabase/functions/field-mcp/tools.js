@@ -1,7 +1,7 @@
 // 計画と作業の記録を返す道具。data は index.ts が DB から読んだもの（表ごとの行の配列と、アプリの更新の一覧）。
 // 圃場はいくつもある。品目と肥料のほかは、どの圃場の話かを毎回 field で選ぶ。
 // 面積、苗数、肥料の量、日程の無理、農薬の使用回数は、画面と同じ部品（lib/）で計算する。
-import { plantingNumbers, summarize, cropLabel } from "./lib/crops.js";
+import { plantingNumbers, plantingSpec, summarize, cropLabel } from "./lib/crops.js";
 import { polygonArea, rectSize } from "./lib/geometry.js";
 import { firstHarvestDay, inputText, logEnd, specText, usageTable } from "./lib/logs.js";
 import { productCodes } from "./lib/rac.js";
@@ -263,7 +263,7 @@ export const TOOLS = [
                     const works = part.works.filter((work) => work.planting_id === planting.id).sort(bySeq);
                     const crop = part.cropOf(planting);
                     const fertilizer = crop ? data.fertilizers.find((item) => item.id === crop.fertilizer_id) || null : null;
-                    const numbers = plantingNumbers(bed.shape, crop, fertilizer);
+                    const numbers = plantingNumbers(bed.shape, crop, fertilizer, plantingSpec(planting, crop, data.workLogs || []));
                     return {
                       no: planting.seq,
                       crop: crop ? cropLabel(crop) : planting.crop_name || "品目なし",
@@ -278,7 +278,7 @@ export const TOOLS = [
             }),
         })),
         totals: (() => {
-          const summary = summarize({ beds: part.beds, plantings: part.plantings, crops: data.crops, fertilizers: data.fertilizers });
+          const summary = summarize({ beds: part.beds, plantings: part.plantings, crops: data.crops, fertilizers: data.fertilizers, logs: data.workLogs || [] });
           return {
             crops: summary.crops.map((row) => ({
               crop: row.name,
