@@ -224,7 +224,14 @@ export async function openBrowser() {
     chrome.kill();
     await new Promise((resolve) => server.close(resolve));
     await Promise.race([exited, sleep(5000)]);
-    rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    // Chrome の子のプロセスが、終わったあともしばらくファイルをつかんでいることがある。消せなければ残す（OS の一時フォルダーの中）
+    try {
+      rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
+    } catch (error) {
+      if (error.code !== "EPERM" && error.code !== "EBUSY") {
+        throw error;
+      }
+    }
   };
 
   return {
