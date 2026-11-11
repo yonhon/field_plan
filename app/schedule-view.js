@@ -923,13 +923,16 @@ function newWork(owner, workType, seq) {
 const ownedBy = (work, owner) => (owner.block_id ? work.block_id === owner.block_id : work.planting_id === owner.planting_id);
 
 // ある区画または作付の作業を、まるごと入れ替えて保存する
+// 入れ替えるのは工程の作業だけ。管理作業（防除などの計画）は「作業の計画」の表に出していないので、そのまま残す
+// （入れ替えの相手に含めると、表に出ていない管理作業の計画が、なくなった行として消えてしまう）
 async function replaceWorks(owner, works) {
-  const old = state().works.filter((work) => ownedBy(work, owner));
+  const replaced = (work) => ownedBy(work, owner) && !isManagement(work.work_type);
+  const old = state().works.filter(replaced);
   const kept = new Set(works.map((work) => work.id));
   works.forEach((work, index) => {
     work.seq = index + 1;
   });
-  state().works = [...state().works.filter((work) => !ownedBy(work, owner)), ...works];
+  state().works = [...state().works.filter((work) => !replaced(work)), ...works];
   await store().remove("works", old.filter((work) => !kept.has(work.id)).map((work) => work.id));
   await store().upsert("works", works);
 }
