@@ -318,6 +318,20 @@
       <p id="scheduleEmpty" class="muted" hidden>圃場図で耕起対象区画を作ると、ここで区画と畝の日程を作れます。</p>
 
       <div id="scheduleBody" class="schedule-body">
+        <!-- 区画の頭（前後の区画、名前と面積・畝・苗、入力と日記のボタン、表示の切り替え）。planting-view.js が描く -->
+        <div id="blockHead" class="block-head"></div>
+        <!-- 苗と肥料の集計（この区画）。頭の面積・畝・苗の行を押すと開く -->
+        <section id="blockSummary" class="panel" hidden>
+          <h2>苗と肥料の集計（この区画）</h2>
+          <div class="table-scroll">
+            <table class="work-table summary-table">
+              <thead><tr><th>品目</th><th>作付の数</th><th>面積（㎡）</th><th>苗数</th><th>肥料</th></tr></thead>
+              <tbody id="cropSummary"></tbody>
+            </table>
+          </div>
+          <p id="fertilizerSummary" class="muted"></p>
+        </section>
+
         <section class="panel">
           <div class="panel-heading">
             <h2>区画と畝</h2>
@@ -355,16 +369,6 @@
             <p class="muted">手前は、圃場図の「圃場の外形」で決めた視点に近い側の端です。この図の左右も、その視点から見た左右です。手前の隙間は、区画の手前の端から畝の端までの距離です。足した畝の長さと前後の位置は、いまある最後の畝に合わせて入ります。</p>
           </details>
           <div class="strip-scroll"><div id="strip" class="strip"></div></div>
-          <details id="summaryFold" class="strip-detail" hidden>
-            <summary>苗と肥料の集計（この区画）</summary>
-            <div class="table-scroll">
-              <table class="work-table summary-table">
-                <thead><tr><th>品目</th><th>作付の数</th><th>面積（㎡）</th><th>苗数</th><th>肥料</th></tr></thead>
-                <tbody id="cropSummary"></tbody>
-              </table>
-            </div>
-            <p id="fertilizerSummary" class="muted"></p>
-          </details>
         </section>
 
         <section class="panel">

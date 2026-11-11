@@ -779,10 +779,9 @@ function numbersText(planting) {
   return parts.join(" ／ ");
 }
 
-// 選んでいる区画の、品目ごとの苗数と、肥料ごとの量（「区画と畝」の中の折りたたみ）
+// 選んでいる区画の、品目ごとの苗数と、肥料ごとの量。区画の頭の面積・畝・苗の行を押すと開く（planting-view.js）
 function renderSummary() {
   const summary = summarize({ ...state(), beds: blockBeds(sel.blockId), logs: state().logs || [] });
-  $("summaryFold").hidden = summary.crops.length === 0;
   const number = (value, digits = 0) => value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   draw(
     $("cropSummary"),

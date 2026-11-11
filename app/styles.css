@@ -3565,3 +3565,17 @@ button.diary-work:hover {
   font-size: 14px;
   margin-bottom: 6px;
 }
+
+/* 日程の画面の区画の頭。作付の詳細の頭と同じ形 */
+.block-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 面積・畝・苗の行は、押すと苗と肥料の集計を開く */
+.detail-summary-btn {
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+}

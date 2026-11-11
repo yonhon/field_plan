@@ -299,8 +299,8 @@ test("作付の詳細: 頭の「日記 n 節（最新 M/D）」で、その作�
   // 区画（前の区画の詳細の URL は、日程の画面でその区画を開く）は、区画の中の作付に付いた日記も数え、一覧にも出す
   await page.run(`location.hash = "#detail/block/b1"`);
   await page.waitFor(`location.hash === "#schedule/block/b1" && !document.getElementById("scheduleView").hidden`, "日程の画面で区画を開く");
-  await page.waitFor(`document.querySelector('#blockRecord [data-act="diary"]')?.textContent === "日記 3 節（最新 10/8）"`, "区画の日記のボタン");
-  await page.click('#blockRecord [data-act="diary"]');
+  await page.waitFor(`document.querySelector('#blockHead [data-act="diary"]')?.textContent === "日記 3 節（最新 10/8）"`, "区画の日記のボタン");
+  await page.click('#blockHead [data-act="diary"]');
   await page.waitFor(`document.querySelectorAll("#diaryMain .diary-day").length === 3`, "この区画の日記の一覧");
   assert.equal(await page.run(`document.querySelector("#diaryMain .diary-tag-filters").textContent`), "区画1 ×");
   assert.deepEqual(page.errors, []);

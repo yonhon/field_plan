@@ -1,13 +1,14 @@
 // 「作付の詳細」の画面。作付 1 つについて、計画と実績を 1 つの画面で見る。
 // 工程表の行の名前や、日程の「区画・畝」の欄で畝を選んで開く。表示（計画／実績／計画と実績）は工程表と共有する。
 // 区画の計画と実績の表（日程の画面で区画を選んだときの「区画の作業の計画と実績」）も、ここで描く（renderBlockRecord）
-import { plantingNumbers, plantingSpec } from "./crops.js";
+import { plantingNumbers, plantingSpec, summarize } from "./crops.js";
 import { notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { openLogEditor, openPlanEditor, uncancelWork } from "./log-view.js";
 import { bedAreas, compressedAxis, cropDiffText, dayGap, firstHarvestDay, logEnd, shiftAfterActual, specText, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled, ingredientIconsHtml, inputHtml, nameHtml } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, isManagement, localToday, workName } from "./schedule.js";
+import { polygonArea } from "./geometry.js";
 import { ICON_LABELS, accumulate, addTwoWeek, fetchAreas, fetchStations, parseForecast, weatherIcon } from "./weather.js";
 import { officeForecast, weatherSettings } from "./weather-view.js";
 import {
@@ -38,8 +39,10 @@ const weather = { key: "", rows: null, loading: false };
 const forecast = { key: "", days: null, error: "", loading: false };
 let stationNames = null;
 let wx = null; // いま描いている作付の気象の表示（作業の表の列で使う）
-// 頭を 2 行（名前の行と、ボタンの行）にしているか。描き直すたびに測り直す（fitHead）
-let stacked = false;
+// 頭を 2 行（名前の行と、ボタンの行）にしているか。作付の詳細と、日程の画面の区画の頭で別々に、描き直すたびに測り直す（fitHead）
+const stacked = { plantingBody: false, blockHead: false };
+// 日程の画面の区画の頭で、苗と肥料の集計を開いているか
+let summaryOpen = false;
 // この作付（区画）に付いた日記の節。画面を開いたあとで読み、読み終えたら描き直す
 const diary = { key: "", rows: null, error: "" };
 
@@ -92,7 +95,7 @@ function context(t = target) {
 function neighbours(c) {
   const s = state();
   const list =
-    target.kind === "block"
+    !c.planting
       ? s.blocks.map((block) => ({ kind: "block", id: block.id, label: block.name }))
       : s.blocks.flatMap((block) =>
           s.beds
@@ -105,7 +108,7 @@ function neighbours(c) {
                 .map((planting) => ({ kind: "planting", id: planting.id, label: `畝${bed.seq} ${planting.crop_name}`.trim() }))
             )
         );
-  const index = list.findIndex((item) => item.id === target.id);
+  const index = list.findIndex((item) => item.id === (c.planting ? c.planting.id : c.block.id));
   return { prev: index > 0 ? list[index - 1] : null, next: index >= 0 && index < list.length - 1 ? list[index + 1] : null, all: list, c };
 }
 
@@ -147,8 +150,8 @@ function specSummary(spec) {
 
 // 頭が 1 行に収まるかを測る。収まらなければ、入力と日記のボタンを名前の下の行に回す（is-stacked）。
 // 1 行の形にしてから測るので、描き直しのたびと、幅が変わったときに呼ぶ（同じ処理の中で切り替えるので、ちらつかない）
-function fitHead() {
-  const head = $("plantingBody").querySelector(".detail-head");
+function fitHead(rootId = "plantingBody") {
+  const head = $(rootId).querySelector(".detail-head");
   if (!head) {
     return;
   }
@@ -163,7 +166,7 @@ function fitHead() {
     head.scrollWidth > head.clientWidth + 1 ||
     (title && h2 && title.getBoundingClientRect().height > h2.getBoundingClientRect().height + 4) ||
     (actions && button && actions.getBoundingClientRect().height > button.getBoundingClientRect().height + 4);
-  stacked = over;
+  stacked[rootId] = over;
   head.classList.toggle("is-stacked", over);
 }
 
@@ -218,11 +221,19 @@ export function renderBlockRecord(blockId) {
   const actuals = currentActuals();
   const logs = active ? (state().logs || []).filter((log) => log.targets.some(c.matches)) : [];
   wx = null; // 区画には定植の日がないので、気温の列は出さない
-  const note = active ? tableNote(mode) : "実績は、実際に使うプランを開くと出せます。";
+  const note = active ? tableNote(mode) : "";
+  // 頭は、作付の詳細と同じ形（前後の区画、名前と面積・畝・苗、入力と日記のボタン）。その下に表示の切り替え
+  draw(
+    $("blockHead"),
+    headHtml(c, active, "blockHead") +
+    `<div class="row detail-modes">${active ? `<div class="seg" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}` +
+    `${active ? "" : '<span class="muted">実績は、実際に使うプランを開くと出せます。</span>'}</div>`
+  );
+  $("blockSummary").hidden = !summaryOpen;
+  fitHead("blockHead");
   draw(
     $("blockRecord"),
-    `<div class="panel-heading"><h2>区画の作業の計画と実績</h2><div class="row">` +
-    `${active ? `<div class="seg" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}${diaryButtonHtml(c, active)}</div></div>` +
+    `<div class="panel-heading"><h2>区画の作業の計画と実績</h2></div>` +
     (note ? `<p class="muted">${note}</p>` : "") +
     (active ? diffHtml(c, actuals).replace('<section class="panel detail-diff">', '<div class="detail-diff block-diff">').replace(/<\/section>$/, "</div>") : "") +
     tableHtml(c, active ? mode : "plan", actuals, logs)
@@ -522,7 +533,27 @@ function forecastHtml() {
   );
 }
 
-function headHtml(c, active) {
+// 区画の頭の、面積・畝・苗の行。押すと、苗と肥料の集計を開く
+function blockInfoHtml(c) {
+  const today = localToday();
+  const beds = state().beds.filter((bed) => bed.block_id === c.block.id);
+  const live = beds.filter((bed) => existsOn(bed.start_date, bed.removed_on, today));
+  const summary = summarize({ ...state(), beds, logs: state().logs || [] });
+  const seedlings = summary.crops.reduce((sum, row) => sum + (row.seedlings || 0), 0);
+  const text = [
+    `区画 ${polygonArea(c.block.shape).toFixed(1)} ㎡`,
+    `畝 ${live.length} 本`,
+    seedlings ? `苗 ${seedlings.toLocaleString("ja-JP")}` : "",
+  ]
+    .filter(Boolean)
+    .join("・");
+  if (!summary.crops.length) {
+    return `<span class="muted detail-info">${escapeHtml(text)}</span>`;
+  }
+  return `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗と肥料の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>`;
+}
+
+function headHtml(c, active, rootId = "plantingBody") {
   const { prev, next } = neighbours(c);
   let title;
   let info = "";
@@ -548,21 +579,22 @@ function headHtml(c, active) {
       .filter(Boolean)
       .join("・");
   } else {
-    title = `${c.block.name}（区画の作業）`;
+    title = c.block.name;
   }
   // 前後の作付（区画）へは、日記の「‹ 前の日」「次の日 ›」と同じ、文字だけのボタン
   const go = (item, arrow) =>
     item
       ? `<button type="button" class="text-btn detail-go" data-act="go" data-kind="${item.kind}" data-id="${item.id}">${arrow === "prev" ? "‹ " : ""}${escapeHtml(item.label)}${arrow === "next" ? " ›" : ""}</button>`
       : "";
-  const recordButton = active && c.planting ? '<button type="button" class="primary-btn" data-act="record">＋ 作業を入力</button>' : "";
+  const recordButton = active ? '<button type="button" class="primary-btn" data-act="record">＋ 作業を入力</button>' : "";
   const actions = diaryButtonHtml(c, active) + recordButton;
   // 名前を真ん中に、前後のボタンを両側に置く。入力と日記のボタンは、名前の右隣に置いて 1 行に収まればそこに、
   // 収まらなければ名前の下の行に置く（fitHead が測って is-stacked を付ける）
   return (
-    `<div class="detail-head${stacked ? " is-stacked" : ""}">` +
+    `<div class="detail-head${stacked[rootId] ? " is-stacked" : ""}">` +
     `<div class="detail-side is-prev">${go(prev, "prev")}</div>` +
-    `<div class="detail-center"><div class="detail-title"><h2>${escapeHtml(title)}</h2>${info ? `<span class="muted detail-info">${escapeHtml(info)}</span>` : ""}</div>` +
+    `<div class="detail-center"><div class="detail-title"><h2>${escapeHtml(title)}</h2>` +
+    `${c.planting ? (info ? `<span class="muted detail-info">${escapeHtml(info)}</span>` : "") : blockInfoHtml(c)}</div>` +
     (actions ? `<div class="detail-actions">${actions}</div>` : "") +
     `</div><div class="detail-side is-next">${go(next, "next")}</div></div>`
   );
@@ -891,12 +923,13 @@ function onClick(event) {
   if (!el) {
     return;
   }
-  // 日程の画面の「区画の作業の計画と実績」で押したときは、その区画が相手
-  const t = event.currentTarget.id === "blockRecord" ? { kind: "block", id: recordBlockId } : target;
+  // 日程の画面の区画の頭と「区画の作業の計画と実績」で押したときは、その区画が相手
+  const inBlock = ["blockHead", "blockRecord"].includes(event.currentTarget.id);
+  const t = inBlock ? { kind: "block", id: recordBlockId } : target;
   if (el.dataset.ganttMode) {
     setGanttMode(el.dataset.ganttMode);
     // 表示は工程表と共有する。日程の画面で押したときは、工程表も描き直す
-    if (event.currentTarget.id === "blockRecord") {
+    if (inBlock) {
       ctx.refresh();
     } else {
       renderPlantingDetail();
@@ -936,7 +969,18 @@ function onClick(event) {
     return;
   }
   const act = el.dataset.act;
-  if (act === "go") {
+  if (act === "go" && el.dataset.kind === "block") {
+    // 隣の区画へ: 日程の画面でその区画を開く（履歴は積まない）
+    ctx.openInSchedule("block", el.dataset.id);
+    ctx.showView("schedule", { history: "replace" });
+    window.scrollTo(0, 0);
+  } else if (act === "summary") {
+    // 苗と肥料の集計の出し入れ
+    summaryOpen = !summaryOpen;
+    $("blockSummary").hidden = !summaryOpen;
+    el.setAttribute("aria-expanded", summaryOpen);
+    el.textContent = el.textContent.replace(/[▸▾]$/, summaryOpen ? "▾" : "▸");
+  } else if (act === "go") {
     // 隣の作付へは、履歴を積まずに URL を置き換える（戻るボタンで、日程にすぐ戻れるように）
     history.replaceState({ fieldPlanView: "planting" }, "", `#detail/${el.dataset.kind}/${el.dataset.id}`);
     openPlantingDetail(el.dataset.kind, el.dataset.id);
@@ -948,7 +992,7 @@ function onClick(event) {
       openDiary(c);
     }
   } else if (act === "record") {
-    openLogEditor(null, { plantingId: target.id });
+    openLogEditor(null, t.kind === "block" ? { blockId: t.id } : { plantingId: t.id });
   } else if (act === "reschedule") {
     reschedule(t);
   }
@@ -958,12 +1002,15 @@ export function initPlantingView(context) {
   ctx = context;
   $("plantingBody").addEventListener("click", onClick);
   $("blockRecord").addEventListener("click", onClick);
+  $("blockHead").addEventListener("click", onClick);
   // 幅が変わったら（ウィンドウの大きさ、スマホの向き）、頭が 1 行に収まるかを測り直す
-  let width = 0;
-  new ResizeObserver(([entry]) => {
-    if (Math.round(entry.contentRect.width) !== width) {
-      width = Math.round(entry.contentRect.width);
-      fitHead();
-    }
-  }).observe($("plantingBody"));
+  for (const rootId of ["plantingBody", "blockHead"]) {
+    let width = 0;
+    new ResizeObserver(([entry]) => {
+      if (Math.round(entry.contentRect.width) !== width) {
+        width = Math.round(entry.contentRect.width);
+        fitHead(rootId);
+      }
+    }).observe($(rootId));
+  }
 }
