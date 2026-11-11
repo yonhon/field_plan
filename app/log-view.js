@@ -510,7 +510,7 @@ function renderDialog() {
     `<button type="button" class="text-btn" data-act="close" aria-label="閉じる">閉じる</button></div>` +
     `<div class="log-body">` +
     (draft.switchable
-      ? `<div class="log-kinds" role="group" aria-label="入力するもの">` +
+      ? `<div class="log-kinds seg" role="group" aria-label="入力するもの">` +
         `<button type="button" class="chip-btn${draft.kind === "plan" ? " is-on" : ""}" data-act="kind" data-kind="plan" aria-pressed="${draft.kind === "plan"}">計画</button>` +
         `<button type="button" class="chip-btn${draft.kind === "actual" ? " is-on" : ""}" data-act="kind" data-kind="actual" aria-pressed="${draft.kind === "actual"}">実績</button></div>`
       : "") +
@@ -612,7 +612,7 @@ function typeSection() {
 
 function targetSection(choices, area) {
   const modes =
-    `<div class="log-modes" role="group" aria-label="対象の選び方">` +
+    `<div class="log-modes seg" role="group" aria-label="対象の選び方">` +
     `<button type="button" class="chip-btn${draft.mode === "crops" ? " is-on" : ""}" data-act="mode" data-mode="crops">品目で選ぶ</button>` +
     `<button type="button" class="chip-btn${draft.mode === "blocks" ? " is-on" : ""}" data-act="mode" data-mode="blocks">区画で選ぶ</button></div>`;
   let list;

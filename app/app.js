@@ -1109,6 +1109,7 @@ function enterMode(mode) {
   }
   document.querySelectorAll(".mode-btn").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.mode === mode);
+    button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
   });
   map.classList.toggle("is-drawing", mode !== "select");
   $("hint").textContent = HINTS[mode === "scale" && state.backdrop?.fitted ? "scaleFitted" : mode];

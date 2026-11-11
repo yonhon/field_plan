@@ -183,7 +183,7 @@ export function renderPlantingDetail() {
   draw(
     $("plantingBody"),
     headHtml(c, active) +
-    `<div class="row detail-modes">${active ? `<div class="log-modes" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}` +
+    `<div class="row detail-modes">${active ? `<div class="seg" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}` +
     `${active ? "" : '<span class="muted">実績は、実際に使うプランを開くと出せます。</span>'}</div>` +
     `<div class="detail-layout"><div class="detail-main">` +
     `<section class="panel">${timelineHtml(c, mode, actuals)}</section>` +

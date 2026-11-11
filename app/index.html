@@ -67,8 +67,12 @@
     <main id="appView" class="layout" hidden>
       <section class="map-area">
         <div class="toolbar edit-only" role="group" aria-label="操作">
-          <button class="mode-btn is-active" data-mode="select">選択・移動</button>
-          <button class="mode-btn" data-mode="outline">外形を描く</button>
+          <!-- 道具は全体で 1 つだけ選べる。組ごとにつなげ、使い終えると「選択・移動」に戻る -->
+          <span class="seg"><button class="mode-btn is-active" data-mode="select" aria-pressed="true">選択・移動</button></span>
+          <span class="zone-tool">
+            <span class="tool-label">外形</span>
+            <span class="seg"><button class="mode-btn" data-mode="outline" aria-pressed="false">外形を描く</button></span>
+          </span>
           <span class="zone-tool">
             <span class="tool-label">区域</span>
             <select id="zoneKind" aria-label="区域の種類">
@@ -79,9 +83,11 @@
               <option value="residue">残渣処理場</option>
               <option value="other">その他</option>
             </select>
-            <button class="mode-btn" data-mode="zone">多角形</button>
-            <button class="mode-btn" data-mode="rect">四角形</button>
-            <button class="mode-btn" data-mode="size">寸法を指定</button>
+            <span class="seg" role="group" aria-label="区域の描き方">
+              <button class="mode-btn" data-mode="zone" aria-pressed="false">多角形</button>
+              <button class="mode-btn" data-mode="rect" aria-pressed="false">四角形</button>
+              <button class="mode-btn" data-mode="size" aria-pressed="false">寸法を指定</button>
+            </span>
           </span>
           <span id="sizeTools" class="size-tools" hidden>
             <label>辺に沿う長さ（m）<input id="sizeAlong" type="number" min="0.1" step="0.1" value="10" /></label>
@@ -96,9 +102,11 @@
           <label class="inline-field">表示日<input id="viewDate" type="date" /></label>
           <span class="zone-tool edit-only">
             <span class="tool-label">耕起対象区画</span>
-            <button class="mode-btn" data-mode="block">有効圃場を区画にする</button>
-            <button class="mode-btn" data-mode="split">線で分ける</button>
-            <button class="mode-btn" data-mode="blockrect">区画を描く</button>
+            <span class="seg" role="group" aria-label="耕起対象区画の作り方">
+              <button class="mode-btn" data-mode="block" aria-pressed="false">有効圃場を区画にする</button>
+              <button class="mode-btn" data-mode="split" aria-pressed="false">線で分ける</button>
+              <button class="mode-btn" data-mode="blockrect" aria-pressed="false">区画を描く</button>
+            </span>
           </span>
           <span id="splitTools" class="size-tools edit-only" hidden>
             <label>分ける線の向き
@@ -341,8 +349,8 @@
           <div class="panel-heading">
             <h2>工程表</h2>
             <div class="row">
-              <div id="ganttModes" class="log-modes" role="group" aria-label="工程表の表示" hidden></div>
-              <div id="ganttRanges" class="log-modes" role="group" aria-label="工程表の表示期間"></div>
+              <div id="ganttModes" class="seg" role="group" aria-label="工程表の表示" hidden></div>
+              <div id="ganttRanges" class="seg" role="group" aria-label="工程表の表示期間"></div>
               <p class="muted">プラン: <span id="schedulePlanName"></span></p>
               <button id="ganttPdfBtn" class="chip-btn" title="工程表の全体を PDF にします">PDF出力</button>
             </div>
@@ -409,7 +417,7 @@
     <main id="diaryView" class="schedule diary" hidden>
       <section class="panel diary-nav">
         <div class="diary-top">
-          <div id="diaryModes" class="log-modes" role="group" aria-label="日記の表示期間"></div>
+          <div id="diaryModes" class="log-modes seg" role="group" aria-label="日記の表示期間"></div>
           <form id="diarySearchForm" class="diary-search" role="search">
             <input id="diarySearch" type="search" placeholder="検索ワード" aria-label="日記の検索ワード" />
             <button class="chip-btn" type="submit">探す</button>

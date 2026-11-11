@@ -506,7 +506,7 @@ function tagViewHtml() {
   return (
     `<div class="panel-heading"><h2 class="diary-tag-filters">${filters}</h2><button type="button" class="text-btn" data-action="tag-clear">一覧をやめる</button></div>` +
     `<div class="row diary-tag-order"><span class="muted">${t.loading && !t.sections.length ? "" : `${t.total} 節${worksCount(t)}。札を押すと、さらに絞れます`}</span>` +
-    `<div class="diary-modes">${order(false, "新しい順")}${order(true, "古い順")}</div></div>` +
+    `<div class="diary-modes seg" role="group" aria-label="並べる順">${order(false, "新しい順")}${order(true, "古い順")}</div></div>` +
     list
   );
 }

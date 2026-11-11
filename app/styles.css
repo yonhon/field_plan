@@ -1032,9 +1032,15 @@ body.plan-busy #scheduleView {
 
 .panel-heading {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
   gap: 10px;
+}
+
+/* 見出しは縮めない。幅が足りなければ、右のボタンの並びを次の行へ送る（スマホで見出しが縦書きにならないように） */
+.panel-heading > h2 {
+  flex: none;
 }
 
 .week-list {
@@ -1868,6 +1874,39 @@ body.plan-busy #scheduleView {
   background: var(--accent);
   color: #fff;
   font-weight: 700;
+}
+
+/* 選ぶもののスイッチ。ボタンをつなげて 1 つの枠にし、操作のボタン（離れたチップ）と見分ける。
+   docs/design-rules.md の「選ぶものと操作」。組の中では折り返さず、組ごとに改行する */
+.seg {
+  display: inline-flex;
+  flex: none;
+  flex-wrap: nowrap;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.seg > .chip-btn,
+.seg > .mode-btn {
+  border: 0;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+.seg > .chip-btn + .chip-btn,
+.seg > .mode-btn + .mode-btn {
+  border-left: 1px solid var(--line);
+}
+
+/* 選んでいるものは塗るだけにし、太字にしない（押しても幅が変わらないように） */
+.seg > .chip-btn.is-on,
+.seg > .mode-btn.is-active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: inherit;
 }
 
 .log-group {
