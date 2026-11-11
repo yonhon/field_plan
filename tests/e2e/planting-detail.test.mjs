@@ -77,9 +77,23 @@ after(async () => {
 
 const notes = () => page.run(`[...document.querySelectorAll("#plantingBody .detail-crop-diff")].map((line) => line.textContent)`);
 
+// 圃場図の、畝の文字の index 文字目の中心（圃場の座標）。index を省くと、品目名のまん中の文字
+const charPoint = (selector, index = null) =>
+  page.run(`(() => {
+    const text = document.querySelector(${JSON.stringify(selector)});
+    const start = Number(text.dataset.name || 0);
+    const i = ${index} ?? Math.floor((start + text.getNumberOfChars()) / 2);
+    const box = text.getExtentOfChar(i);
+    const p = new DOMPoint(box.x + box.width / 2, box.y + box.height / 2).matrixTransform(text.getScreenCTM());
+    const world = new DOMPoint(p.x, p.y).matrixTransform(document.getElementById("map").getScreenCTM().inverse());
+    return [world.x, -world.y];
+  })()`);
+
 async function openFromMap(planting) {
   await page.click('.tab-btn[data-view="map"]');
-  await page.click(`#map .map-link[data-detail="${planting}"]`);
+  const selector = `#map text[data-detail="${planting}"]`;
+  await page.waitFor(`Boolean(document.querySelector(${JSON.stringify(selector)}))`, "品目名のある文字");
+  await page.clickMap(await charPoint(selector));
   await page.waitFor(`location.hash === "#detail/planting/${planting}" && !document.getElementById("plantingView").hidden`, "作付の詳細が開く");
 }
 
@@ -94,16 +108,9 @@ test("圃場図の品目名を押すと、その作付の詳細が開く", optio
 test("畝の番号の所を押すと、作付の詳細には移らず、畝を選ぶ", options, async () => {
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="map"]');
-  await page.waitFor(`Boolean(document.querySelector("#map .map-label.is-linked"))`, "品目名のある文字");
+  await page.waitFor(`Boolean(document.querySelector('#map text[data-detail="pl1"]'))`, "品目名のある文字");
   // 番号（1 文字目）の位置を、本物のマウスの操作で押す
-  const point = await page.run(`(() => {
-    const text = document.querySelector("#map .map-label.is-linked");
-    const box = text.getExtentOfChar(0);
-    const p = new DOMPoint(box.x + box.width / 2, box.y + box.height / 2).matrixTransform(text.getScreenCTM());
-    const world = new DOMPoint(p.x, p.y).matrixTransform(document.getElementById("map").getScreenCTM().inverse());
-    return [world.x, -world.y];
-  })()`);
-  await page.clickMap(point);
+  await page.clickMap(await charPoint('#map text[data-detail="pl1"]', 0));
   await page.waitFor(`document.querySelector('#map polygon[data-shape="bed1"]').classList.contains("is-selected")`, "畝を選ぶ");
   assert.equal(await page.run(`location.hash`), "#map");
 });

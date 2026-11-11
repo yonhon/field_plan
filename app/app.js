@@ -541,9 +541,8 @@ function renderMap(scale) {
     );
   }
 
-  // html を渡すと、text の代わりに中身として使う（品目名のリンクの tspan など）。extra は class に足す名前
-  const label = (point, text, size = fontSize, attrs = "", html = escapeHtml(text), extra = "") =>
-    `<text class="map-label${extra ? ` ${extra}` : ""}" x="${point[0]}" y="${-point[1]}" font-size="${size}" stroke-width="${size / 4}" ${attrs}>${html}</text>`;
+  const label = (point, text, size = fontSize, attrs = "") =>
+    `<text class="map-label" x="${point[0]}" y="${-point[1]}" font-size="${size}" stroke-width="${size / 4}" ${attrs}>${escapeHtml(text)}</text>`;
   const outside = findOutside();
   const strays = new Set([...outside.zones, ...outside.blocks, ...outside.beds].map((item) => item.id));
   // 選択の印と、入れ物からはみ出している印
@@ -598,6 +597,9 @@ function renderMap(scale) {
         parts.push(label(centroid(block.shape), block.name));
       }
     }
+    // 畝の文字は、畝の図形をすべて描いたあとに描く。文字は畝からはみ出すことがあり、
+    // 先に描くと、隣の畝の図形に隠れる（見えにくく、押すと隣の畝が選ばれる）
+    const bedLabels = [];
     for (const bed of groupBeds) {
       const planting = plantingOn(bed);
       const name = planting?.crop_name || "";
@@ -615,23 +617,16 @@ function renderMap(scale) {
         degrees = degrees > 90 ? degrees - 180 : degrees <= -90 ? degrees + 180 : degrees;
         const center = centroid(bed.shape);
         const text = `${bed.seq}${name ? ` ${name}` : ""}`;
-        // 品目名は、押すと作付の詳細を開くリンクにする（印刷では、ただの文字）
-        const html = name && !printing ? `${bed.seq} <tspan class="map-link" data-detail="${planting.id}">${escapeHtml(name)}</tspan>` : escapeHtml(text);
-        // 品目名のある文字は、文字ごと押せるようにする（is-linked）。WebKit（iPad、iPhone）は、押せない text の中の
-        // tspan だけを押せるようにしても効かないため。番号の所を押したときは、今までどおり畝を選ぶ（data-shape）
-        const linked = html !== escapeHtml(text);
-        parts.push(
-          label(
-            center,
-            text,
-            Math.min(fontSize, Math.max(size.width * 0.85, 9 / z)),
-            `transform="rotate(${degrees} ${center[0]} ${-center[1]})"${linked ? ` data-shape="${bed.id}"` : ""}`,
-            html,
-            linked ? "is-linked" : ""
-          )
+        // 品目名を押すと、作付の詳細を開く（印刷では開かない）。品目名だけを tspan に分けると、WebKit（iPad、iPhone）では
+        // 品目名の高さが番号とずれ、押しても効かないので、文字は 1 つのまま、押した位置から品目名かを求める（mapLabelAt）。
+        // data-name は、品目名が何文字目から始まるか
+        const link = name && !printing ? ` data-detail="${planting.id}" data-name="${String(bed.seq).length + 1}"` : "";
+        bedLabels.push(
+          label(center, text, Math.min(fontSize, Math.max(size.width * 0.85, 9 / z)), `transform="rotate(${degrees} ${center[0]} ${-center[1]})" data-bed="${bed.id}"${link}`)
         );
       }
     }
+    parts.push(...bedLabels);
   };
   const front = printing ? null : frontZoneId();
   const allBlocks = ghost ? [...blocks, ghost] : blocks;
@@ -2330,6 +2325,42 @@ function drawingToolsShown() {
   return Boolean(tools) && getComputedStyle(tools).display !== "none";
 }
 
+// 押した位置にある畝の文字。{ bed: 畝の ID, detail: 品目名なら作付の ID }。文字がなければ null。
+// ブラウザーの「押された要素」は使わず、文字の位置から求める（WebKit は、文字の一部だけを押せるようにしても効かない。
+// 文字の線の上でなく、文字と文字のすき間を押しても、品目名として扱う）
+function mapLabelAt(event) {
+  const pad = 2; // 画面の px。文字の枠の外側も少し含める
+  for (const text of map.querySelectorAll("text[data-bed]")) {
+    const ctm = text.getScreenCTM();
+    const count = text.getNumberOfChars();
+    if (!ctm || !count) {
+      continue;
+    }
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
+    const margin = pad / Math.hypot(ctm.a, ctm.b);
+    const nameStart = Number(text.dataset.name || count);
+    // 番号と品目名の、それぞれの文字の枠をまとめた四角形に入っているか
+    const inside = (from, to) => {
+      if (from >= to) {
+        return false;
+      }
+      const boxes = Array.from({ length: to - from }, (_, i) => text.getExtentOfChar(from + i));
+      const left = Math.min(...boxes.map((box) => box.x)) - margin;
+      const right = Math.max(...boxes.map((box) => box.x + box.width)) + margin;
+      const top = Math.min(...boxes.map((box) => box.y)) - margin;
+      const bottom = Math.max(...boxes.map((box) => box.y + box.height)) + margin;
+      return point.x >= left && point.x <= right && point.y >= top && point.y <= bottom;
+    };
+    if (text.dataset.detail && inside(nameStart, count)) {
+      return { bed: text.dataset.bed, detail: text.dataset.detail };
+    }
+    if (inside(0, Math.min(nameStart, count))) {
+      return { bed: text.dataset.bed, detail: null };
+    }
+  }
+  return null;
+}
+
 map.addEventListener("pointerdown", (event) => {
   map.setPointerCapture(event.pointerId);
   pointers.set(event.pointerId, [event.clientX, event.clientY]);
@@ -2338,6 +2369,9 @@ map.addEventListener("pointerdown", (event) => {
     return;
   }
   const target = event.target;
+  // 畝の文字を押したときは、その畝（品目名なら作付の詳細）。文字は押せない（pointer-events: none）ので、位置から求める
+  const labelHit = mapLabelAt(event);
+  const detail = labelHit?.detail;
   // 作図の道具が出ていないときは、図形を動かさず、図を動かす（pan）。離したときは、図形を選ぶか、品目名から作付の詳細を開くだけ
   const editing = drawingToolsShown();
   if (!editing && state.mode !== "select") {
@@ -2366,19 +2400,19 @@ map.addEventListener("pointerdown", (event) => {
     const zone = state.mode === "blockrect" ? tillableZoneAt(start) : null;
     const frames = zone ? [zone.shape] : state.field.outline;
     gesture = { kind: "rect", start, zone, angle: nearestEdgeAngleOf(start, frames), origin: [event.clientX, event.clientY] };
-  } else if (editing && state.mode === "select" && !target.dataset.detail && pressedSelected(event)) {
+  } else if (editing && state.mode === "select" && !detail && pressedSelected(event)) {
     // 選択中の図形は、ドラッグでそのまま動かせる。動かさずに離したら、押した図形を選ぶ
-    gesture = { kind: "move", moved: false, start: [event.clientX, event.clientY], last: clientToWorld(event), shape: target.dataset.shape };
+    gesture = { kind: "move", moved: false, start: [event.clientX, event.clientY], last: clientToWorld(event), shape: labelHit?.bed || target.dataset.shape };
   } else {
     gesture = {
       kind: "pan",
       moved: false,
       start: [event.clientX, event.clientY],
-      shape: target.dataset.shape,
+      shape: labelHit?.bed || target.dataset.shape,
       // すき間と辺の長さの数字を押すと、長さを入れる窓が開く。作図の道具が出ていないときは開かない
       gap: editing ? target.dataset.gap : undefined,
       edge: editing ? target.dataset.edge : undefined,
-      detail: target.dataset.detail,
+      detail,
     };
   }
 });
