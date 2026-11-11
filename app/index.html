@@ -386,6 +386,15 @@
             <input id="newPlantingDate" type="date" aria-label="基準にする日" />
             <button id="addPlantingBtn" class="chip-btn">作付を追加</button>
           </div>
+          <!-- 作業の種類ごとの目安の日数。ふだんは閉じておく -->
+          <details class="strip-detail edit-only">
+            <summary>作業の種類と目安の日数</summary>
+            <p class="muted">ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。</p>
+            <table class="type-table">
+              <thead><tr><th>作業</th><th>かかる日数</th><th>あとにあける日数</th></tr></thead>
+              <tbody id="typeRows"></tbody>
+            </table>
+          </details>
         </section>
 
         <!-- 区画の作業の計画と実績（計画にない実績も）、計画との差、日記のボタン（planting-view.js が描く） -->
@@ -394,14 +403,6 @@
         <!-- 工程表の欄は、日程の画面ではここに移す（placeGantt）。選んだ区画だけを描く -->
         <div id="ganttSlotSchedule"></div>
 
-        <details class="panel fold-panel edit-only">
-          <summary><h2>作業の種類と目安の日数</h2></summary>
-          <p class="muted">ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。</p>
-          <table class="type-table">
-            <thead><tr><th>作業</th><th>かかる日数</th><th>あとにあける日数</th></tr></thead>
-            <tbody id="typeRows"></tbody>
-          </table>
-        </details>
       </div>
     </main>
 

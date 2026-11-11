@@ -241,8 +241,9 @@ export function renderPicker(view) {
             return `<option value="bed:${bed.id}">${escapeHtml(`${block.name} 畝${bed.seq}${crops ? ` ${crops}` : ""}${mark(flagged)}`)}</option>`;
           })
           .join("");
+        // 区画の行は太字にして、その下に畝の行を並べる（区画の行も選べる）
         const flagged = problems.some((problem) => blockOfProblem(problem) === block.id);
-        return `<optgroup label="${escapeHtml(block.name)}"><option value="block:${block.id}">${escapeHtml(`${block.name}（区画の全体）${mark(flagged)}`)}</option>${beds}</optgroup>`;
+        return `<option value="block:${block.id}" class="picker-block">${escapeHtml(`${block.name}${mark(flagged)}`)}</option>${beds}`;
       })
       .join("")
   );

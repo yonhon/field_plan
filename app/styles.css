@@ -3548,17 +3548,9 @@ button.diary-work:hover {
   margin-bottom: 12px;
 }
 
-/* 折りたたみの欄（作業の種類と目安の日数）。見出しを押して開く */
-.fold-panel > summary {
-  cursor: pointer;
-}
-
-.fold-panel > summary h2 {
-  display: inline;
-}
-
-.fold-panel[open] > summary {
-  margin-bottom: 8px;
+/* 区画・畝の欄の、区画の行（その下に畝の行が並ぶ） */
+.picker-field option.picker-block {
+  font-weight: 700;
 }
 
 /* 区画の作業の計画と実績の中の、計画との差 */
