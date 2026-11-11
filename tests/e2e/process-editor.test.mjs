@@ -115,6 +115,8 @@ test("工程の計画: 何も変えずに閉じるときは確かめない。実
   await openFromBlock();
   await page.click(`${DIALOG} .log-head [data-act="close"]`);
   await page.waitFor(`!document.querySelector("dialog[open]")`, "確かめずに閉じる");
+  // 開いたときに積んだ履歴の取り消しが終わってから、次の画面を読み込む（途中で読み込むと、戻るが読み込みとぶつかる）
+  await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
 
   const data = seed();
   data.fields[0].active_plan_id = null;
