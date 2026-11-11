@@ -156,6 +156,31 @@
             <button id="fitBtn" class="chip-btn">全体を表示</button>
           </div>
         </div>
+
+        <!-- 工程表の欄。圃場図ではすべての区画と畝を、日程の画面では選んだ区画だけを描く（1 つの欄を、開いた画面へ移す） -->
+        <div id="ganttSlotMap">
+          <section id="ganttPanel" class="panel">
+            <div class="panel-heading">
+              <h2>工程表</h2>
+              <div class="row">
+                <div id="ganttModes" class="seg" role="group" aria-label="工程表の表示" hidden></div>
+                <div id="ganttRanges" class="seg" role="group" aria-label="工程表の表示期間"></div>
+                <p class="muted">プラン: <span id="schedulePlanName"></span></p>
+                <button id="ganttPdfBtn" class="chip-btn" title="工程表の全体を PDF にします">PDF出力</button>
+              </div>
+            </div>
+            <p id="ganttModeNote" class="muted" hidden></p>
+            <div class="row edit-only gantt-tools">
+              <span id="pickInfo" class="muted"></span>
+              <button id="copyPickedBtn" class="chip-btn">コピー</button>
+              <button id="cutPickedBtn" class="chip-btn">切り取り</button>
+              <button id="pastePickedBtn" class="chip-btn">貼り付け</button>
+              <button id="deletePickedBtn" class="text-btn danger">削除</button>
+            </div>
+            <p class="muted edit-only">行や帯を押すと、その区画（畝）を選びます。選んだ行は、貼り付けの入れ先と、「＋ 入力する」の対象になります。帯は Ctrl を押しながらで複数選べ（同じ行の中）、ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。管理作業（防除、除草など）の帯は、押すと計画の窓も開き、Ctrl を押しながら横に動かして離すと、その日へコピーします。区画の名前を押すと、日程の画面でその区画を開きます。畝・品目の名前を押すと、作付の詳細を開きます。</p>
+            <div id="gantt"></div>
+          </section>
+        </div>
       </section>
 
       <aside class="side">
@@ -347,27 +372,8 @@
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel-heading">
-            <h2>工程表</h2>
-            <div class="row">
-              <div id="ganttModes" class="seg" role="group" aria-label="工程表の表示" hidden></div>
-              <div id="ganttRanges" class="seg" role="group" aria-label="工程表の表示期間"></div>
-              <p class="muted">プラン: <span id="schedulePlanName"></span></p>
-              <button id="ganttPdfBtn" class="chip-btn" title="工程表の全体を PDF にします">PDF出力</button>
-            </div>
-          </div>
-          <p id="ganttModeNote" class="muted" hidden></p>
-          <div class="row edit-only gantt-tools">
-            <span id="pickInfo" class="muted"></span>
-            <button id="copyPickedBtn" class="chip-btn">コピー</button>
-            <button id="cutPickedBtn" class="chip-btn">切り取り</button>
-            <button id="pastePickedBtn" class="chip-btn">貼り付け</button>
-            <button id="deletePickedBtn" class="text-btn danger">削除</button>
-          </div>
-          <p class="muted edit-only">行や帯を押すと、その区画（畝）を選びます。選んだ行は、貼り付けの入れ先と、「＋ 入力する」の対象になります。帯は Ctrl を押しながらで複数選べ（同じ行の中）、ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。管理作業（防除、除草など）の帯は、押すと計画の窓も開き、Ctrl を押しながら横に動かして離すと、その日へコピーします。区画・畝・品目の名前を押すと、詳細を開きます。下の「作業の計画」で開く区画（畝）は、「区画と畝」の図で選びます。</p>
-          <div id="gantt"></div>
-        </section>
+        <!-- 工程表の欄は、日程の画面ではここに移す（showGantt）。選んだ区画だけを描く -->
+        <div id="ganttSlotSchedule"></div>
 
         <section id="summaryPanel" class="panel" hidden>
           <h2>苗と肥料の集計</h2>

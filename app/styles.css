@@ -363,6 +363,11 @@ label.check {
   flex-shrink: 0;
 }
 
+/* 図の下の工程表（すべての区画と畝） */
+#ganttSlotMap {
+  margin-top: 12px;
+}
+
 .map-overview {
   display: flex;
   flex-direction: column;

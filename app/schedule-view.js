@@ -62,7 +62,9 @@ let barDrag = null; // 工程表で帯をドラッグしている途中の状態
 // 工程表で選んでいる行（"block:区画の ID" か "bed:畝の ID"）。貼り付けの入れ先と、「＋ 入力する」の対象になる。
 // 下の「作業の計画」で開いている区画・畝（sel）とは別に覚える
 let rowSel = null;
-let ganttScrollKey = ""; // 工程表の横の位置を保つための、表示期間とプラン
+let ganttScrollKey = ""; // 工程表の横の位置を保つための、表示期間とプランと、描く区画
+let ganttScopeKey = null; // 前に描いた工程表の範囲（区画の ID か "all"）。範囲が変わったら、帯の選択を外す
+let ganttFocused = false; // 最後に押したのが工程表の欄か。圃場図の画面で、キーの操作を工程表と図のどちらに渡すかを決める
 let actualDrag = null; // 工程表で実績の帯をドラッグしている途中の状態
 let addingFor = null; // 「作付を追加」の日付の初期値を入れたときの状態
 
@@ -190,7 +192,7 @@ export function renderSchedule() {
 
 // 圃場図の上に出す、圃場の全体の情報（今週やること、遅れている作業、確認が必要な点と、タブの件数）。
 // 日程の画面を描くときと、圃場図を開いたときに描く
-export function renderOverview() {
+function renderOverview() {
   if (!ctx) {
     return;
   }
@@ -425,8 +427,33 @@ export const blockTarget = (blockId) => (target) => !target.bed_id && !target.pl
 // その畝（の作付）の記録か
 export const bedTarget = (bed, plantingIds) => (target) => target.bed_id === bed.id || plantingIds.includes(target.planting_id);
 
+// 工程表の欄は 1 つで、開いた画面へ移す。圃場図ではすべての区画と畝、日程の画面では選んだ区画だけを描く
+const ganttOnMap = () => $("ganttPanel").parentElement.id === "ganttSlotMap";
+const ganttShown = () => $("ganttPanel").offsetParent !== null;
+// 工程表に描く区画。null はすべての区画
+const ganttBlockId = () => (ganttOnMap() ? null : sel.blockId);
+
+// 工程表の欄を、圃場図（"map"）か日程（"schedule"）へ移す。描くのは renderSchedule
+export function placeGantt(view) {
+  const slot = $(view === "map" ? "ganttSlotMap" : "ganttSlotSchedule");
+  if ($("ganttPanel").parentElement !== slot) {
+    slot.append($("ganttPanel"));
+  }
+}
+
+// 圃場図の画面で、キーの操作（Delete など）を工程表に渡すか。最後に工程表の欄を押したときだけ渡す
+export const ganttHasFocus = () => ganttFocused && ganttShown();
+
 // fit を渡すと（PDF 出力）、表示期間を「全体」にして、その幅（px）に収める
 function renderGantt(fit = null) {
+  const scopeId = ganttBlockId();
+  const blocks = scopeId ? state().blocks.filter((block) => block.id === scopeId) : state().blocks;
+  // 範囲が変わったら、見えなくなった帯を選んだままにしない（見えない作業を Delete で消さないように）
+  const scopeKey = scopeId || "all";
+  if (ganttScopeKey !== scopeKey) {
+    ganttScopeKey = scopeKey;
+    picked.clear();
+  }
   const mode = ganttMode();
   $("ganttModes").hidden = !isActivePlan();
   draw($("ganttModes"), modeButtons(mode));
@@ -443,11 +470,13 @@ function renderGantt(fit = null) {
   const showActual = mode !== "plan";
   const actuals = currentActuals();
   const isDated = (work) => work.plan_start && work.plan_end && work.plan_end >= work.plan_start;
-  const dated = state().works.filter(isDated);
+  // 描く区画の作業だけ（区画の作業と、その区画の畝の作付の作業）
+  const inScope = new Set(blocks.flatMap((block) => [...blockWorks(block.id), ...blockBeds(block.id).flatMap((bed) => bedPlantings(bed.id).flatMap((planting) => plantingWorks(planting.id)))]).map((work) => work.id));
+  const dated = state().works.filter((work) => inScope.has(work.id) && isDated(work));
   // 区画と畝ごとの実績の帯を、先に集めておく（表示の範囲を決めるのにも使う）
   const spansOf = new Map();
   if (showActual) {
-    for (const block of state().blocks) {
+    for (const block of blocks) {
       spansOf.set(block.id, actualSpans(blockWorks(block.id), blockTarget(block.id), actuals));
       for (const bed of blockBeds(block.id)) {
         const plantings = bedPlantings(bed.id);
@@ -563,7 +592,7 @@ function renderGantt(fit = null) {
   const link = (kind, id, text) => `<a href="#" class="gantt-link" data-detail="${kind}" data-id="${id}">${escapeHtml(text)}</a>`;
 
   const rows = [];
-  for (const block of state().blocks) {
+  for (const block of blocks) {
     const content = (showPlan ? bars(blockWorks(block.id).map((work) => ({ work }))) : "") + (showActual ? actualBars(spansOf.get(block.id)) : "");
     rows.push(row("block", `block:${block.id}`, `data-block="${block.id}" data-actual-block="${block.id}" data-name="${escapeHtml(block.name)}"`, link("block", block.id, block.name), content));
     for (const bed of blockBeds(block.id)) {
@@ -598,7 +627,7 @@ function renderGantt(fit = null) {
 
   const scroller = $("gantt").querySelector(".gantt-scroll");
   // 描き直しでは横の位置を保つ。初めて描くときと、表示期間を替えたときは、表示期間の始めを左に合わせる
-  const scrollKey = `${range}|${state().plan.id}|${fit || ""}`;
+  const scrollKey = `${range}|${state().plan.id}|${scopeKey}|${fit || ""}`;
   const keep = scroller && ganttScrollKey === scrollKey ? scroller.scrollLeft : null;
   ganttScrollKey = scrollKey;
   draw(
@@ -627,7 +656,7 @@ function printGantt() {
   copy.querySelectorAll(".is-picked, .is-selected").forEach((element) => element.classList.remove("is-picked", "is-selected"));
   printPage({
     name: "工程表",
-    title: `工程表　プラン: ${$("schedulePlanName").textContent}　出力日: ${fullDay(localToday())}`,
+    title: `工程表　プラン: ${$("schedulePlanName").textContent}${ganttBlockId() ? `　${state().blocks.find((block) => block.id === ganttBlockId())?.name || ""}` : ""}　出力日: ${fullDay(localToday())}`,
     body: `<div style="zoom:${zoom}">${copy.innerHTML}</div>`,
     landscape: true,
   });
@@ -1250,7 +1279,7 @@ function selectRow(row) {
 
 // 「＋ 入力する」で、工程表で選んだ行を対象に入れて開くための値。畝なら今日その畝にある作付、区画なら区画
 export function selectedRowPreset() {
-  if (!rowSel || $("scheduleView").hidden || !isActivePlan()) {
+  if (!rowSel || !ganttShown() || !isActivePlan()) {
     return {};
   }
   const [kind, id] = rowSel.split(":");
@@ -1615,7 +1644,13 @@ function initGanttEditing() {
     const link = event.target.closest("[data-detail]");
     if (link) {
       event.preventDefault();
-      ctx.openDetail(link.dataset.detail, link.dataset.id);
+      if (link.dataset.detail === "block") {
+        // 区画の名前: 日程の画面で、その区画を開く
+        openInSchedule("block", link.dataset.id);
+        ctx.showView("schedule");
+      } else {
+        ctx.openDetail(link.dataset.detail, link.dataset.id);
+      }
       return;
     }
     const row = event.target.closest(".gantt-row");
@@ -1651,15 +1686,19 @@ function initGanttEditing() {
   let resizeTimer = null;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => !$("scheduleView").hidden && renderGantt(), 200);
+    resizeTimer = setTimeout(() => ganttShown() && state().blocks.length && renderGantt(), 200);
   });
 
   $("copyPickedBtn").addEventListener("click", () => copyPicked(false));
   $("cutPickedBtn").addEventListener("click", () => copyPicked(true));
   $("pastePickedBtn").addEventListener("click", pastePicked);
   $("deletePickedBtn").addEventListener("click", deletePicked);
+  // 最後に押した所が工程表の欄か。圃場図の画面では、そのときだけキーを工程表で受ける（図の操作と取り合わない）
+  document.addEventListener("pointerdown", (event) => {
+    ganttFocused = Boolean(event.target.closest?.("#ganttPanel"));
+  }, true);
   document.addEventListener("keydown", (event) => {
-    if ($("scheduleView").hidden || !canEdit() || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
+    if (!ganttShown() || (ganttOnMap() && !ganttFocused) || !canEdit() || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
       return;
     }
     const command = event.ctrlKey || event.metaKey;

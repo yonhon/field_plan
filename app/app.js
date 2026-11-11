@@ -48,7 +48,7 @@ import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
-import { initSchedule, openInSchedule, problemTotal, renderOverview, renderSchedule, selectedRowPreset } from "./schedule-view.js";
+import { ganttHasFocus, initSchedule, openInSchedule, placeGantt, problemTotal, renderSchedule, selectedRowPreset } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
 
@@ -2604,7 +2604,8 @@ window.addEventListener("resize", renderMap);
 const ARROWS = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
 
 document.addEventListener("keydown", (event) => {
-  if (!state.field || $("appView").hidden || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
+  // 最後に工程表の欄を押したときは、キーは工程表の操作（schedule-view.js）に渡す
+  if (!state.field || $("appView").hidden || ganttHasFocus() || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
     return;
   }
   if (event.key === "Escape") {
@@ -2810,9 +2811,13 @@ function showView(view, { history: mode = "push" } = {}) {
   $("diaryView").hidden = view !== "diary";
   $("journalView").hidden = view !== "journal";
   $("logAddBtn").hidden = view !== "map" && view !== "schedule";
+  // 工程表の欄は 1 つで、圃場図と日程の画面のうち、開いた方へ移す（描くのは renderSchedule）
+  if (view === "map" || view === "schedule") {
+    placeGantt(view);
+  }
   if (view === "map") {
     render();
-    renderOverview();
+    renderSchedule(); // 今週やること、警告、工程表（すべての区画）
     renderLogs();
     renderWeatherSettings();
   } else if (view === "schedule") {
