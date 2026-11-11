@@ -247,18 +247,29 @@ export function renderPicker(view) {
       })
       .join("")
   );
-  let shown;
   if (view === "planting") {
     const target = ctx.plantingTarget();
     const bedId = state().plantings.find((planting) => planting.id === target.id)?.bed_id;
     $("schedulePicker").value = bedId ? `bed:${bedId}` : "";
-    shown = bedId ? problems.filter((problem) => problemBed(problem) === bedId) : [];
   } else {
     $("schedulePicker").value = `block:${sel.blockId}`;
-    shown = problems.filter((problem) => blockOfProblem(problem) === sel.blockId);
   }
-  $("pickerProblems").hidden = !shown.length;
-  draw($("pickerProblems"), problemItems(shown));
+}
+
+// 区画（kind "block"）か畝（"bed"）の、確認が必要な点の欄（HTML）。なければ空。
+// 区画の頭と作付の詳細の頭の下に置く（区画・畝の欄の中に置くと、有無で頭の位置が上下するため）
+export function scopeProblemsHtml(kind, id) {
+  const blockOf = (problem) => problem.block_id || state().beds.find((bed) => bed.id === problemBed(problem))?.block_id;
+  const shown = problems.filter((problem) => (kind === "block" ? blockOf(problem) === id : problemBed(problem) === id));
+  return shown.length ? `<section class="panel problem-panel"><ul class="problem-list">${problemItems(shown)}</ul></section>` : "";
+}
+
+// 確認が必要な点の行を押したとき: 日程の画面に移って、その区画か作付の作業を開く
+export function openProblemTarget(kind, id) {
+  openInSchedule(kind, id);
+  ctx.showView("schedule");
+  const section = $("editorSections").querySelector(`[data-planting="${sel.plantingId}"]`) || $("editorSections");
+  section.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 // 区画・畝の欄で選んだとき。区画なら日程の画面でその区画を、畝ならその畝の作付の詳細を開く。
@@ -1883,18 +1894,13 @@ export function initSchedule(context) {
     });
   }
   $("ganttPdfBtn").addEventListener("click", printGantt);
-  // 確認が必要な点の行（圃場図の「警告」と、区画・畝の欄の下）: 日程の画面に移って、その区画か作付の作業を開く
-  const openProblem = (event) => {
+  // 圃場図の「警告」の、確認が必要な点の行
+  $("problemList").addEventListener("click", (event) => {
     const item = event.target.closest("li[data-id]");
     if (item) {
-      openInSchedule(item.dataset.kind, item.dataset.id);
-      ctx.showView("schedule");
-      const section = $("editorSections").querySelector(`[data-planting="${sel.plantingId}"]`) || $("editorSections");
-      section.scrollIntoView({ block: "center", behavior: "smooth" });
+      openProblemTarget(item.dataset.kind, item.dataset.id);
     }
-  };
-  $("problemList").addEventListener("click", openProblem);
-  $("pickerProblems").addEventListener("click", openProblem);
+  });
   $("typeRows").addEventListener("change", (event) => {
     const row = event.target.closest("tr[data-code]");
     const value = Number(event.target.value);

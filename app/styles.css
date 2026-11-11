@@ -3543,11 +3543,6 @@ button.diary-work:hover {
   font-size: 15px;
 }
 
-/* 作付の詳細では、区画・畝の欄と作付の頭の間をあける */
-#pickerSlotPlanting .picker-panel {
-  margin-bottom: 12px;
-}
-
 /* 区画・畝の欄の、区画の行（その下に畝の行が並ぶ） */
 .picker-field option.picker-block {
   font-weight: 700;
@@ -3573,9 +3568,9 @@ button.diary-work:hover {
   gap: 12px;
 }
 
-/* 面積・畝・苗の行は、押すと苗と肥料の集計を開く */
+/* 面積・畝の行は、押すと苗と肥料の集計を開く。大きさは作付の詳細の面積・苗数の行と同じ */
 .detail-summary-btn {
   padding: 0;
   color: var(--accent);
-  font-size: inherit;
+  font-size: 13px;
 }

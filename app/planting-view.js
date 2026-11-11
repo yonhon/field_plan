@@ -20,6 +20,8 @@ import {
   ganttMode,
   isActivePlan,
   modeButtons,
+  openProblemTarget,
+  scopeProblemsHtml,
   setGanttMode,
 } from "./schedule-view.js";
 import { draw } from "./draw.js";
@@ -194,6 +196,7 @@ export function renderPlantingDetail() {
     headHtml(c, active) +
     `<div class="row detail-modes">${active ? `<div class="seg" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}` +
     `${active ? "" : '<span class="muted">実績は、実際に使うプランを開くと出せます。</span>'}</div>` +
+    scopeProblemsHtml("bed", c.bed.id) +
     `<div class="detail-layout"><div class="detail-main">` +
     `<section class="panel">${timelineHtml(c, mode, actuals)}</section>` +
     (mode === "both" ? diffHtml(c, actuals) : "") +
@@ -227,7 +230,8 @@ export function renderBlockRecord(blockId) {
     $("blockHead"),
     headHtml(c, active, "blockHead") +
     `<div class="row detail-modes">${active ? `<div class="seg" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}` +
-    `${active ? "" : '<span class="muted">実績は、実際に使うプランを開くと出せます。</span>'}</div>`
+    `${active ? "" : '<span class="muted">実績は、実際に使うプランを開くと出せます。</span>'}</div>` +
+    scopeProblemsHtml("block", c.block.id)
   );
   $("blockSummary").hidden = !summaryOpen;
   fitHead("blockHead");
@@ -912,6 +916,12 @@ async function reschedule(t = target) {
 }
 
 function onClick(event) {
+  // 確認が必要な点の行: 日程の画面で、その区画か作付の作業を開く
+  const problem = event.target.closest(".problem-list li[data-id]");
+  if (problem) {
+    openProblemTarget(problem.dataset.kind, problem.dataset.id);
+    return;
+  }
   const el = event.target.closest("[data-act], [data-log], [data-plan-edit], [data-uncancel], [data-gantt-mode], [data-plan]");
   if (!el) {
     return;
