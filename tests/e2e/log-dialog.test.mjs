@@ -304,3 +304,41 @@ test("1 穴あたりの量: 苗数が分からない畝があれば、保存せ�
   assert.deepEqual((await page.saved()).works, []);
   assert.deepEqual(page.errors, []);
 });
+
+// 管理作業の計画と実績は、入れた内容をそのまま持って行き来できる。持っていけない（実績で定植・播種を選んだ）ときだけ確かめる
+test("入力の窓: 実績と管理作業の計画は、入れた内容のまま行き来できる", options, async () => {
+  await page.loadApp(seed());
+  await page.click("#logAddBtn");
+  const DIALOG = "dialog.log-dialog[open]";
+  const state = () =>
+    page.run(`JSON.stringify({
+      kind: document.querySelector('${DIALOG} [data-act="kind"].is-on')?.dataset.kind,
+      type: document.querySelector('${DIALOG} [data-act="type"].is-on')?.dataset.code || "",
+      beds: document.querySelectorAll('${DIALOG} [data-act="bed"].is-on').length,
+      notice: Boolean(document.querySelector("dialog.notice[open]")),
+    })`);
+  await page.click(`${DIALOG} [data-act="type"][data-code="spray"]`);
+  await page.click(`${DIALOG} [data-act="group"]`);
+  const before = JSON.parse(await state());
+  assert.equal(before.kind, "actual");
+  assert.ok(before.beds > 0, "畝を選んでいる");
+
+  await page.click(`${DIALOG} [data-act="kind"][data-kind="plan"]`);
+  await page.waitFor(`document.querySelector('${DIALOG} [data-act="kind"].is-on')?.dataset.kind === "plan"`, "管理作業の計画へ");
+  assert.deepEqual(JSON.parse(await state()), { ...before, kind: "plan" }, "確かめずに、防除と畝を持っていく");
+  await page.click(`${DIALOG} [data-act="kind"][data-kind="actual"]`);
+  await page.waitFor(`document.querySelector('${DIALOG} [data-act="kind"].is-on')?.dataset.kind === "actual"`, "実績へ戻る");
+  assert.deepEqual(JSON.parse(await state()), before);
+
+  // 定植・播種は計画のタブでは選べないので、持っていけない。捨ててよいかを確かめる
+  await page.click(`${DIALOG} [data-act="type"][data-code="plant"]`);
+  await page.click(`${DIALOG} [data-act="kind"][data-kind="plan"]`);
+  await page.waitFor(`document.querySelector('dialog.notice[open] [data-action="delete"]')?.textContent === "捨てて切り替える"`, "捨ててよいかの確かめ");
+  await page.click('dialog.notice [data-action="cancel"]');
+  await page.waitFor(`!document.querySelector("dialog.notice[open]")`, "確かめを閉じる");
+  assert.equal(await page.run(`document.querySelector('${DIALOG} [data-act="kind"].is-on').dataset.kind`), "actual");
+  await page.click(`${DIALOG} .log-head [data-act="close"]`);
+  await page.click('dialog.notice [data-action="delete"]');
+  await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
+  assert.deepEqual(page.errors, []);
+});

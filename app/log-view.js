@@ -456,8 +456,29 @@ function makeDraft(log, preset) {
 }
 
 // タブを替える。書きかけがあれば、捨ててよいかを確かめてから、新しいタブの書きかけを作る
+// 管理作業の計画と実績は、同じ形の書きかけ（日付、作業の種類、対象、資材、メモ）を使うので、入れたまま行き来できる。
+// ただし実績から計画へは、作業の種類が管理作業でない（定植・播種など）か、つなぐ計画に印を付けているときは持っていけない
+function carryable(kind) {
+  if (!["plan", "actual"].includes(draft.kind) || !["plan", "actual"].includes(kind)) {
+    return false;
+  }
+  if (kind === "actual") {
+    return true;
+  }
+  return (!draft.work_type || isManagement(draft.work_type)) && !linkedWorks(pickedItems()).length;
+}
+
 async function switchKind(kind) {
   if (!draft || kind === draft.kind) {
+    return;
+  }
+  // 入れた内容をそのまま持っていけるときは、確かめずに切り替える（日付や対象は、そのまま次のタブの値になる）
+  if (carryable(kind)) {
+    draft.kind = kind;
+    draft.linked = new Set();
+    renderDialog();
+    updateTotals();
+    refreshUses();
     return;
   }
   if (isDirty() && !(await confirmDiscard("捨てて切り替える"))) {
