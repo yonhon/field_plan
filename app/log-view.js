@@ -4,7 +4,7 @@ import { WORK_COLORS, WORK_ITEMS, addDays, diffDays, isManagement, localToday, w
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { noteChange } from "./history.js";
 import { record } from "./journal.js";
-import { SPEC_FIELDS, formatAmount, logEnd, perHoleScale, perHoleUnit, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
+import { SPEC_FIELDS, formatAmount, isBlockTarget, logEnd, perHoleScale, perHoleUnit, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
 import { draw } from "./draw.js";
 import { holesOf } from "./crops.js";
@@ -418,7 +418,7 @@ function makeDraft(log, preset) {
     for (const target of existing) {
       if (target.bed_id && bedIds.has(target.bed_id)) {
         draft.beds.add(target.bed_id);
-      } else if (!target.bed_id && target.block_id && blockIds.has(target.block_id)) {
+      } else if (isBlockTarget(target) && blockIds.has(target.block_id)) {
         draft.blocks.add(target.block_id);
       } else {
         draft.orphans.push(target);
@@ -445,7 +445,7 @@ function makeDraft(log, preset) {
         draft.spray[group.key] = round(liters, 2);
       }
     }
-    log.targets.filter((target) => !target.bed_id && target.block_id && num(target.spray_l)).forEach((target) => (draft.spray[target.block_id] = num(target.spray_l)));
+    log.targets.filter((target) => isBlockTarget(target) && num(target.spray_l)).forEach((target) => (draft.spray[target.block_id] = num(target.spray_l)));
   }
   if (!draft.inputs.length && type) {
     draft.inputs = defaultInputs(type);
@@ -1289,7 +1289,7 @@ function setDate(date) {
       draft.beds.add(target.bed_id);
       return false;
     }
-    if (!target.bed_id && target.block_id && blocks.has(target.block_id)) {
+    if (isBlockTarget(target) && blocks.has(target.block_id)) {
       draft.blocks.add(target.block_id);
       return false;
     }

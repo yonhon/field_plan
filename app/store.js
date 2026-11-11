@@ -2,6 +2,7 @@
 // URL に ?local=1 を付けると、DB を使わずにこのブラウザーの中だけに保存する（動作確認用）。
 // さらに &strict=1 を付けると、保存の遅れと外部キーを DB に近づける。
 import { DEFAULT_WORK_TYPES } from "./schedule.js";
+import { isBlockTarget } from "./logs.js";
 import { uploadWithProgress } from "./upload.js";
 import { pathKey, photoNames, pickLabels, renameTagKeys, renamedHeadings } from "./diary.js";
 
@@ -747,7 +748,7 @@ export function createLocalStore({ strict = false } = {}) {
       const blockOf = new Map((data.beds || []).map((bed) => [bed.id, bed.block_id]));
       const plantings = kind === "block" ? (data.plantings || []).filter((planting) => blockOf.get(planting.bed_id) === id).map((planting) => planting.id) : [id];
       const blocks = kind === "block" ? [id] : (data.plantings || []).filter((planting) => planting.id === id).map((planting) => blockOf.get(planting.bed_id));
-      const hits = (target) => plantings.includes(target.planting_id) || (!target.planting_id && blocks.includes(target.block_id));
+      const hits = (target) => plantings.includes(target.planting_id) || (isBlockTarget(target) && blocks.includes(target.block_id));
       const allLogs = data.workLogs || [];
       const done = new Set(allLogs.filter((log) => log.finishes).flatMap((log) => (log.targets || []).map((target) => target.work_id)).filter(Boolean));
       const logs = allLogs

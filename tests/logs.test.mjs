@@ -31,6 +31,7 @@ import {
   productAmount,
   splitByArea,
   targetChoices,
+  isBlockTarget,
   targetSummary,
   workActuals,
 } from "../app/logs.js";
@@ -179,6 +180,14 @@ test("対象を品目ごとの本数で短く表す", () => {
     ]),
     "レタス 2 本、ニンジン、区画A"
   );
+});
+
+test("区画の記録の対象か: 畝を消して畝と作付の ID だけが空になった対象は、区画の対象にしない", () => {
+  assert.equal(isBlockTarget({ block_id: "k1", bed_id: null, planting_id: null, crop_name: "", label: "区画A" }), true);
+  assert.equal(isBlockTarget({ block_id: "k1", bed_id: "b1", planting_id: "p1", crop_name: "レタス" }), false);
+  assert.equal(isBlockTarget({ block_id: "k1", bed_id: null, planting_id: null, crop_name: "レタス", label: "区画A 畝3 レタス" }), false);
+  assert.equal(isBlockTarget({ block_id: "k1", bed_id: "b1", planting_id: null, crop_name: "" }), false);
+  assert.equal(isBlockTarget({ block_id: null, bed_id: null, planting_id: null, crop_name: "" }), false);
 });
 
 test("作業の状態と、遅れている作業", () => {

@@ -1519,14 +1519,25 @@ async function deleteSelectedShape() {
     block: () => `区画「${item.name}」を削除します。${beds.length ? `中の畝 ${beds.length} 本と、` : ""}この区画の日程も消えます。`,
     bed: () => "この畝を、最初からなかったことにします。この畝の作付と日程も消えます。\n収穫のあとで畝をなくすだけなら、「表示日で畝をなくす」を使ってください。",
   }[kind]();
+  const logs = logsWithout(blocks.map((block) => block.id), beds.map((bed) => bed.id));
+  const logNote = logs.count
+    ? `\n作業の記録 ${logs.count} 件から、${kind === "bed" ? "この畝" : "消える区画と畝"}を対象から外します。` +
+      (logs.emptied.length ? `そのうち、ほかに対象のない記録 ${logs.emptied.length} 件は、記録ごと消えます。` : "")
+    : "";
   // 確かめているあいだに、選んだ図形が変わったり消えたりしていたら、何も消さない
-  if (!(await confirmDelete(message, shapeName(id))) || state.selected !== id || !findShape(id)) {
+  if (!(await confirmDelete(message + logNote, shapeName(id))) || state.selected !== id || !findShape(id)) {
     return;
   }
   record({
     kind: `${kind}.delete`,
-    text: `${shapeName(id)}を削除${kind !== "bed" && beds.length ? `（中の畝 ${beds.length} 本と日程も）` : ""}`,
+    text: `${shapeName(id)}を削除${kind !== "bed" && beds.length ? `（中の畝 ${beds.length} 本と日程も）` : ""}` +
+      (logs.count ? `（作業の記録 ${logs.count} 件から対象を外した）` : ""),
   });
+  // 確かめているあいだに記録が変わっていることがあるので、数え直してから外す
+  const dropped = logsWithout(blocks.map((block) => block.id), beds.map((bed) => bed.id));
+  const emptied = new Set(dropped.emptied.map((log) => log.id));
+  const changed = new Map(dropped.changed.map((log) => [log.id, log]));
+  state.logs = (state.logs || []).filter((log) => !emptied.has(log.id)).map((log) => changed.get(log.id) || log);
   if (kind === "zone") {
     forgetBlocks(blocks.map((block) => block.id));
     state.zones = state.zones.filter((zone) => zone.id !== id);
@@ -1537,7 +1548,39 @@ async function deleteSelectedShape() {
     renumberBlock(item.block_id);
   }
   select(null);
-  persist(() => state.store.remove(TABLES[kind], [id]));
+  // 記録を先に直してから、図形を消す。同じ操作の書き込みとして、続けて送る（元に戻すと、図形を戻してから記録を戻す）
+  const { store } = state;
+  persist(() =>
+    Promise.all([
+      ...dropped.emptied.map((log) => store.deleteLog(log.id)),
+      ...dropped.changed.map((log) => store.saveLog(log)),
+      store.remove(TABLES[kind], [id]),
+    ])
+  );
+}
+
+// 区画・畝を消すときに、それを対象にした作業の記録から、その対象を外した記録。
+// DB の外部キーに任せると、畝と作付の ID だけが空になった対象が残り、区画の記録に見えてしまう。
+// changed は対象を外した記録、emptied はほかに対象がなくなる記録（記録ごと消す）、count はその合計
+function logsWithout(blockIds, bedIds) {
+  const blocks = new Set(blockIds);
+  const beds = new Set(bedIds);
+  const plantings = new Set(state.plantings.filter((planting) => beds.has(planting.bed_id)).map((planting) => planting.id));
+  const gone = (target) => blocks.has(target.block_id) || beds.has(target.bed_id) || plantings.has(target.planting_id);
+  const changed = [];
+  const emptied = [];
+  for (const log of state.logs || []) {
+    if (!log.targets?.some(gone)) {
+      continue;
+    }
+    const targets = log.targets.filter((target) => !gone(target));
+    if (targets.length) {
+      changed.push({ ...log, targets });
+    } else {
+      emptied.push(log);
+    }
+  }
+  return { changed, emptied, count: changed.length + emptied.length };
 }
 
 // ---- 耕起対象区画 ----

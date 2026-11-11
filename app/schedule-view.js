@@ -22,7 +22,7 @@ import { summarize } from "./crops.js";
 import { confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor } from "./log-view.js";
-import { lateWorks, layoutBars, logEnd, plantingOnDate, withActualDates, workActuals, workStatus } from "./logs.js";
+import { isBlockTarget, lateWorks, layoutBars, logEnd, plantingOnDate, withActualDates, workActuals, workStatus } from "./logs.js";
 import { loadPref, savePref } from "./prefs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
@@ -514,7 +514,7 @@ export function actualSpans(ownerWorks, matchesTarget, actuals) {
 }
 
 // 区画の記録か（畝の記録ではなく）
-export const blockTarget = (blockId) => (target) => !target.bed_id && !target.planting_id && target.block_id === blockId;
+export const blockTarget = (blockId) => (target) => isBlockTarget(target) && target.block_id === blockId;
 // その畝（の作付）の記録か
 export const bedTarget = (bed, plantingIds) => (target) => target.bed_id === bed.id || plantingIds.includes(target.planting_id);
 

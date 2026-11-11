@@ -425,9 +425,10 @@ test("日記: 対象の札で絞ると、その作付の作業の記録と予定
       { id: "w3", plan_id: "p1", block_id: null, planting_id: "pl2", work_type: "harvest", seq: 1, plan_start: "2026-12-01", plan_end: "2026-12-10", note: "", cancelled_on: null, detail: {} },
     ],
   };
+  // 区画の対象（planting が null）は、アプリが作るのと同じく、品目の名前を持たない
   const log = (id, date, type, planting, extra = {}) => ({
     id, field_id: "f1", date, end_date: null, work_type: type, finishes: true, spec: {}, note: "", created_at: AT, inputs: [],
-    targets: [{ id: `t-${id}`, log_id: id, planting_id: planting, bed_id: planting ? `bed${planting.slice(2)}` : null, block_id: "b1", work_id: extra.work_id ?? null, label: "", crop_name: "試験菜", area_m2: null, spray_l: null }],
+    targets: [{ id: `t-${id}`, log_id: id, planting_id: planting, bed_id: planting ? `bed${planting.slice(2)}` : null, block_id: "b1", work_id: extra.work_id ?? null, label: planting ? "" : "区画1", crop_name: planting ? "試験菜" : "", area_m2: null, spray_l: null }],
     ...extra,
   });
   data.workLogs = [

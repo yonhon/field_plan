@@ -711,6 +711,10 @@ export function productAmount(liters, dilution) {
   return liters > 0 && dilution > 0 ? (liters * 1000) / dilution : null;
 }
 
+// 区画の記録の対象か（畝の対象ではなく）。区画の対象は、品目の名前を持たない。
+// 畝や作付を消して、DB の側で畝と作付の ID だけが空になった畝の対象は、品目の名前が残るので、区画の対象にしない
+export const isBlockTarget = (target) => Boolean(target.block_id) && !target.bed_id && !target.planting_id && !target.crop_name;
+
 // 記録の対象を、品目ごとの本数で短く表す。例: リーフレタス 3 本、ニンジン 2 本
 export function targetSummary(targets) {
   const counts = new Map();

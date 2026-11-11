@@ -90,6 +90,40 @@ test("選んだ畝を完全に削除: キャンセルなら残り、削除する
   assert.deepEqual(page.errors, []);
 });
 
+test("記録のある畝を削除: 記録の対象から外し、ほかに対象のない記録は消え、元に戻すと両方戻る", options, async () => {
+  const DAY = "2026-03-10";
+  const data = seed(2);
+  data.fields[0].active_plan_id = "p1";
+  data.plantings = ["bed1", "bed2"].map((bedId, i) => ({ id: `pl${i + 1}`, plan_id: "p1", bed_id: bedId, seq: 1, crop_id: "c1", crop_name: "試験菜", note: "" }));
+  const target = (n) => ({ id: `t${n}`, planting_id: `pl${n}`, bed_id: `bed${n}`, block_id: "b1", work_id: null, label: `A 畝${n} 試験菜`, crop_name: "試験菜", area_m2: 10, spray_l: null });
+  const log = (id, targets) => ({ id, field_id: "f1", date: DAY, end_date: null, work_type: "spray", finishes: false, spec: {}, note: "", created_at: AT, inputs: [], targets: targets.map((item) => ({ ...item, id: `${id}-${item.id}`, log_id: id })) });
+  data.workLogs = [log("both", [target(1), target(2)]), log("only1", [target(1)])];
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(`document.querySelectorAll("#strip .strip-bed").length === 2`, "図に畝が 2 本出る");
+  await chooseBed("bed1");
+
+  await page.click("#stripDeleteBtn");
+  await page.waitFor(`document.querySelector("dialog.notice")?.textContent.includes("作業の記録 2 件")`, "記録の件数を知らせる");
+  assert.match(await page.run(`document.querySelector("dialog.notice").textContent`), /ほかに対象のない記録 1 件は、記録ごと消えます/);
+  await page.click(CONFIRM);
+  await waitBeds("bed2");
+  const logsSaved = `JSON.parse(localStorage.getItem("field_plan_local")).workLogs`;
+  await page.waitFor(`${logsSaved}.length === 1 && ${logsSaved}[0].targets.length === 1`, "記録から畝 1 が外れる");
+  const [left] = (await page.saved()).workLogs;
+  assert.equal(left.id, "both");
+  assert.deepEqual(left.targets.map((item) => item.bed_id), ["bed2"]);
+
+  await page.waitFor(`!document.getElementById("undoBtn").disabled`, "元に戻すが使える");
+  await page.click("#undoBtn");
+  await page.waitFor(`${logsSaved}.length === 2`, "消えた記録が戻る");
+  const saved = await page.saved();
+  assert.equal(saved.beds.length, 2);
+  assert.deepEqual(saved.workLogs.find((item) => item.id === "both").targets.map((item) => item.bed_id).sort(), ["bed1", "bed2"]);
+  assert.deepEqual(saved.workLogs.find((item) => item.id === "only1").targets.map((item) => item.bed_id), ["bed1"]);
+  assert.deepEqual(page.errors, []);
+});
+
 test("選んだ畝を表示日でなくす: 図からすぐ消える", options, async () => {
   await openStrip(3);
   await chooseBed("bed2");
