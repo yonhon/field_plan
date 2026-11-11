@@ -228,11 +228,16 @@ export function specDiff(spec, planned) {
 }
 
 // 定植・播種の仕様と、品目の設定値との違いを書いた文。違いがなければ空。
+// 違う項目だけを並べる（例:「株間、条数の実績値20cm、3条に対し、品目の設定値は15cm、4条です。」）。
 // side は「計画」か「実績」。crop は品目の設定値（株間、条間、条数、千鳥）。品目に値がない項目は「なし」と書く
 export function cropDiffText(spec, crop, side) {
   const value = (item, v) => (item.key === "staggered" ? (v ? "千鳥" : "千鳥なし") : v === null ? "なし" : `${v}${item.unit}`);
   const diff = specDiff(spec || {}, crop);
-  return diff.length ? `${diff.map((item) => `${item.label}は、${side}が ${value(item, item.actual)}、品目の設定値が ${value(item, item.planned)}`).join("。")}です。` : "";
+  if (!diff.length) {
+    return "";
+  }
+  const list = (pick) => diff.map((item) => value(item, pick(item))).join("、");
+  return `${diff.map((item) => item.label).join("、")}の${side}値${list((item) => item.actual)}に対し、品目の設定値は${list((item) => item.planned)}です。`;
 }
 
 // 作業のない期間を詰めた時間の軸。spans は [開始, 終了] の日付の組。作業のある日の前後 margin 日を残し、

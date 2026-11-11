@@ -97,11 +97,11 @@ test("定植の仕様が品目の設定値と違えば、計画と実績の欄�
   // 「計画」の表示では、計画の欄の添え書きだけ
   await page.click('#plantingBody [data-gantt-mode="plan"]');
   await page.waitFor(`document.querySelectorAll("#plantingBody .detail-crop-diff").length === 1`, "添え書きが 1 つ出る");
-  assert.deepEqual(await notes(), ["株間は、計画が 30cm、品目の設定値が 15cmです。"]);
+  assert.deepEqual(await notes(), ["株間の計画値30cmに対し、品目の設定値は15cmです。"]);
   // 「計画と実績」の表示では、計画どおりに植えていても、実績の欄にも出す
   await page.click('#plantingBody [data-gantt-mode="both"]');
   await page.waitFor(`document.querySelectorAll("#plantingBody .detail-crop-diff").length === 2`, "添え書きが 2 つ出る");
-  assert.deepEqual(await notes(), ["株間は、計画が 30cm、品目の設定値が 15cmです。", "株間は、実績が 30cm、品目の設定値が 15cmです。"]);
+  assert.deepEqual(await notes(), ["株間の計画値30cmに対し、品目の設定値は15cmです。", "株間の実績値30cmに対し、品目の設定値は15cmです。"]);
   // 仕様の差は「計画との差」の欄には出さない（並べ直すものもないので、欄ごと出ない）
   assert.equal(await page.run(`Boolean(document.querySelector("#plantingBody .detail-diff"))`), false);
 

@@ -232,10 +232,10 @@ test("定植の仕様の、計画との差", () => {
 
 test("定植の仕様と、品目の設定値との違いの文", () => {
   const crop = { plant_gap_cm: 15, row_gap_cm: 15, row_count: 4, staggered: false };
-  assert.equal(cropDiffText({ plant_gap_cm: 20, row_gap_cm: 20, row_count: 3 }, crop, "実績"), "株間は、実績が 20cm、品目の設定値が 15cm。条間は、実績が 20cm、品目の設定値が 15cm。条数は、実績が 3条、品目の設定値が 4条です。");
-  assert.equal(cropDiffText({ plant_gap_cm: 30, staggered: true }, crop, "計画"), "株間は、計画が 30cm、品目の設定値が 15cm。千鳥は、計画が 千鳥、品目の設定値が 千鳥なしです。");
+  assert.equal(cropDiffText({ plant_gap_cm: 20, row_gap_cm: 20, row_count: 3 }, crop, "実績"), "株間、条間、条数の実績値20cm、20cm、3条に対し、品目の設定値は15cm、15cm、4条です。");
+  assert.equal(cropDiffText({ plant_gap_cm: 30, staggered: true }, crop, "計画"), "株間、千鳥の計画値30cm、千鳥に対し、品目の設定値は15cm、千鳥なしです。");
   // 品目に値がない項目は「なし」
-  assert.equal(cropDiffText({ plant_gap_cm: 20 }, { ...crop, plant_gap_cm: null }, "実績"), "株間は、実績が 20cm、品目の設定値が なしです。");
+  assert.equal(cropDiffText({ plant_gap_cm: 20 }, { ...crop, plant_gap_cm: null }, "実績"), "株間の実績値20cmに対し、品目の設定値はなしです。");
   // 同じなら空。仕様がなくても空
   assert.equal(cropDiffText({ plant_gap_cm: 15, row_count: 4 }, crop, "実績"), "");
   assert.equal(cropDiffText({}, crop, "実績"), "");
