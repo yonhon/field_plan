@@ -21,6 +21,7 @@ import {
   isActivePlan,
   modeButtons,
   openProblemTarget,
+  openProcessPlan,
   scopeProblemsHtml,
   setGanttMode,
 } from "./schedule-view.js";
@@ -964,11 +965,10 @@ function onClick(event) {
     return;
   }
   if (el.dataset.plan) {
-    // 計画の行: 日程の画面で、その作業の計画を開く
+    // 計画の欄: その作業の区画か作付の工程の計画を、窓で開く
     const work = state().works.find((item) => item.id === el.dataset.plan);
     if (work) {
-      ctx.openInSchedule(work.block_id ? "block" : "planting", work.block_id || work.planting_id);
-      ctx.showView("schedule");
+      openProcessPlan(work.block_id ? "block" : "planting", work.block_id || work.planting_id);
     }
     return;
   }

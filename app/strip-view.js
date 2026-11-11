@@ -217,7 +217,7 @@ export function renderStrip() {
               const works = state.works.filter((work) => work.planting_id === planting.id).sort(bySeq);
               const end = harvestEnd(works);
               return (
-                `<div class="strip-planting"><div class="strip-crop">${planting.seq}. ${escapeHtml(planting.crop_name || "品目なし")}</div>` +
+                `<div class="strip-planting" data-planting="${planting.id}"><div class="strip-crop">${planting.seq}. ${escapeHtml(planting.crop_name || "品目なし")}</div>` +
                 `${numbersLine(bed, planting)}` +
                 `${workItems(works)}${end ? "" : '<p class="strip-empty">収穫完了は未定</p>'}</div>`
               );
@@ -478,7 +478,11 @@ export function initStrip(context) {
         record({ kind: "bed.move", target: ["bed", bed.id], text: `${name}を移動` });
       }
       renderStrip();
+    } else if (canEdit()) {
+      // 動かさずに離した: その畝を選ぶ（図の上のボタンの相手）
+      ctx.select("bed", bed.id);
     } else {
+      // スマホ（畝を動かせない幅）: 選んでも使うボタンがないので、その畝の作付の詳細を開く
       ctx.open("bed", bed.id);
     }
   };
@@ -490,7 +494,9 @@ export function initStrip(context) {
     if (dimension) {
       setDimension(dimension.dataset.dim);
     } else if (opener) {
-      ctx.open(opener.dataset.open === "block" ? "block" : "bed", opener.dataset.open === "block" ? view.block.id : opener.dataset.open);
+      // 区画の作業の欄なら区画、畝の下の欄なら畝（押した作付があれば、その作付）
+      const planting = event.target.closest("[data-planting]")?.dataset.planting || null;
+      ctx.open(opener.dataset.open === "block" ? "block" : "bed", opener.dataset.open === "block" ? view.block.id : opener.dataset.open, planting);
     }
   });
 

@@ -9,7 +9,7 @@ const AREA = [[0, 0], [40, 0], [40, 20], [0, 20]];
 const bed = (seq) => ({ id: `bed${seq}`, plan_id: "p1", block_id: "b1", seq, shape: [[seq * 3, 2], [seq * 3 + 1, 2], [seq * 3 + 1, 18], [seq * 3, 18]], start_date: null, removed_on: null });
 const work = (id, owner, type, seq, start, end) => ({ id, plan_id: "p1", block_id: null, planting_id: null, ...owner, work_type: type, seq, plan_start: start, plan_end: end, note: "" });
 
-// 区画 1 つに、区画の作業 2 件と、畝 2 本（畝 1 だけ作付と作業がある）
+// 区画 1 つに、区画の作業 2 件と、畝 2 本（畝 1 だけ作付と作業がある。畝 1 には管理作業の防除の計画もある）
 const seed = () => ({
   fields: [{ id: "f1", name: "試験の圃場", outline: AREA, note: "", active_plan_id: "p1", created_at: AT }],
   plans: [{ id: "p1", field_id: "f1", name: "プラン1" }],
@@ -21,6 +21,7 @@ const seed = () => ({
     work("w1", { block_id: "b1" }, "rotary", 1, "2026-10-01", "2026-10-01"),
     work("w2", { block_id: "b1" }, "subsoil", 2, "2026-10-05", "2026-10-05"),
     work("w3", { planting_id: "pl1" }, "ridge", 1, "2026-11-01", "2026-11-02"),
+    work("m1", { planting_id: "pl1" }, "spray", 2, "2026-11-20", "2026-11-20"),
   ],
   crops: [{ id: "c1", name: "試験菜", mulch: false, bed_width_cm: 100, aisle_width_cm: 60 }],
 });
@@ -89,7 +90,17 @@ test("工程の計画: 畝を選んで作業を足し、キャンセルで捨て
   await page.click(`${DIALOG} .log-foot [data-act="close"]`);
   await page.click('dialog.notice [data-action="delete"]');
   await page.waitFor(`!document.querySelector("${DIALOG}")`, "捨てて閉じる");
-  assert.equal(await page.run(`JSON.parse(localStorage.getItem("field_plan_local")).works.filter((work) => work.planting_id === "pl1").length`), 1);
+  assert.equal(await page.run(`JSON.parse(localStorage.getItem("field_plan_local")).works.filter((work) => work.planting_id === "pl1").length`), 2);
+
+  // 畝 1 の工程の作業を消して保存しても、カードに出ていない管理作業（防除）の計画は残る
+  await openFromBlock();
+  await setValue(`${DIALOG} [data-pe="target"]`, "bed:bed1");
+  await page.waitFor(`document.querySelectorAll("${DIALOG} .pe-planting .pe-card").length === 1`, "畝 1 の作業（防除は出ない）");
+  await page.click(`${DIALOG} .pe-card[data-id="w3"] [data-pe-act="delete"]`);
+  await page.click(`${DIALOG} [data-act="save"]`);
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "保存して閉じる");
+  await page.waitFor(`!JSON.parse(localStorage.getItem("field_plan_local")).works.some((work) => work.id === "w3")`, "工程の作業が消える");
+  assert.ok(await savedWork("m1"), "防除の計画が残る");
 
   // 畝 2（作付なし）に、試験菜の作付を足して保存する。ひな形の作業が入る
   await openFromBlock();

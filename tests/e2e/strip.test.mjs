@@ -142,11 +142,14 @@ test("品目を決めずに足す: 畝だけが保存される", options, async 
   assert.deepEqual(page.errors, []);
 });
 
+// 作付のない畝の欄を押すと、窓の工程の計画がその畝で開き、そこで作付を足せる
 test("畝に作付を追加する: 作付と作業が保存される", options, async () => {
   await openStrip(1);
-  await chooseBed("bed1");
-  await chooseCrop("#newCropSelect");
-  await page.click("#addPlantingBtn");
+  await page.click('.strip-column-bed[data-open="bed1"]');
+  await page.waitFor(`Boolean(document.querySelector('dialog.log-dialog[open] [data-pe="add-crop"]'))`, "窓の工程の計画");
+  await chooseCrop('dialog.log-dialog[open] [data-pe="add-crop"]');
+  await page.click('dialog.log-dialog[open] [data-pe-act="add-planting"]');
+  await page.click('dialog.log-dialog[open] [data-act="save"]');
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).works.length > 0`, "作付と作業の保存");
   assert.equal((await page.saved()).plantings[0].crop_name, "試験菜");
   assert.deepEqual(page.errors, []);

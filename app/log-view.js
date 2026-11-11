@@ -707,7 +707,7 @@ function planCopySection() {
 }
 
 function typeSection() {
-  // 計画で入れられるのは管理作業だけ（工程の作業の計画は「作業の計画」の表で入れる）
+  // 計画で入れられるのは管理作業だけ（工程の作業の計画は「工程の計画」のタブで入れる）
   const usable = draft.kind === "plan" ? allTypes().filter((type) => isManagement(type.code)) : allTypes();
   const quick = QUICK_TYPES.filter((code) => usable.some((type) => type.code === code));
   const others = usable.filter((type) => !quick.includes(type.code));

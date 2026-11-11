@@ -49,7 +49,7 @@ import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
-import { currentBlockId, ganttHasFocus, initSchedule, openInSchedule, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, scheduleHash, selectedRowPreset } from "./schedule-view.js";
+import { currentBlockId, ganttHasFocus, initSchedule, openInSchedule, openProcessPlan, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash, selectedRowPreset } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
 
@@ -2841,6 +2841,7 @@ function showView(view, { history: mode = "push" } = {}) {
     window.scrollTo(0, 0);
   } else if (view === "crops") {
     renderCrops();
+    renderTypes();
   } else if (view === "diary") {
     renderDiary();
   } else {
@@ -2908,12 +2909,15 @@ function openTarget(entry) {
   if (kind === "crop" || kind === "fertilizer") {
     showView("crops");
   } else if (kind === "planting" && state.plantings.some((item) => item.id === id)) {
+    // 作付と作業: 日程の画面でその区画を開き、窓の工程の計画をその作付（区画）で開く
     openInSchedule("planting", id);
     showView("schedule");
+    openProcessPlan("planting", id);
   } else if (kind === "work" && state.works.some((item) => item.id === id)) {
     const work = state.works.find((item) => item.id === id);
     openInSchedule(work.block_id ? "block" : "planting", work.block_id || work.planting_id);
     showView("schedule");
+    openProcessPlan(work.block_id ? "block" : "planting", work.block_id || work.planting_id);
   } else if (["zone", "block", "bed"].includes(kind) && findShape(id)) {
     showView("map");
     select(id);

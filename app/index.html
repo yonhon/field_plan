@@ -335,7 +335,7 @@
             <h2>区画と畝</h2>
             <label class="inline-field">表示日<input id="stripDate" type="date" /></label>
           </div>
-          <p class="muted edit-only">畝や区画の作業をクリックすると、下で編集できます。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わります。数字をクリックすると、畝幅や隙間を cm で指定できます。図の中の「＋」を押すと、その場所に下の畝幅と隙間で畝を足します。畝の追加、移動、削除は、この図だけで行います。</p>
+          <p class="muted edit-only">区画の作業の欄を押すと、その区画の工程の計画を窓で開きます。畝の下の作付の欄を押すと、その作付の詳細を開きます。畝を押すと、その畝を選びます（下の「選んだ畝を…」のボタンの相手）。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わります。数字をクリックすると、畝幅や隙間を cm で指定できます。図の中の「＋」を押すと、その場所に下の畝幅と隙間で畝を足します。畝の追加、移動、削除は、この図だけで行います。</p>
           <div class="row edit-only strip-tools">
             <select id="stripCrop" aria-label="足す畝の品目"></select>
             <label class="inline-field">畝幅（cm）<input id="stripWidth" type="number" min="1" value="70" /></label>
@@ -367,36 +367,6 @@
             <p class="muted">手前は、圃場図の「圃場の外形」で決めた視点に近い側の端です。この図の左右も、その視点から見た左右です。手前の隙間は、区画の手前の端から畝の端までの距離です。足した畝の長さと前後の位置は、いまある最後の畝に合わせて入ります。</p>
           </details>
           <div class="strip-scroll"><div id="strip" class="strip"></div></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-heading">
-            <h2>作業の計画</h2>
-            <select id="scheduleTarget" aria-label="区画の作業か、畝か"></select>
-          </div>
-          <!-- 区画なら区画の作業、畝なら作付ごとの欄が、上から順に並ぶ（schedule-view.js が描く） -->
-          <div id="editorSections"></div>
-          <!-- 畝のとき: 次の作付を足す欄。作付がまだなければ、これだけが出る -->
-          <div id="addPlantingBar" class="row edit-only add-planting">
-            <label class="inline-field">追加する作付の品目
-              <select id="newCropSelect"></select>
-            </label>
-            <select id="newPlantingMode" aria-label="日付の基準">
-              <option value="plant">定植・播種をこの日に始める（前は逆算）</option>
-              <option value="forward">最初の作業をこの日に始める</option>
-            </select>
-            <input id="newPlantingDate" type="date" aria-label="基準にする日" />
-            <button id="addPlantingBtn" class="chip-btn">作付を追加</button>
-          </div>
-          <!-- 作業の種類ごとの目安の日数。ふだんは閉じておく -->
-          <details class="strip-detail edit-only">
-            <summary>作業の種類と目安の日数</summary>
-            <p class="muted">ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。</p>
-            <table class="type-table">
-              <thead><tr><th>作業</th><th>かかる日数</th><th>あとにあける日数</th></tr></thead>
-              <tbody id="typeRows"></tbody>
-            </table>
-          </details>
         </section>
 
         <!-- 区画の作業の計画と実績（計画にない実績も）、計画との差、日記のボタン（planting-view.js が描く） -->
@@ -432,6 +402,15 @@
         </div>
         <p class="muted">窒素の成分（%）から、肥料の量を計算します。</p>
         <div class="table-scroll"><table id="fertilizerTable" class="work-table crop-table"></table></div>
+      </section>
+
+      <section class="panel edit-only">
+        <h2>作業の種類と目安の日数</h2>
+        <p class="muted">ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。品目を登録した作付では、収穫までの日数などは品目の設定を使います。</p>
+        <table class="type-table">
+          <thead><tr><th>作業</th><th>かかる日数</th><th>あとにあける日数</th></tr></thead>
+          <tbody id="typeRows"></tbody>
+        </table>
       </section>
     </main>
 
