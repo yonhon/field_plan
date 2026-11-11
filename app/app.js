@@ -1037,6 +1037,23 @@ for (const type of ["pointerdown", "keydown"]) {
   document.addEventListener(type, startOperation, true);
 }
 
+// 新しい版へ読み込み直す前に、送り残しの保存と、送っている書き込みと、変更の記録を送り終える。
+// 区画を動かすと、区画の行を送ってから畝の行を送るので、途中で読み込み直すと、区画だけが動いて畝が残る。
+// 送れずに残ったものがあれば false（読み込み直すと消えるので、読み込み直さない。失敗は flushSaves などが窓で知らせる）
+async function finishSaves() {
+  await sendPendingSaves();
+  while (state.store?.writing()) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await saveJournalNow();
+  return !pendingSaves.size && !state.store?.writing();
+}
+
+// 「読み込み直す」のボタン（index.html）が、読み込み直す前に知らせてくる。待つものを detail.waits に入れる
+document.addEventListener("app-before-reload", (event) => {
+  event.detail.waits.push(finishSaves());
+});
+
 // 保存が終わらないうちに閉じると、変更が消える。閉じる前に送り、確かめる
 window.addEventListener("beforeunload", (event) => {
   if (pendingSaves.size || state.store?.writing()) {
@@ -2292,6 +2309,13 @@ function pressedSelected(event) {
   return Boolean(points) && gap === undefined && edge === undefined && pointInPolygon(clientToWorld(event), points);
 }
 
+// 作図の道具（選択・移動、外形を描く、など）が出ているか。スマホやタブレットの幅では出さない（.edit-only）。
+// 出ていないときは、図形を動かしたり描いたりせず、なぞったら図が動くだけにする（見るための画面なので）
+function drawingToolsShown() {
+  const tools = document.querySelector("#appView .toolbar.edit-only");
+  return Boolean(tools) && getComputedStyle(tools).display !== "none";
+}
+
 map.addEventListener("pointerdown", (event) => {
   map.setPointerCapture(event.pointerId);
   pointers.set(event.pointerId, [event.clientX, event.clientY]);
@@ -2300,14 +2324,20 @@ map.addEventListener("pointerdown", (event) => {
     return;
   }
   const target = event.target;
-  if (state.mode === "select" && target.dataset.vertex !== undefined) {
+  // 作図の道具が出ていないときは、図形を動かさず、図を動かす（pan）。離したときは、図形を選ぶか、品目名から作付の詳細を開くだけ
+  const editing = drawingToolsShown();
+  if (!editing && state.mode !== "select") {
+    // PC の幅で道具を選んだまま、画面を狭めたとき。道具は見えないので、選択に戻す
+    setMode("select");
+  }
+  if (editing && state.mode === "select" && target.dataset.vertex !== undefined) {
     state.selectedVertex = Number(target.dataset.vertex);
     gesture = { kind: "vertex", index: state.selectedVertex, moved: false, was: sizeText(state.selected) };
     render();
-  } else if (state.mode === "select" && target.dataset.mid !== undefined && !isOutline(state.selected)) {
+  } else if (editing && state.mode === "select" && target.dataset.mid !== undefined && !isOutline(state.selected)) {
     // 区域と区画: 辺を平行に動かして、大きさを変える
     gesture = { kind: "edge", index: Number(target.dataset.mid), last: clientToWorld(event), was: sizeText(state.selected) };
-  } else if (state.mode === "select" && target.dataset.mid !== undefined) {
+  } else if (editing && state.mode === "select" && target.dataset.mid !== undefined) {
     // 圃場の外形: 辺の途中に頂点を足す
     const index = Number(target.dataset.mid) + 1;
     const points = [...shapePoints(state.selected)];
@@ -2316,13 +2346,13 @@ map.addEventListener("pointerdown", (event) => {
     state.selectedVertex = index;
     gesture = { kind: "vertex", index, moved: true, was: sizeText(state.selected) };
     render();
-  } else if (state.mode === "rect" || state.mode === "blockrect") {
+  } else if (editing && (state.mode === "rect" || state.mode === "blockrect")) {
     // 区域は圃場の外形の辺に、区画は有効圃場の辺に平行に描く
     const start = clientToWorld(event);
     const zone = state.mode === "blockrect" ? tillableZoneAt(start) : null;
     const frames = zone ? [zone.shape] : state.field.outline;
     gesture = { kind: "rect", start, zone, angle: nearestEdgeAngleOf(start, frames), origin: [event.clientX, event.clientY] };
-  } else if (state.mode === "select" && !target.dataset.detail && pressedSelected(event)) {
+  } else if (editing && state.mode === "select" && !target.dataset.detail && pressedSelected(event)) {
     // 選択中の図形は、ドラッグでそのまま動かせる。動かさずに離したら、押した図形を選ぶ
     gesture = { kind: "move", moved: false, start: [event.clientX, event.clientY], last: clientToWorld(event), shape: target.dataset.shape };
   } else {
@@ -2331,8 +2361,9 @@ map.addEventListener("pointerdown", (event) => {
       moved: false,
       start: [event.clientX, event.clientY],
       shape: target.dataset.shape,
-      gap: target.dataset.gap,
-      edge: target.dataset.edge,
+      // すき間と辺の長さの数字を押すと、長さを入れる窓が開く。作図の道具が出ていないときは開かない
+      gap: editing ? target.dataset.gap : undefined,
+      edge: editing ? target.dataset.edge : undefined,
       detail: target.dataset.detail,
     };
   }

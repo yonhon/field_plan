@@ -192,6 +192,26 @@ export async function openBrowser() {
     }
   };
 
+  // 圃場図の上の点（圃場の座標）から、右へ dx ピクセル、本物のマウスの操作でなぞる
+  const dragMap = async (world, dx) => {
+    const point = await run(`(() => {
+      const map = document.getElementById("map");
+      const p = new DOMPoint(${world[0]}, ${-world[1]}).matrixTransform(map.getScreenCTM());
+      return { x: p.x, y: p.y };
+    })()`);
+    await page.send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", buttons: 1, clickCount: 1 });
+    for (let step = 1; step <= 5; step += 1) {
+      await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x + (dx * step) / 5, y: point.y, button: "left", buttons: 1 });
+    }
+    await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x + dx, y: point.y, button: "left", clickCount: 1 });
+  };
+
+  // 画面の幅を変える（スマホの幅を試す）。width を省くと元の大きさに戻す
+  const viewport = (width, height = 844) =>
+    width
+      ? page.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false })
+      : page.send("Emulation.clearDeviceMetricsOverride");
+
   // キーを押して離す（Tab など）。文字を入れるときは type を使う
   const press = async (key, code = key, keyCode = { Tab: 9, Enter: 13 }[key]) => {
     await page.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode });
@@ -235,7 +255,10 @@ export async function openBrowser() {
     const exited = chrome.exitCode !== null ? Promise.resolve() : new Promise((resolve) => chrome.once("exit", resolve));
     chrome.kill();
     await new Promise((resolve) => server.close(resolve));
-    await Promise.race([exited, sleep(5000)]);
+    // 待つのは 5 秒まで。Chrome が先に終わったら、タイマーを止める（残ると、テストのプロセスが終わるのを 5 秒止める）
+    let timer;
+    await Promise.race([exited, new Promise((resolve) => (timer = setTimeout(resolve, 5000)))]);
+    clearTimeout(timer);
     // Chrome の子のプロセスが、終わったあともしばらくファイルをつかんでいることがある。消せなければ残す（OS の一時フォルダーの中）
     try {
       rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
@@ -251,6 +274,8 @@ export async function openBrowser() {
     waitFor,
     click,
     clickMap,
+    dragMap,
+    viewport,
     drag,
     press,
     type,
