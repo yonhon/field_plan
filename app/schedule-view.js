@@ -42,7 +42,7 @@ const BAR_H = 26; // 計画の帯の高さ（「実績」だけのときは実�
 const THIN_H = 10; // 「計画と実績」で計画の帯の下側に重ねる、実績の帯の高さ
 const MIN_BAR_PX = 12; // 1 日の作業も、押せるようにこの幅より細くしない
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
-const SCOPE_LABELS = { block: "区画の作業（畝立ての前まで）", bed: "畝の作業（畝立てから後）" };
+export const SCOPE_LABELS = { block: "区画の作業（畝立ての前まで）", bed: "畝の作業（畝立てから後）" };
 
 let ctx = null; // { state, setStatus, queueSave, cropColor, plantingOn }
 // いま編集している相手。target は "block"（区画の作業）か、畝の ID
@@ -52,7 +52,7 @@ const folded = new Set(); // 折りたたんでいる作付の ID
 const arrangeChoice = new Map(); // 並べ直しの欄で選んだ基準と日 { mode, date }。区画や作付ごと
 const template = { key: Object.keys(TEMPLATES.block)[0], start: "" }; // 区画のひな形の欄で選んだもの
 let problems = []; // 日程の無理。描くたびに求め直す
-const ARRANGE_MODES = {
+export const ARRANGE_MODES = {
   block: { before: "畝立てをこの日に始められるように逆算", forward: "最初の作業をこの日に始める" },
   bed: { plant: "定植・播種をこの日に始める（前は逆算）", forward: "最初の作業をこの日に始める" },
 };
@@ -197,6 +197,9 @@ export function renderSchedule() {
     }
   }
 }
+
+// 日程の画面で開いている区画（「作業を入力する」の窓の、工程の計画の初めの相手に使う）
+export const currentBlockId = () => sel.blockId;
 
 // 日程の画面の URL。区画を選んでいれば #schedule/block/区画の ID
 export const scheduleHash = () => (sel.blockId ? `#schedule/block/${sel.blockId}` : "#schedule");

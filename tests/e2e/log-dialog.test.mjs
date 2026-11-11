@@ -69,8 +69,8 @@ const near = (actual, expected, label) => assert.ok(Math.abs(actual - expected) 
 test("防除の入力: 農薬・作物名・使い方を選んでも、窓の中の位置が変わらない", options, async () => {
   await page.loadApp(seed());
   await page.click("#logAddBtn");
-  // 窓は計画で開く。計画、実績の順に並ぶ
-  assert.deepEqual(await page.run(`[...document.querySelectorAll('dialog.log-dialog [data-act="kind"]')].map((el) => el.textContent + (el.classList.contains("is-on") ? "*" : ""))`), ["計画*", "実績"]);
+  // 窓は実績で開く。工程の計画、管理作業の計画、実績の順に並ぶ
+  assert.deepEqual(await page.run(`[...document.querySelectorAll('dialog.log-dialog [data-act="kind"]')].map((el) => el.textContent + (el.classList.contains("is-on") ? "*" : ""))`), ["工程の計画", "管理作業の計画", "実績*"]);
   await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
   await page.click('dialog.log-dialog [data-act="type"][data-code="spray"]');
   await page.click('dialog.log-dialog [data-act="group"]');
@@ -228,8 +228,15 @@ test("株の手入れ・その他の中身は、作業の種類のすぐ下（�
   const order = await headings();
   assert.deepEqual(order.slice(order.indexOf("作業の種類"), order.indexOf("作業の種類") + 3), ["作業の種類", "中身", "対象"]);
   assert.ok(await page.run('Boolean(document.querySelector(\'dialog.log-dialog [data-act="item"][data-item="鉢上げ"]\'))'), "鉢上げを選べる");
-  // 閉じると履歴を 1 つ戻す。戻り終わるのを待ってから次のテストへ
+  // 書きかけのまま閉じると、捨ててよいかを確かめる。「入力を続ける」なら窓は開いたまま
   await page.click('dialog.log-dialog [data-act="close"]');
+  await page.waitFor(`document.querySelector("dialog.notice[open] .notice-text")?.textContent.includes("まだ保存していない入力")`, "捨ててよいかの確かめ");
+  await page.click('dialog.notice [data-action="cancel"]');
+  await page.waitFor(`!document.querySelector("dialog.notice[open]") && Boolean(document.querySelector("dialog.log-dialog[open]"))`, "窓は開いたまま");
+  // 「捨てて閉じる」で閉じると履歴を 1 つ戻す。戻り終わるのを待ってから次のテストへ
+  await page.click('dialog.log-dialog [data-act="close"]');
+  await page.click('dialog.notice [data-action="delete"]');
+  await page.waitFor(`!document.querySelector("dialog.log-dialog[open]")`, "窓が閉じる");
   await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
   assert.deepEqual(page.errors, []);
 });

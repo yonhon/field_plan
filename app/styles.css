@@ -3574,3 +3574,210 @@ button.diary-work:hover {
   color: var(--accent);
   font-size: 13px;
 }
+
+/* ---- 「作業を入力する」の窓のタブと、工程の計画 ---- */
+/* タブは 3 つを同じ幅で並べる */
+.log-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+}
+
+.log-tabs .chip-btn {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.pe {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pe-target {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pe-target select {
+  width: 100%;
+}
+
+.pe-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.pe-line > select {
+  flex: 1;
+  min-width: 0;
+}
+
+.pe-tools summary {
+  font-size: 13px;
+}
+
+/* 作業 1 件 = カード 1 枚 */
+.pe-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.pe-card.is-done {
+  background: #f3f8f7;
+}
+
+.pe-card.is-flagged {
+  border-color: var(--danger);
+}
+
+.pe-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pe-card-top select {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.pe-no {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #eef3f2;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pe-dates {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.pe-dates input {
+  width: 100%;
+  min-width: 0;
+}
+
+.pe-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pe-meta b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.pe-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fff1d6;
+  color: #8a5a00;
+  font-size: 11px;
+}
+
+.pe-badge.is-done {
+  background: #dcefe9;
+  color: #1d6a4f;
+}
+
+.pe-memo-btn {
+  margin-left: auto;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.pe-flag,
+.pe-notes {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.pe-notes {
+  padding: 0;
+  list-style: none;
+}
+
+.pe-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.pe-icon {
+  min-width: 40px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.pe-icon.is-danger {
+  color: var(--danger);
+}
+
+.pe-icon:disabled {
+  color: var(--line);
+}
+
+.pe-add {
+  align-self: flex-start;
+}
+
+.pe-planting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.pe-planting-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pe-planting-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.pe-add-planting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--accent);
+  border-radius: 12px;
+  background: #f7fbfb;
+}
+
+.log-tabs + .pe {
+  margin-top: 6px;
+}

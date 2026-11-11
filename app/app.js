@@ -43,12 +43,13 @@ import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
+import { initProcessEditor } from "./process-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
-import { ganttHasFocus, initSchedule, openInSchedule, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, scheduleHash, selectedRowPreset } from "./schedule-view.js";
+import { currentBlockId, ganttHasFocus, initSchedule, openInSchedule, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, scheduleHash, selectedRowPreset } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
 
@@ -3013,6 +3014,7 @@ async function startApp() {
     refreshDiaryWorks();
   };
   initLogs({ state, activePlanData, setStatus, onLogsChanged: refreshRecords, selectedTarget: selectedRowPreset });
+  initProcessEditor({ state, setStatus, refresh: refreshRecords, currentBlockId });
   initPlantingView({
     state,
     showView,

@@ -583,7 +583,8 @@ function headHtml(c, active, rootId = "plantingBody") {
     item
       ? `<button type="button" class="text-btn detail-go" data-act="go" data-kind="${item.kind}" data-id="${item.id}">${arrow === "prev" ? "‹ " : ""}${escapeHtml(item.label)}${arrow === "next" ? " ›" : ""}</button>`
       : "";
-  const recordButton = active ? '<button type="button" class="primary-btn" data-act="record">＋ 作業を入力</button>' : "";
+  // 実際に使うプランでなくても出す（工程の計画は、どのプランでも直せる）
+  const recordButton = '<button type="button" class="primary-btn" data-act="record">＋ 作業を入力</button>';
   const actions = diaryButtonHtml(c, active) + recordButton;
   // 名前を真ん中に、前後のボタンを両側に置く。入力と日記のボタンは、名前の右隣に置いて 1 行に収まればそこに、
   // 収まらなければ名前の下の行に置く（fitHead が測って is-stacked を付ける）
@@ -995,7 +996,8 @@ function onClick(event) {
       openDiary(c);
     }
   } else if (act === "record") {
-    openLogEditor(null, t.kind === "block" ? { blockId: t.id } : { plantingId: t.id });
+    // 区画からは工程の計画のタブで、作付からは実績のタブで開く
+    openLogEditor(null, t.kind === "block" ? { blockId: t.id, tab: "process" } : { plantingId: t.id });
   } else if (act === "reschedule") {
     reschedule(t);
   }
