@@ -68,7 +68,6 @@ const near = (actual, expected, label) => assert.ok(Math.abs(actual - expected) 
 
 test("防除の入力: 農薬・作物名・使い方を選んでも、窓の中の位置が変わらない", options, async () => {
   await page.loadApp(seed());
-  await page.click('.tab-btn[data-view="schedule"]');
   await page.click("#logAddBtn");
   // 窓は計画で開く。計画、実績の順に並ぶ
   assert.deepEqual(await page.run(`[...document.querySelectorAll('dialog.log-dialog [data-act="kind"]')].map((el) => el.textContent + (el.classList.contains("is-on") ? "*" : ""))`), ["計画*", "実績"]);
@@ -195,8 +194,8 @@ test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴
   const length = await page.run("history.length");
   const isOpen = 'Boolean(document.querySelector("dialog.log-dialog[open]"))';
 
-  // 開いたら、入力の位置は見出し（閉じるボタンではない）
-  await page.click("#logAddBtn");
+  // 日程の画面では、区画の頭の「＋ 作業を入力」で開く。開いたら、入力の位置は見出し（閉じるボタンではない）
+  await page.click('#blockHead [data-act="record"]');
   await page.waitFor(isOpen, "窓が開く");
   assert.equal(await page.run("document.activeElement.id"), "logDialogTitle");
   assert.equal(await page.run("history.length"), length + 1);
@@ -209,7 +208,7 @@ test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴
   assert.equal(await page.run('document.querySelector(".tab-btn.is-active").dataset.view'), "schedule");
 
   // もう一度開いて、閉じるボタンで閉じる: 積んだ履歴を取り消し、そのあとの戻るは前の画面（圃場図）へ
-  await page.click("#logAddBtn");
+  await page.click('#blockHead [data-act="record"]');
   await page.waitFor(isOpen, "窓がもう一度開く");
   await page.click('dialog.log-dialog .log-head [data-act="close"]');
   await page.waitFor(`!${isOpen}`, "閉じるで窓が閉じる");
@@ -223,7 +222,6 @@ test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴
 
 test("株の手入れ・その他の中身は、作業の種類のすぐ下（対象の上）に出る", options, async () => {
   await page.loadApp(seed());
-  await page.click('.tab-btn[data-view="schedule"]');
   await page.click("#logAddBtn");
   await page.click('dialog.log-dialog [data-act="type"][data-code="care"]');
   const headings = () => page.run('[...document.querySelectorAll("dialog.log-dialog .log-section > h3, dialog.log-dialog .log-section-head > h3")].map((h) => h.textContent)');
@@ -242,7 +240,6 @@ test("1 穴あたりの量: 選んだ畝の穴の数を掛けた量で記録し�
   Object.assign(data.crops[0], { plant_gap_cm: 20, row_count: 2 });
   data.fertilizers = [{ id: "fe1", name: "試験の肥料", n_pct: 10, p_pct: 10, k_pct: 10 }];
   await page.loadApp(data);
-  await page.click('.tab-btn[data-view="schedule"]');
   await page.click("#logAddBtn");
   await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
   await page.click('dialog.log-dialog [data-act="type"][data-code="topdress"]');
@@ -285,7 +282,6 @@ test("1 穴あたりの量: 選んだ畝の穴の数を掛けた量で記録し�
 
 test("1 穴あたりの量: 苗数が分からない畝があれば、保存せずに知らせる", options, async () => {
   await page.loadApp(seed());
-  await page.click('.tab-btn[data-view="schedule"]');
   await page.click("#logAddBtn");
   await page.click('dialog.log-dialog [data-act="type"][data-code="topdress"]');
   await page.click('dialog.log-dialog [data-act="group"]');

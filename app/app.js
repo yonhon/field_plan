@@ -2818,7 +2818,8 @@ function showView(view, { history: mode = "push" } = {}) {
   $("cropsView").hidden = view !== "crops";
   $("diaryView").hidden = view !== "diary";
   $("journalView").hidden = view !== "journal";
-  $("logAddBtn").hidden = view !== "map" && view !== "schedule";
+  // 右下の「＋ 入力する」は圃場図だけ（日程の画面と作付の詳細では、頭の「＋ 作業を入力」を使う）
+  $("logAddBtn").hidden = view !== "map";
   // 工程表の欄は 1 つで、圃場図と日程の画面のうち、開いた方へ移す（描くのは renderSchedule）
   if (view === "map" || view === "schedule") {
     placeGantt(view);

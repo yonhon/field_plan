@@ -533,20 +533,13 @@ function forecastHtml() {
   );
 }
 
-// 区画の頭の、面積・畝・苗の行。押すと、苗と肥料の集計を開く
+// 区画の頭の、面積・畝の行。押すと、苗と肥料の集計を開く
 function blockInfoHtml(c) {
   const today = localToday();
   const beds = state().beds.filter((bed) => bed.block_id === c.block.id);
   const live = beds.filter((bed) => existsOn(bed.start_date, bed.removed_on, today));
   const summary = summarize({ ...state(), beds, logs: state().logs || [] });
-  const seedlings = summary.crops.reduce((sum, row) => sum + (row.seedlings || 0), 0);
-  const text = [
-    `区画 ${polygonArea(c.block.shape).toFixed(1)} ㎡`,
-    `畝 ${live.length} 本`,
-    seedlings ? `苗 ${seedlings.toLocaleString("ja-JP")}` : "",
-  ]
-    .filter(Boolean)
-    .join("・");
+  const text = `区画 ${polygonArea(c.block.shape).toFixed(1)} ㎡・畝 ${live.length} 本`;
   if (!summary.crops.length) {
     return `<span class="muted detail-info">${escapeHtml(text)}</span>`;
   }
