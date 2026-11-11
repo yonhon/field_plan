@@ -972,6 +972,12 @@ body.plan-busy #scheduleView {
 }
 
 /* 辺の長さの数字。クリックすると数値で指定できる */
+/* 圃場図の畝の品目名。押すと作付の詳細を開く。図の文字として読むので、見た目はまわりの文字と同じにする */
+.map-link {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
 .map-label[data-edge] {
   pointer-events: auto;
   cursor: pointer;
@@ -2295,6 +2301,11 @@ body.plan-busy #scheduleView {
   font-size: 12px;
   color: var(--memo);
   white-space: pre-line; /* メモの改行を生かし、長い行は折り返す（表のセルは折り返さない設定） */
+}
+
+/* 定植・播種の仕様が、品目の設定値と違うことの添え書き */
+.detail-crop-diff {
+  color: var(--muted);
 }
 
 .detail-gap td {

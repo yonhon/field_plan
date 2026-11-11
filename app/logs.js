@@ -227,6 +227,14 @@ export function specDiff(spec, planned) {
     .map(([key, label, unit]) => ({ key, label, unit, planned: planned[key] ?? null, actual: spec[key] }));
 }
 
+// 定植・播種の仕様と、品目の設定値との違いを書いた文。違いがなければ空。
+// side は「計画」か「実績」。crop は品目の設定値（株間、条間、条数、千鳥）。品目に値がない項目は「なし」と書く
+export function cropDiffText(spec, crop, side) {
+  const value = (item, v) => (item.key === "staggered" ? (v ? "千鳥" : "千鳥なし") : v === null ? "なし" : `${v}${item.unit}`);
+  const diff = specDiff(spec || {}, crop);
+  return diff.length ? `${diff.map((item) => `${item.label}は、${side}が ${value(item, item.actual)}、品目の設定値が ${value(item, item.planned)}`).join("。")}です。` : "";
+}
+
 // 作業のない期間を詰めた時間の軸。spans は [開始, 終了] の日付の組。作業のある日の前後 margin 日を残し、
 // minGap 日以上の空きは gapWidth 日ぶんの幅に詰める。x(日付) は軸の上の位置（日の単位）、total は軸の長さ。
 // breaks は詰めた空き（位置、幅、日数）、ticks は詰めた空きのあとに作業が始まる位置と日付

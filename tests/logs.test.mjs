@@ -21,6 +21,7 @@ import {
   standardChoice,
   usageTable,
   shiftAfterActual,
+  cropDiffText,
   specDiff,
   layoutBars,
   stackLanes,
@@ -227,6 +228,18 @@ test("定植の仕様の、計画との差", () => {
   const diff = specDiff({ plant_gap_cm: 30, row_gap_cm: 20, staggered: true }, { plant_gap_cm: 25, row_gap_cm: 20, row_count: 3, staggered: false });
   assert.deepEqual(diff.map((item) => [item.key, item.planned, item.actual]), [["plant_gap_cm", 25, 30], ["staggered", false, true]]);
   assert.deepEqual(specDiff({}, { plant_gap_cm: 25 }), []);
+});
+
+test("定植の仕様と、品目の設定値との違いの文", () => {
+  const crop = { plant_gap_cm: 15, row_gap_cm: 15, row_count: 4, staggered: false };
+  assert.equal(cropDiffText({ plant_gap_cm: 20, row_gap_cm: 20, row_count: 3 }, crop, "実績"), "株間は、実績が 20cm、品目の設定値が 15cm。条間は、実績が 20cm、品目の設定値が 15cm。条数は、実績が 3条、品目の設定値が 4条です。");
+  assert.equal(cropDiffText({ plant_gap_cm: 30, staggered: true }, crop, "計画"), "株間は、計画が 30cm、品目の設定値が 15cm。千鳥は、計画が 千鳥、品目の設定値が 千鳥なしです。");
+  // 品目に値がない項目は「なし」
+  assert.equal(cropDiffText({ plant_gap_cm: 20 }, { ...crop, plant_gap_cm: null }, "実績"), "株間は、実績が 20cm、品目の設定値が なしです。");
+  // 同じなら空。仕様がなくても空
+  assert.equal(cropDiffText({ plant_gap_cm: 15, row_count: 4 }, crop, "実績"), "");
+  assert.equal(cropDiffText({}, crop, "実績"), "");
+  assert.equal(cropDiffText(null, crop, "実績"), "");
 });
 
 test("作業のない期間を詰めた時間の軸", () => {

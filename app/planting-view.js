@@ -1,10 +1,10 @@
 // 「作付の詳細」の画面。作付 1 つ（または区画 1 つ）について、計画と実績を 1 つの画面で見る。
 // 工程表の行の名前から開く。表示（計画／実績／計画と実績）は工程表と共有する
 import { plantingNumbers, plantingSpec } from "./crops.js";
-import { confirmAction, notify } from "./dialog.js";
+import { notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { openLogEditor, openPlanEditor, uncancelWork } from "./log-view.js";
-import { bedAreas, compressedAxis, dayGap, firstHarvestDay, logEnd, plantingStart, shiftAfterActual, specDiff, specText, usageTable } from "./logs.js";
+import { bedAreas, compressedAxis, cropDiffText, dayGap, firstHarvestDay, logEnd, shiftAfterActual, specText, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled, ingredientIconsHtml, inputHtml, nameHtml } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, isManagement, localToday, workName } from "./schedule.js";
 import { ICON_LABELS, accumulate, addTwoWeek, fetchAreas, fetchStations, parseForecast, weatherIcon } from "./weather.js";
@@ -116,6 +116,14 @@ function cropSpec(crop) {
   return { plant_gap_cm: crop.plant_gap_cm ?? null, row_gap_cm: crop.row_gap_cm ?? null, row_count: crop.row_count ?? null, staggered: Boolean(crop.staggered) };
 }
 
+// 定植・播種の仕様が、品目の設定値と違うことを書いた行（HTML）。品目の設定値に反映するかを考えるきっかけにする。
+// side は「計画」か「実績」。品目の一覧にない品目の作付と、区画の画面では書かない
+function cropNote(c, spec, side) {
+  const crop = c.planting && state().crops.find((item) => item.id === c.planting.crop_id);
+  const text = crop ? cropDiffText(spec, cropSpec(crop), side) : "";
+  return text ? `<br><span class="detail-line detail-crop-diff">${escapeHtml(text)}</span>` : "";
+}
+
 function plannedSpecText(planting) {
   return specSummary(plannedSpec(planting));
 }
@@ -179,7 +187,7 @@ export function renderPlantingDetail() {
     `${active ? "" : '<span class="muted">実績は、実際に使うプランを開くと出せます。</span>'}</div>` +
     `<div class="detail-layout"><div class="detail-main">` +
     `<section class="panel">${timelineHtml(c, mode, actuals)}</section>` +
-    (mode === "both" ? diffHtml(c, actuals, logs) : "") +
+    (mode === "both" ? diffHtml(c, actuals) : "") +
     `<section class="panel"><div class="panel-heading"><h2>作業</h2>${tableNote(mode) ? `<span class="muted">${tableNote(mode)}</span>` : ""}</div>${tableHtml(c, mode, actuals, logs)}</section>` +
     `</div><aside class="detail-aside">${asideHtml(c, active)}</aside></div>`
   );
@@ -596,26 +604,10 @@ function timelineHtml(c, mode, actuals) {
   );
 }
 
-// 計画との差。定植・播種の仕様の違いと、実績に合わせて後ろを並べ直すボタン
-function diffHtml(c, actuals, logs) {
+// 計画との差。実績に合わせて後ろを並べ直すボタン。
+// 定植・播種の仕様と品目の設定値との違いは、作業の表の行に書く（cropNote）
+function diffHtml(c, actuals) {
   const parts = [];
-  if (c.planting) {
-    const plantLog = logs.find((log) => log.work_type === "plant" && log.targets.some((item) => item.planting_id === c.planting.id) && Object.keys(log.spec || {}).length);
-    const diff = plantLog ? specDiff(plantLog.spec, plannedSpec(c.planting)) : [];
-    if (diff.length) {
-      const text = diff
-        .map((item) => `${item.label}は、実績が ${item.key === "staggered" ? (item.actual ? "千鳥" : "千鳥なし") : `${item.actual}${item.unit}`}、計画が ${item.key === "staggered" ? (item.planned ? "千鳥" : "千鳥なし") : `${item.planned ?? "なし"}${item.planned === null ? "" : item.unit}`}`)
-        .join("。");
-      // 計画は書き換えない。次からの作付のために、品目の設定値を記録に合わせられる
-      const crop = state().crops.find((item) => item.id === c.planting.crop_id);
-      const action = !crop
-        ? '<p class="muted">品目の一覧にない品目なので、品目の設定値には合わせられません。</p>'
-        : specDiff(plantLog.spec, cropSpec(crop)).length
-          ? `<button type="button" class="chip-btn" data-act="apply-spec" data-spec-log="${plantLog.id}">品目の設定値を実績に合わせる</button>`
-          : '<p class="muted">品目の設定値は、実績と同じです。</p>';
-      parts.push(`<p>定植の${escapeHtml(text)}です。</p>${action}`);
-    }
-  }
   const shift = shiftAfterActual(c.planting ? c.ownWorks : c.works, actuals);
   if (shift?.works.length) {
     const way = shift.days > 0 ? `${shift.days} 日後ろ` : `${-shift.days} 日前`;
@@ -679,7 +671,7 @@ function tableHtml(c, mode, actuals, logs) {
     // 気温・降水量は、作業を終えた日（つながる記録が複数あれば最後の記録の終えた日）の値
     const last = entry.log || entry.linked?.at(-1);
     const date = last ? logEnd(last) : null;
-    rows.push((entry.work ? workRow(c, entry, mode, today) : logRow(entry.log, mode)).replace("</tr>", `${showWeather ? wxCell(date) : ""}</tr>`));
+    rows.push((entry.work ? workRow(c, entry, mode, today) : logRow(c, entry.log, mode)).replace("</tr>", `${showWeather ? wxCell(date) : ""}</tr>`));
   }
   return `<div class="table-scroll"><table class="work-table detail-table"><thead>${head}</thead><tbody>${rows.join("")}</tbody></table></div>`;
 }
@@ -706,6 +698,7 @@ function workRow(c, { work, linked, actual }, mode, today) {
   const planCell = showPlan
     ? `<td class="detail-plan" data-plan="${work.id}"><a href="#" data-plan-edit="${work.id}">${work.plan_start ? rangeText(work.plan_start, work.plan_end) : "日付なし"}</a>` +
       planLines.map((line) => `<br><span class="detail-line">${escapeHtml(line)}</span>`).join("") +
+      (work.work_type === "plant" && c.planting ? cropNote(c, plannedSpec(c.planting), "計画") : "") +
       "</td>"
     : "";
   let actualCell = "";
@@ -718,7 +711,7 @@ function workRow(c, { work, linked, actual }, mode, today) {
       actualCell =
         "<td>" +
         linked
-          .map((log) => `${logLink(log)}${logLines(log).map((line) => `<br><span class="detail-line">${line}</span>`).join("")}`)
+          .map((log) => `${logLink(log)}${logLines(log).map((line) => `<br><span class="detail-line">${line}</span>`).join("")}${logNote(c, log)}`)
           .join("<br>") +
         (actual && !actual.end ? '<br><span class="log-going">作業中</span>' : "") +
         "</td>";
@@ -732,11 +725,15 @@ function workRow(c, { work, linked, actual }, mode, today) {
   return `<tr>${typeCell(work.work_type, tag, work.detail?.spec)}${planCell}${actualCell}${gapCell}</tr>`;
 }
 
-function logRow(log, mode) {
+// 定植・播種の記録の仕様が、品目の設定値と違えば、その行（HTML）
+const logNote = (c, log) => (log.work_type === "plant" ? cropNote(c, log.spec, "実績") : "");
+
+function logRow(c, log, mode) {
   const showPlan = mode !== "act";
-  const lines = logLines(log)
-    .map((line) => `<br><span class="detail-line">${line}</span>`)
-    .join("");
+  const lines =
+    logLines(log)
+      .map((line) => `<br><span class="detail-line">${line}</span>`)
+      .join("") + logNote(c, log);
   return `<tr>${typeCell(log.work_type, "計画にない実績", log.spec)}${showPlan ? '<td class="muted">－</td>' : ""}<td>${logLink(log)}${lines}</td>${mode === "both" ? "<td></td>" : ""}</tr>`;
 }
 
@@ -819,73 +816,6 @@ function openWorkPlanEditor(work) {
   });
   box.addEventListener("close", () => box.remove());
   box.showModal();
-}
-
-// 品目の設定値を、定植の記録の仕様に合わせる。今回の作付の計画は書き換えない。
-// 品目の設定値を使っている作付（作付に値がない作付）のうち、今回の作付と、このプランですでに始まった作付には、
-// いまの品目の値を写してから変える。まだ始まっていない作付は、新しい設定値になる
-async function applySpec(logId) {
-  const c = context();
-  const log = (state().logs || []).find((item) => item.id === logId);
-  const crop = c?.planting && state().crops.find((item) => item.id === c.planting.crop_id);
-  if (!crop || !log) {
-    return;
-  }
-  const diff = specDiff(log.spec, cropSpec(crop));
-  if (!diff.length) {
-    return;
-  }
-  const today = localToday();
-  const keys = diff.map((item) => item.key);
-  const frozen = state().plantings.filter(
-    (planting) =>
-      planting.crop_id === crop.id &&
-      (planting.id === c.planting.id || (plantingStart(planting, state().works, state().logs || []) || "9999") <= today) &&
-      keys.some((key) => planting[key] === null || planting[key] === undefined)
-  );
-  const before = specSummary(cropSpec(crop));
-  const after = specSummary({ ...cropSpec(crop), ...Object.fromEntries(diff.map((item) => [item.key, item.key === "staggered" ? Boolean(item.actual) : Number(item.actual)])) });
-  const ok = await confirmAction({
-    message:
-      `品目「${crop.name}」の設定値を「${before || "なし"}」から「${after || "なし"}」に変えます。今回の作付の計画は変わりません。` +
-      "まだ始まっていない作付で、作付に値を入れていないものは、新しい設定値になります（ほかの圃場とプランも同じです）。",
-    action: "合わせる",
-  });
-  if (!ok) {
-    return;
-  }
-  const savedCrop = { ...crop };
-  const savedPlantings = frozen.map((planting) => ({ ...planting }));
-  frozen.forEach((planting) => {
-    keys.forEach((key) => {
-      if (planting[key] === null || planting[key] === undefined) {
-        planting[key] = crop[key] ?? (key === "staggered" ? false : null);
-      }
-    });
-  });
-  diff.forEach((item) => {
-    crop[item.key] = item.key === "staggered" ? Boolean(item.actual) : Number(item.actual);
-  });
-  try {
-    if (frozen.length) {
-      await state().store.upsert("plantings", frozen);
-    }
-    await state().store.upsert("crops", [crop]);
-    record({
-      kind: "crops.spec",
-      target: ["crop", crop.id],
-      plan: false,
-      text: `品目「${crop.name}」の設定値を、${c.block.name} 畝${c.bed.seq} の定植の実績に合わせた`,
-      before,
-      after,
-    });
-    ctx.setStatus("品目の設定値を合わせました");
-  } catch (error) {
-    Object.assign(crop, savedCrop);
-    savedPlantings.forEach((saved) => Object.assign(state().plantings.find((planting) => planting.id === saved.id), saved));
-    notify(`品目の設定値を合わせられませんでした: ${error.message}`);
-  }
-  ctx.refresh();
 }
 
 async function reschedule() {
@@ -976,8 +906,6 @@ function onClick(event) {
     }
   } else if (act === "record") {
     openLogEditor(null, { plantingId: target.id });
-  } else if (act === "apply-spec") {
-    applySpec(el.dataset.specLog);
   } else if (act === "reschedule") {
     reschedule();
   }

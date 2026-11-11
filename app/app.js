@@ -541,8 +541,9 @@ function renderMap(scale) {
     );
   }
 
-  const label = (point, text, size = fontSize, attrs = "") =>
-    `<text class="map-label" x="${point[0]}" y="${-point[1]}" font-size="${size}" stroke-width="${size / 4}" ${attrs}>${escapeHtml(text)}</text>`;
+  // html を渡すと、text の代わりに中身として使う（品目名のリンクの tspan など）
+  const label = (point, text, size = fontSize, attrs = "", html = escapeHtml(text)) =>
+    `<text class="map-label" x="${point[0]}" y="${-point[1]}" font-size="${size}" stroke-width="${size / 4}" ${attrs}>${html}</text>`;
   const outside = findOutside();
   const strays = new Set([...outside.zones, ...outside.blocks, ...outside.beds].map((item) => item.id));
   // 選択の印と、入れ物からはみ出している印
@@ -598,7 +599,8 @@ function renderMap(scale) {
       }
     }
     for (const bed of groupBeds) {
-      const name = plantingOn(bed)?.crop_name || "";
+      const planting = plantingOn(bed);
+      const name = planting?.crop_name || "";
       const color = name ? cropColor(name) : BED_COLOR;
       parts.push(
         `<polygon class="shape bed${selectedClass(bed.id)}" data-shape="${bed.id}" ` +
@@ -613,7 +615,9 @@ function renderMap(scale) {
         degrees = degrees > 90 ? degrees - 180 : degrees <= -90 ? degrees + 180 : degrees;
         const center = centroid(bed.shape);
         const text = `${bed.seq}${name ? ` ${name}` : ""}`;
-        parts.push(label(center, text, Math.min(fontSize, Math.max(size.width * 0.85, 9 / z)), `transform="rotate(${degrees} ${center[0]} ${-center[1]})"`));
+        // 品目名は、押すと作付の詳細を開くリンクにする（印刷では、ただの文字）
+        const html = name && !printing ? `${bed.seq} <tspan class="map-link" data-detail="${planting.id}">${escapeHtml(name)}</tspan>` : escapeHtml(text);
+        parts.push(label(center, text, Math.min(fontSize, Math.max(size.width * 0.85, 9 / z)), `transform="rotate(${degrees} ${center[0]} ${-center[1]})"`, html));
       }
     }
   };
@@ -2317,7 +2321,7 @@ map.addEventListener("pointerdown", (event) => {
     const zone = state.mode === "blockrect" ? tillableZoneAt(start) : null;
     const frames = zone ? [zone.shape] : state.field.outline;
     gesture = { kind: "rect", start, zone, angle: nearestEdgeAngleOf(start, frames), origin: [event.clientX, event.clientY] };
-  } else if (state.mode === "select" && pressedSelected(event)) {
+  } else if (state.mode === "select" && !target.dataset.detail && pressedSelected(event)) {
     // 選択中の図形は、ドラッグでそのまま動かせる。動かさずに離したら、押した図形を選ぶ
     gesture = { kind: "move", moved: false, start: [event.clientX, event.clientY], last: clientToWorld(event), shape: target.dataset.shape };
   } else {
@@ -2328,6 +2332,7 @@ map.addEventListener("pointerdown", (event) => {
       shape: target.dataset.shape,
       gap: target.dataset.gap,
       edge: target.dataset.edge,
+      detail: target.dataset.detail,
     };
   }
 });
@@ -2463,6 +2468,12 @@ function endPointer(event) {
   }
   if (state.mode === "select" && finished.edge !== undefined) {
     setEdgeLength(Number(finished.edge));
+    return;
+  }
+  if (state.mode === "select" && finished.detail) {
+    // 畝の品目名: その作付の詳細を開く
+    openPlantingDetail("planting", finished.detail);
+    showView("planting");
     return;
   }
   if (state.mode === "select") {
