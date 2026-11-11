@@ -29,7 +29,7 @@
       </div>
       <nav id="viewTabs" class="control-group" aria-label="画面の切り替え" hidden>
         <button class="tab-btn is-active" data-view="map">圃場図<span id="mapBadge" class="tab-badge" hidden></span></button>
-        <button class="tab-btn" data-view="schedule">日程<span id="scheduleBadge" class="tab-badge" hidden></span></button>
+        <button class="tab-btn" data-view="schedule">日程</button>
         <button class="tab-btn" data-view="crops">品目</button>
         <button class="tab-btn" data-view="diary">日記</button>
         <button class="tab-btn" data-view="journal">履歴</button>
@@ -66,6 +66,36 @@
 
     <main id="appView" class="layout" hidden>
       <section class="map-area">
+        <!-- 圃場の全体の情報。警告、今週やること、最近の実績を、図の上に並べる -->
+        <div class="map-overview">
+          <section id="alertPanel" class="panel problem-panel" hidden>
+            <div class="panel-heading">
+              <h2>警告</h2>
+              <p id="alertCount" class="muted"></p>
+            </div>
+            <ul id="warnings" class="problem-list" hidden></ul>
+            <ul id="problemList" class="problem-list"></ul>
+          </section>
+
+          <section class="panel">
+            <div id="lateBox" class="late-box" hidden>
+              <h2 id="lateTitle">遅れている作業</h2>
+              <ul id="lateList" class="week-list"></ul>
+            </div>
+            <h2 id="weekTitle">今週やること</h2>
+            <ul id="weekList" class="week-list"></ul>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <h2 id="logTitle">最近の実績</h2>
+              <button id="logToggle" class="text-btn" hidden>すべて</button>
+            </div>
+            <p id="logNote" class="muted" hidden></p>
+            <ul id="logList" class="week-list log-list"></ul>
+          </section>
+        </div>
+
         <div class="toolbar edit-only" role="group" aria-label="操作">
           <!-- 道具は全体で 1 つだけ選べる。組ごとにつなげ、使い終えると「選択・移動」に戻る -->
           <span class="seg"><button class="mode-btn is-active" data-mode="select" aria-pressed="true">選択・移動</button></span>
@@ -118,7 +148,6 @@
           </span>
         </div>
         <p id="hint" class="hint edit-only"></p>
-        <ul id="warnings" class="map-warnings" hidden></ul>
         <div class="map-frame">
           <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="圃場図"></svg>
           <button id="mapPdfBtn" class="chip-btn map-pdf" title="圃場の全体を、下絵なしで PDF にします">PDF出力</button>
@@ -252,32 +281,6 @@
     </main>
 
     <main id="scheduleView" class="schedule" hidden>
-      <section id="problemPanel" class="panel problem-panel" hidden>
-        <div class="panel-heading">
-          <h2>確認が必要な点</h2>
-          <p id="problemCount" class="muted"></p>
-        </div>
-        <ul id="problemList" class="problem-list"></ul>
-      </section>
-
-      <section class="panel">
-        <div id="lateBox" class="late-box" hidden>
-          <h2 id="lateTitle">遅れている作業</h2>
-          <ul id="lateList" class="week-list"></ul>
-        </div>
-        <h2 id="weekTitle">今週やること</h2>
-        <ul id="weekList" class="week-list"></ul>
-      </section>
-
-      <section class="panel">
-        <div class="panel-heading">
-          <h2 id="logTitle">最近の実績</h2>
-          <button id="logToggle" class="text-btn" hidden>すべて</button>
-        </div>
-        <p id="logNote" class="muted" hidden></p>
-        <ul id="logList" class="week-list log-list"></ul>
-      </section>
-
       <p id="scheduleEmpty" class="muted" hidden>圃場図で耕起対象区画を作ると、ここで区画と畝の日程を作れます。</p>
 
       <div id="scheduleBody" class="schedule-body">
@@ -386,9 +389,10 @@
           </table>
         </section>
       </div>
-
-      <button id="logAddBtn" class="fab" type="button">＋ 入力する</button>
     </main>
+
+    <!-- 圃場図と日程の画面の右下に出す（showView が出し入れする） -->
+    <button id="logAddBtn" class="fab" type="button" hidden>＋ 入力する</button>
 
     <main id="plantingView" class="schedule" hidden>
       <div id="plantingBody" class="schedule-body"></div>

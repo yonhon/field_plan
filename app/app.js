@@ -48,7 +48,7 @@ import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
-import { initSchedule, openInSchedule, renderSchedule, selectedRowPreset } from "./schedule-view.js";
+import { initSchedule, openInSchedule, problemTotal, renderOverview, renderSchedule, selectedRowPreset } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
 
@@ -759,13 +759,17 @@ function mapWarnings(outside = findOutside()) {
   return warnings;
 }
 
-// 図の上の警告と、「圃場図」のタブの件数。日程の画面で畝を動かしたときも呼ばれる
+// 図の上の「警告」の欄と、「圃場図」のタブの件数。図形のはみ出しと、日程の確認が必要な点（schedule-view.js が描く）を合わせる。
+// 日程の画面で畝を動かしたときや、日程を描き直したときも呼ばれる
 function renderWarnings(outside = findOutside()) {
   const warnings = mapWarnings(outside);
   $("warnings").hidden = warnings.length === 0;
   draw($("warnings"), warnings.map(([id, text]) => `<li data-shape="${id}">${escapeHtml(text)}</li>`).join(""));
-  $("mapBadge").hidden = warnings.length === 0;
-  $("mapBadge").textContent = `⚠${warnings.length}`;
+  const total = warnings.length + problemTotal();
+  $("alertPanel").hidden = total === 0;
+  $("alertCount").textContent = `${total} 件`;
+  $("mapBadge").hidden = total === 0;
+  $("mapBadge").textContent = `⚠${total}`;
 }
 
 // 右側の木の行。圃場の外形、区域、その中の区画、その中の畝の順。
@@ -2715,6 +2719,8 @@ $("warnings").addEventListener("click", (event) => {
   const item = event.target.closest("[data-shape]");
   if (item) {
     select(item.dataset.shape);
+    // 警告の欄は図の上にあるので、選んだ図形が見えるよう、図まで送る
+    document.querySelector(".map-frame").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 });
 // 木の行を押すと選んで内容を開き、選んでいる行をもう一度押すと閉じる。▸ は畝の行の出し入れ
@@ -2803,12 +2809,14 @@ function showView(view, { history: mode = "push" } = {}) {
   $("cropsView").hidden = view !== "crops";
   $("diaryView").hidden = view !== "diary";
   $("journalView").hidden = view !== "journal";
+  $("logAddBtn").hidden = view !== "map" && view !== "schedule";
   if (view === "map") {
     render();
+    renderOverview();
+    renderLogs();
     renderWeatherSettings();
   } else if (view === "schedule") {
     renderSchedule();
-    renderLogs();
   } else if (view === "planting") {
     renderPlantingDetail();
     window.scrollTo(0, 0);
@@ -2972,6 +2980,7 @@ async function startApp() {
     },
     setStatus,
     renderWarnings,
+    showView,
     openDetail: (kind, id) => {
       openPlantingDetail(kind, id);
       showView("planting");
@@ -2994,13 +3003,13 @@ async function startApp() {
   initWeather({ state, setStatus, onWeatherChanged: renderPlantingDetail });
   renderWeatherSettings();
   syncWeather();
-  // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホは作業の確認が主なので日程、PC は圃場図。
+  // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホも PC も圃場図（今週やることが図の上にある）。
   // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）。履歴の画面は、読み込んでから開く
   const route = routeFromHash();
   if (route && route.view !== "journal") {
     openRoute(route, "replace");
   } else if (!route) {
-    showView(window.matchMedia("(max-width: 800px)").matches ? "schedule" : "map", { history: "replace" });
+    showView("map", { history: "replace" });
   }
   initCrops({ state, setStatus });
   initDiary({ state, setStatus });

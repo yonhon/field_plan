@@ -128,8 +128,7 @@ test("農薬名の後ろのアイコン: 実績の一覧、検索の結果、選
     targets: [{ id: "t1", log_id: "log1", planting_id: "pl1", bed_id: "bed1", block_id: null, work_id: null, label: "", crop_name: "試験菜", area_m2: null, spray_l: null }],
   }];
   await page.loadApp(data);
-  await page.click('.tab-btn[data-view="schedule"]');
-  // 実績の一覧: 登録番号のある農薬は、その分類。名前だけで入れた農薬は「−」
+  // 実績の一覧は圃場図にある（開いた画面のまま）。登録番号のある農薬は、その分類。名前だけで入れた農薬は「−」
   const LOGGED = '#logList svg[data-rac="IRAC:4A"]';
   await page.waitFor(`Boolean(document.querySelector(${JSON.stringify(LOGGED)}))`, "実績の一覧のアイコン");
   assert.match(await page.run(`document.querySelector(${JSON.stringify(LOGGED)}).closest(".pesticide-name").textContent`), /^試験乳剤/);

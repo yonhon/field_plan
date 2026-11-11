@@ -350,10 +350,24 @@ label.check {
   padding: 12px;
 }
 
+/* 図の上に、警告・今週やること・最近の実績を並べるので、図の列は縦に送れるようにする */
 .map-area {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
+}
+
+/* 送る列なので、中身は縮めない（縮めると、案内の 2 行目が図に隠れる） */
+.map-area > * {
+  flex-shrink: 0;
+}
+
+.map-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .toolbar {
@@ -653,10 +667,11 @@ body.plan-busy #scheduleView {
   font-size: 13px;
 }
 
+/* 図は、送って道具の行を上に合わせたときに、画面の残りに収まる高さにする */
 .map-frame {
   position: relative;
-  flex: 1;
-  min-height: 320px;
+  flex: none;
+  height: max(360px, calc(100dvh - 190px));
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #eef3f1;
@@ -859,24 +874,12 @@ body.plan-busy #scheduleView {
   stroke-dasharray: 3 3;
 }
 
-/* 圃場図の上に出す、はみ出しの警告。右側をどこまで送っていても見える */
-.map-warnings {
-  margin: 0 0 8px;
-  padding: 4px 10px;
-  list-style: none;
-  border: 1px solid var(--danger);
-  border-radius: 8px;
-  background: var(--surface);
+/* 「警告」の欄の、図形のはみ出し。押すと、その図形を選ぶ */
+#warnings li {
   color: var(--danger);
-  font-size: 13px;
 }
 
-.map-warnings li {
-  padding: 2px 0;
-  cursor: pointer;
-}
-
-.map-warnings li::before,
+#warnings li::before,
 .zone-list .stray-mark::before {
   content: "⚠ ";
 }
@@ -1083,6 +1086,11 @@ body.plan-busy #scheduleView {
 
 .problem-list li:first-child {
   border-top: 0;
+}
+
+/* 図形のはみ出しの下に続く、確認が必要な点の最初の行には、区切りの線を引く */
+#warnings:not([hidden]) + #problemList li:first-child {
+  border-top: 1px solid var(--line);
 }
 
 .problem-list strong {
@@ -1713,7 +1721,9 @@ body.plan-busy #scheduleView {
 }
 
 /* 右下のボタンに、最後の欄が隠れないようにする */
-#scheduleView {
+#scheduleView,
+#appView .map-area,
+#appView .side {
   padding-bottom: 84px;
 }
 

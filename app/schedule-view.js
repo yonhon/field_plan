@@ -177,12 +177,7 @@ export function renderSchedule() {
   const blocks = state().blocks;
   $("scheduleEmpty").hidden = blocks.length > 0;
   $("scheduleBody").hidden = blocks.length === 0;
-  renderWeek();
-  // 取りやめた作業は見ない。実績のある作業は、実績の日で無理を見る
-  const live = state().works.filter((work) => !work.cancelled_on);
-  problems = planProblems({ ...state(), works: isActivePlan() ? withActualDates(live, currentActuals()) : live });
-  renderProblems();
-  ctx.renderWarnings();
+  renderOverview();
   renderSummary();
   if (!blocks.length) {
     return;
@@ -192,6 +187,23 @@ export function renderSchedule() {
   renderEditor();
   renderTypes();
 }
+
+// 圃場図の上に出す、圃場の全体の情報（今週やること、遅れている作業、確認が必要な点と、タブの件数）。
+// 日程の画面を描くときと、圃場図を開いたときに描く
+export function renderOverview() {
+  if (!ctx) {
+    return;
+  }
+  renderWeek();
+  // 取りやめた作業は見ない。実績のある作業は、実績の日で無理を見る
+  const live = state().works.filter((work) => !work.cancelled_on);
+  problems = planProblems({ ...state(), works: isActivePlan() ? withActualDates(live, currentActuals()) : live });
+  renderProblems();
+  ctx.renderWarnings();
+}
+
+// 確認が必要な点の件数。圃場図の警告と合わせて、「圃場図」のタブに出す
+export const problemTotal = () => problems.length;
 
 // 同じ日の同じ作業は、場所をまとめて 1 行にする
 function weekLines(works) {
@@ -320,7 +332,6 @@ const problemBed = (problem) => state().plantings.find((item) => item.id === pro
 
 // 同じ内容の指摘は、場所をまとめて 1 行にする（コピーした畝は同じ指摘が並ぶため）
 function renderProblems() {
-  $("problemPanel").hidden = problems.length === 0;
   const groups = new Map();
   for (const problem of problems) {
     const work = state().works.find((item) => item.id === problem.work_id);
@@ -331,9 +342,6 @@ function renderProblems() {
     }
     groups.get(key).items.push(problem);
   }
-  $("problemCount").textContent = `${problems.length} 件`;
-  $("scheduleBadge").hidden = problems.length === 0;
-  $("scheduleBadge").textContent = `⚠${problems.length}`;
   draw(
     $("problemList"),
     [...groups.values()]
@@ -1747,8 +1755,9 @@ export function initSchedule(context) {
   $("problemList").addEventListener("click", (event) => {
     const item = event.target.closest("li[data-id]");
     if (item) {
+      // 一覧は圃場図にある。日程の画面に移って、その区画か作付の作業を開く
       openInSchedule(item.dataset.kind, item.dataset.id);
-      renderSchedule();
+      ctx.showView("schedule");
       const section = $("editorSections").querySelector(`[data-planting="${sel.plantingId}"]`) || $("editorSections");
       section.scrollIntoView({ block: "center", behavior: "smooth" });
     }
