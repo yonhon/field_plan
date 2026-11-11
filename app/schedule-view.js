@@ -8,20 +8,18 @@ import {
   GANTT_RANGES,
   dayWidth,
   ganttWindow,
-  harvestEnd,
   isManagement,
   localToday,
   planProblems,
   scheduleAnchored,
-  scheduleBefore,
   scheduleForward,
   typesForCrop,
   workDays,
   workName,
   worksRange,
 } from "./schedule.js";
-import { cropLabel, plantingNumbers, plantingSpec, summarize } from "./crops.js";
-import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
+import { summarize } from "./crops.js";
+import { confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor } from "./log-view.js";
 import { lateWorks, layoutBars, logEnd, plantingOnDate, withActualDates, workActuals, workStatus } from "./logs.js";
@@ -42,17 +40,13 @@ const BAR_H = 26; // 計画の帯の高さ（「実績」だけのときは実�
 const THIN_H = 10; // 「計画と実績」で計画の帯の下側に重ねる、実績の帯の高さ
 const MIN_BAR_PX = 12; // 1 日の作業も、押せるようにこの幅より細くしない
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
-const SCOPE_LABELS = { block: "区画の作業（畝立ての前まで）", bed: "畝の作業（畝立てから後）" };
+export const SCOPE_LABELS = { block: "区画の作業（畝立ての前まで）", bed: "畝の作業（畝立てから後）" };
 
 let ctx = null; // { state, setStatus, queueSave, cropColor, plantingOn }
 // いま編集している相手。target は "block"（区画の作業）か、畝の ID
 const sel = { blockId: null, target: "block", plantingId: null };
-let daysBeforeEdit = null; // 開始日を動かす前の日数 { id, days }
-const folded = new Set(); // 折りたたんでいる作付の ID
-const arrangeChoice = new Map(); // 並べ直しの欄で選んだ基準と日 { mode, date }。区画や作付ごと
-const template = { key: Object.keys(TEMPLATES.block)[0], start: "" }; // 区画のひな形の欄で選んだもの
 let problems = []; // 日程の無理。描くたびに求め直す
-const ARRANGE_MODES = {
+export const ARRANGE_MODES = {
   block: { before: "畝立てをこの日に始められるように逆算", forward: "最初の作業をこの日に始める" },
   bed: { plant: "定植・播種をこの日に始める（前は逆算）", forward: "最初の作業をこの日に始める" },
 };
@@ -60,11 +54,12 @@ const picked = new Set(); // 工程表で選んでいる作業の ID
 let clipboard = null; // コピーか切り取りをした作業 { works, cut }
 let barDrag = null; // 工程表で帯をドラッグしている途中の状態
 // 工程表で選んでいる行（"block:区画の ID" か "bed:畝の ID"）。貼り付けの入れ先と、「＋ 入力する」の対象になる。
-// 下の「作業の計画」で開いている区画・畝（sel）とは別に覚える
+// 日程の画面で開いている区画・畝（sel）とは別に覚える
 let rowSel = null;
-let ganttScrollKey = ""; // 工程表の横の位置を保つための、表示期間とプラン
+let ganttScrollKey = ""; // 工程表の横の位置を保つための、表示期間とプランと、描く区画
+let ganttScopeKey = null; // 前に描いた工程表の範囲（区画の ID か "all"）。範囲が変わったら、帯の選択を外す
+let ganttFocused = false; // 最後に押したのが工程表の欄か。圃場図の画面で、キーの操作を工程表と図のどちらに渡すかを決める
 let actualDrag = null; // 工程表で実績の帯をドラッグしている途中の状態
-let addingFor = null; // 「作付を追加」の日付の初期値を入れたときの状態
 
 const state = () => ctx.state;
 const store = () => ctx.state.store;
@@ -90,11 +85,8 @@ export const isActivePlan = () => state().field.active_plan_id === state().plan.
 // 計画の作業の実績（作業の ID → { start, end }）。実際に使うプランでなければ空
 export const currentActuals = () => (isActivePlan() ? workActuals(state().logs || []) : new Map());
 
-// 工程の作業だけ。管理作業（防除など）は「作業の計画」の表と並べ直しの対象にしない（入力の窓で入れる）
+// 工程の作業だけ。管理作業（防除など）は、工程の計画と並べ直しの対象にしない（入力の窓の「管理作業の計画」で入れる）
 const processOnly = (works) => works.filter((work) => !isManagement(work.work_type));
-
-const kindOf = (owner) => (owner.block_id ? "block" : "bed");
-const worksOf = (owner) => processOnly(owner.block_id ? blockWorks(owner.block_id) : plantingWorks(owner.planting_id));
 
 function formatDay(iso) {
   const [year, month, day] = iso.split("-").map(Number);
@@ -162,7 +154,6 @@ export function openInSchedule(kind, id) {
     const planting = state().plantings.find((item) => item.id === id);
     const bed = state().beds.find((item) => item.id === planting.bed_id);
     Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: id });
-    folded.delete(id);
   } else if (kind === "bed") {
     const bed = state().beds.find((item) => item.id === id);
     Object.assign(sel, { blockId: bed.block_id, target: id, plantingId: null });
@@ -177,21 +168,145 @@ export function renderSchedule() {
   const blocks = state().blocks;
   $("scheduleEmpty").hidden = blocks.length > 0;
   $("scheduleBody").hidden = blocks.length === 0;
-  renderWeek();
-  // 取りやめた作業は見ない。実績のある作業は、実績の日で無理を見る
-  const live = state().works.filter((work) => !work.cancelled_on);
-  problems = planProblems({ ...state(), works: isActivePlan() ? withActualDates(live, currentActuals()) : live });
-  renderProblems();
-  ctx.renderWarnings();
+  renderOverview();
   renderSummary();
   if (!blocks.length) {
     return;
   }
   renderStrip();
   renderGantt();
-  renderEditor();
+  ctx.renderBlockRecord(sel.blockId);
   renderTypes();
+  if (!$("scheduleView").hidden) {
+    renderPicker("schedule");
+    // 開いている区画を URL に書く（再読み込みしても同じ区画を開く）。「区画と畝」の図で区画を替えたときも書き換える
+    if (location.hash !== scheduleHash()) {
+      history.replaceState(history.state, "", scheduleHash());
+    }
+  }
 }
+
+// 日程の画面で開いている区画（「作業を入力する」の窓の、工程の計画の初めの相手に使う）
+export const currentBlockId = () => sel.blockId;
+
+// 日程の画面の URL。区画を選んでいれば #schedule/block/区画の ID
+export const scheduleHash = () => (sel.blockId ? `#schedule/block/${sel.blockId}` : "#schedule");
+
+// ---- 区画・畝の欄 ----
+
+// 区画か畝を選ぶ欄を、日程（"schedule"）か作付の詳細（"planting"）の上へ移す
+export function placePicker(view) {
+  const slot = $(view === "planting" ? "pickerSlotPlanting" : "pickerSlotSchedule");
+  if ($("pickerPanel").parentElement !== slot) {
+    slot.append($("pickerPanel"));
+  }
+}
+
+// 畝を選んだときに開く作付。今日その畝にある作付、なければ最後の作付
+const bedPlantingNow = (bedId) => {
+  const plantings = bedPlantings(bedId);
+  return plantingOnDate(plantings, state().works, localToday(), state().logs || []) || plantings.at(-1) || null;
+};
+
+// 区画・畝の欄を描く。日程の画面では選んでいる区画、作付の詳細では開いている作付の畝を選んだ形にする。
+// 確認が必要な点のある区画と畝には ⚠ を付け、その区画（畝）の確認が必要な点を欄の下に並べる
+export function renderPicker(view) {
+  if (!ctx) {
+    return;
+  }
+  const blocks = state().blocks;
+  $("pickerPanel").hidden = !blocks.length;
+  if (!blocks.length) {
+    return;
+  }
+  const blockOfProblem = (problem) => problem.block_id || state().beds.find((bed) => bed.id === problemBed(problem))?.block_id;
+  const mark = (on) => (on ? " ⚠" : "");
+  draw(
+    $("schedulePicker"),
+    blocks
+      .map((block) => {
+        const beds = blockBeds(block.id)
+          .map((bed) => {
+            const crops = bedPlantings(bed.id).map((planting) => planting.crop_name).filter(Boolean).join(" → ");
+            const flagged = problems.some((problem) => problemBed(problem) === bed.id);
+            return `<option value="bed:${bed.id}">${escapeHtml(`${block.name} 畝${bed.seq}${crops ? ` ${crops}` : ""}${mark(flagged)}`)}</option>`;
+          })
+          .join("");
+        // 区画の行は太字にして、その下に畝の行を並べる（区画の行も選べる）
+        const flagged = problems.some((problem) => blockOfProblem(problem) === block.id);
+        return `<option value="block:${block.id}" class="picker-block">${escapeHtml(`${block.name}${mark(flagged)}`)}</option>${beds}`;
+      })
+      .join("")
+  );
+  if (view === "planting") {
+    const target = ctx.plantingTarget();
+    const bedId = state().plantings.find((planting) => planting.id === target.id)?.bed_id;
+    $("schedulePicker").value = bedId ? `bed:${bedId}` : "";
+  } else {
+    $("schedulePicker").value = `block:${sel.blockId}`;
+  }
+}
+
+// 区画（kind "block"）か畝（"bed"）の、確認が必要な点の欄（HTML）。なければ空。
+// 区画の頭と作付の詳細の頭の下に置く（区画・畝の欄の中に置くと、有無で頭の位置が上下するため）
+export function scopeProblemsHtml(kind, id) {
+  const blockOf = (problem) => problem.block_id || state().beds.find((bed) => bed.id === problemBed(problem))?.block_id;
+  const shown = problems.filter((problem) => (kind === "block" ? blockOf(problem) === id : problemBed(problem) === id));
+  return shown.length ? `<section class="panel problem-panel"><ul class="problem-list">${problemItems(shown)}</ul></section>` : "";
+}
+
+// 区画（kind "block"）か作付（"planting"）の工程の計画を、「作業を入力する」の窓の「工程の計画」のタブで開く。
+// 確認が必要な点の行、作付の詳細の計画の欄、変更の履歴の行から使う
+export function openProcessPlan(kind, id) {
+  openLogEditor(null, kind === "block" ? { tab: "process", blockId: id } : { tab: "process", plantingId: id });
+}
+
+// 確認が必要な点の行を押したとき: その区画か作付の工程の計画を、窓で開く
+export function openProblemTarget(kind, id) {
+  openProcessPlan(kind, id);
+}
+
+// 区画・畝の欄で選んだとき。区画なら日程の画面でその区画を、畝ならその畝の作付の詳細を開く。
+// 作付のない畝は、日程の画面でその区画を開き、窓の工程の計画をその畝で開く（作付を足せる）
+function onPick(value) {
+  const [kind, id] = value.split(":");
+  if (kind === "block") {
+    Object.assign(sel, { blockId: id, target: "block", plantingId: null });
+    ctx.showView("schedule");
+    return;
+  }
+  const bed = state().beds.find((item) => item.id === id);
+  if (!bed) {
+    return;
+  }
+  const planting = bedPlantingNow(id);
+  if (planting) {
+    // 日程の画面に戻ったときも、この畝の区画を開く
+    Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: planting.id });
+    ctx.openDetail("planting", planting.id);
+  } else {
+    Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: null });
+    ctx.showView("schedule");
+    openLogEditor(null, { tab: "process", bedId: bed.id });
+  }
+}
+
+// 圃場図の上に出す、圃場の全体の情報（今週やること、遅れている作業、確認が必要な点と、タブの件数）。
+// 日程の画面を描くときと、圃場図を開いたときに描く
+function renderOverview() {
+  if (!ctx) {
+    return;
+  }
+  renderWeek();
+  // 取りやめた作業は見ない。実績のある作業は、実績の日で無理を見る
+  const live = state().works.filter((work) => !work.cancelled_on);
+  problems = planProblems({ ...state(), works: isActivePlan() ? withActualDates(live, currentActuals()) : live });
+  renderProblems();
+  ctx.renderWarnings();
+}
+
+// 確認が必要な点の件数。圃場図の警告と合わせて、「圃場図」のタブに出す
+export const problemTotal = () => problems.length;
 
 // 同じ日の同じ作業は、場所をまとめて 1 行にする
 function weekLines(works) {
@@ -293,18 +408,6 @@ async function onWeekClick(event) {
   }
 }
 
-// 作業の期間を「6/17（木）〜6/29（火）」の形にする。日付がなければ「日付なし」
-function rangeText(works) {
-  const range = worksRange(works);
-  return range ? (range.start === range.end ? fullDay(range.start) : `${fullDay(range.start)}〜${formatDay(range.end)}`) : "日付なし";
-}
-
-// 作付のある場所の名前。例: 区画1 畝3 作付 2
-function placeName(planting) {
-  const bed = state().beds.find((item) => item.id === planting.bed_id);
-  return `${state().blocks.find((item) => item.id === bed.block_id).name} 畝${bed.seq} 作付 ${planting.seq}`;
-}
-
 // 無理のある作付が、どの区画のどの畝かを名前にする
 function ownerName(problem) {
   if (problem.block_id) {
@@ -318,11 +421,15 @@ function ownerName(problem) {
 
 const problemBed = (problem) => state().plantings.find((item) => item.id === problem.planting_id)?.bed_id;
 
-// 同じ内容の指摘は、場所をまとめて 1 行にする（コピーした畝は同じ指摘が並ぶため）
+// 圃場図の「警告」の欄の、確認が必要な点（すべての区画）
 function renderProblems() {
-  $("problemPanel").hidden = problems.length === 0;
+  draw($("problemList"), problemItems(problems));
+}
+
+// 確認が必要な点の行（HTML）。同じ内容の指摘は、場所をまとめて 1 行にする（コピーした畝は同じ指摘が並ぶため）
+function problemItems(list) {
   const groups = new Map();
-  for (const problem of problems) {
+  for (const problem of list) {
     const work = state().works.find((item) => item.id === problem.work_id);
     const text = `${work ? `${typeLabel(work.work_type)}: ` : ""}${problem.message}`;
     const key = `${problem.block_id ? "block" : "bed"}|${text}`;
@@ -331,20 +438,14 @@ function renderProblems() {
     }
     groups.get(key).items.push(problem);
   }
-  $("problemCount").textContent = `${problems.length} 件`;
-  $("scheduleBadge").hidden = problems.length === 0;
-  $("scheduleBadge").textContent = `⚠${problems.length}`;
-  draw(
-    $("problemList"),
-    [...groups.values()]
-      .map(({ text, items }) => {
-        const first = items[0];
-        const where = items.length > 1 ? `${ownerName(first)} ほか ${items.length - 1} か所` : ownerName(first);
-        const target = first.block_id ? `data-kind="block" data-id="${first.block_id}"` : `data-kind="planting" data-id="${first.planting_id}"`;
-        return `<li ${target}><strong>${escapeHtml(where)}</strong>${escapeHtml(text)}</li>`;
-      })
-      .join("")
-  );
+  return [...groups.values()]
+    .map(({ text, items }) => {
+      const first = items[0];
+      const where = items.length > 1 ? `${ownerName(first)} ほか ${items.length - 1} か所` : ownerName(first);
+      const target = first.block_id ? `data-kind="block" data-id="${first.block_id}"` : `data-kind="planting" data-id="${first.planting_id}"`;
+      return `<li ${target}><strong>${escapeHtml(where)}</strong>${escapeHtml(text)}</li>`;
+    })
+    .join("");
 }
 
 // 工程表の表示。plan（計画）、act（実績）、both（計画と実績）。工程表と作付の詳細で共有し、ブラウザーが圃場ごとに覚える
@@ -417,8 +518,33 @@ export const blockTarget = (blockId) => (target) => !target.bed_id && !target.pl
 // その畝（の作付）の記録か
 export const bedTarget = (bed, plantingIds) => (target) => target.bed_id === bed.id || plantingIds.includes(target.planting_id);
 
+// 工程表の欄は 1 つで、開いた画面へ移す。圃場図ではすべての区画と畝、日程の画面では選んだ区画だけを描く
+const ganttOnMap = () => $("ganttPanel").parentElement.id === "ganttSlotMap";
+const ganttShown = () => $("ganttPanel").offsetParent !== null;
+// 工程表に描く区画。null はすべての区画
+const ganttBlockId = () => (ganttOnMap() ? null : sel.blockId);
+
+// 工程表の欄を、圃場図（"map"）か日程（"schedule"）へ移す。描くのは renderSchedule
+export function placeGantt(view) {
+  const slot = $(view === "map" ? "ganttSlotMap" : "ganttSlotSchedule");
+  if ($("ganttPanel").parentElement !== slot) {
+    slot.append($("ganttPanel"));
+  }
+}
+
+// 圃場図の画面で、キーの操作（Delete など）を工程表に渡すか。最後に工程表の欄を押したときだけ渡す
+export const ganttHasFocus = () => ganttFocused && ganttShown();
+
 // fit を渡すと（PDF 出力）、表示期間を「全体」にして、その幅（px）に収める
 function renderGantt(fit = null) {
+  const scopeId = ganttBlockId();
+  const blocks = scopeId ? state().blocks.filter((block) => block.id === scopeId) : state().blocks;
+  // 範囲が変わったら、見えなくなった帯を選んだままにしない（見えない作業を Delete で消さないように）
+  const scopeKey = scopeId || "all";
+  if (ganttScopeKey !== scopeKey) {
+    ganttScopeKey = scopeKey;
+    picked.clear();
+  }
   const mode = ganttMode();
   $("ganttModes").hidden = !isActivePlan();
   draw($("ganttModes"), modeButtons(mode));
@@ -435,11 +561,13 @@ function renderGantt(fit = null) {
   const showActual = mode !== "plan";
   const actuals = currentActuals();
   const isDated = (work) => work.plan_start && work.plan_end && work.plan_end >= work.plan_start;
-  const dated = state().works.filter(isDated);
+  // 描く区画の作業だけ（区画の作業と、その区画の畝の作付の作業）
+  const inScope = new Set(blocks.flatMap((block) => [...blockWorks(block.id), ...blockBeds(block.id).flatMap((bed) => bedPlantings(bed.id).flatMap((planting) => plantingWorks(planting.id)))]).map((work) => work.id));
+  const dated = state().works.filter((work) => inScope.has(work.id) && isDated(work));
   // 区画と畝ごとの実績の帯を、先に集めておく（表示の範囲を決めるのにも使う）
   const spansOf = new Map();
   if (showActual) {
-    for (const block of state().blocks) {
+    for (const block of blocks) {
       spansOf.set(block.id, actualSpans(blockWorks(block.id), blockTarget(block.id), actuals));
       for (const bed of blockBeds(block.id)) {
         const plantings = bedPlantings(bed.id);
@@ -555,7 +683,7 @@ function renderGantt(fit = null) {
   const link = (kind, id, text) => `<a href="#" class="gantt-link" data-detail="${kind}" data-id="${id}">${escapeHtml(text)}</a>`;
 
   const rows = [];
-  for (const block of state().blocks) {
+  for (const block of blocks) {
     const content = (showPlan ? bars(blockWorks(block.id).map((work) => ({ work }))) : "") + (showActual ? actualBars(spansOf.get(block.id)) : "");
     rows.push(row("block", `block:${block.id}`, `data-block="${block.id}" data-actual-block="${block.id}" data-name="${escapeHtml(block.name)}"`, link("block", block.id, block.name), content));
     for (const bed of blockBeds(block.id)) {
@@ -590,7 +718,7 @@ function renderGantt(fit = null) {
 
   const scroller = $("gantt").querySelector(".gantt-scroll");
   // 描き直しでは横の位置を保つ。初めて描くときと、表示期間を替えたときは、表示期間の始めを左に合わせる
-  const scrollKey = `${range}|${state().plan.id}|${fit || ""}`;
+  const scrollKey = `${range}|${state().plan.id}|${scopeKey}|${fit || ""}`;
   const keep = scroller && ganttScrollKey === scrollKey ? scroller.scrollLeft : null;
   ganttScrollKey = scrollKey;
   draw(
@@ -619,35 +747,15 @@ function printGantt() {
   copy.querySelectorAll(".is-picked, .is-selected").forEach((element) => element.classList.remove("is-picked", "is-selected"));
   printPage({
     name: "工程表",
-    title: `工程表　プラン: ${$("schedulePlanName").textContent}　出力日: ${fullDay(localToday())}`,
+    title: `工程表　プラン: ${$("schedulePlanName").textContent}${ganttBlockId() ? `　${state().blocks.find((block) => block.id === ganttBlockId())?.name || ""}` : ""}　出力日: ${fullDay(localToday())}`,
     body: `<div style="zoom:${zoom}">${copy.innerHTML}</div>`,
     landscape: true,
   });
 }
 
-// 作付の寸法、苗数、肥料の量を 1 行にする
-function numbersText(planting) {
-  const bed = state().beds.find((item) => item.id === planting.bed_id);
-  const crop = cropOf(planting);
-  const fertilizer = state().fertilizers.find((item) => item.id === crop?.fertilizer_id);
-  const numbers = plantingNumbers(bed.shape, crop, fertilizer, plantingSpec(planting, crop, state().logs || []));
-  const parts = [`畝 ${Math.round(numbers.width * 100)} cm × ${numbers.length.toFixed(1)} m（${numbers.area.toFixed(1)} ㎡）`];
-  if (numbers.seedlings !== null) {
-    parts.push(`苗 ${numbers.seedlings.toLocaleString("ja-JP")}`);
-  }
-  if (numbers.nitrogenKg !== null) {
-    parts.push(`窒素 ${numbers.nitrogenKg.toFixed(2)} kg`);
-  }
-  if (numbers.fertilizerKg !== null) {
-    parts.push(`${fertilizer.name} ${numbers.fertilizerKg.toFixed(2)} kg`);
-  }
-  return parts.join(" ／ ");
-}
-
-// プラン全体の、品目ごとの苗数と、肥料ごとの量
+// 選んでいる区画の、品目ごとの苗数と、肥料ごとの量。区画の頭の面積・畝・苗の行を押すと開く（planting-view.js）
 function renderSummary() {
-  const summary = summarize({ ...state(), logs: state().logs || [] });
-  $("summaryPanel").hidden = summary.crops.length === 0;
+  const summary = summarize({ ...state(), beds: blockBeds(sel.blockId), logs: state().logs || [] });
   const number = (value, digits = 0) => value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   draw(
     $("cropSummary"),
@@ -673,223 +781,8 @@ function startAfter(works) {
   return last ? addDays(last.plan_end, 1 + (typeFor(ownerOf(last), last.work_type)?.min_gap_days || 0)) : "";
 }
 
-const optionList = (entries, selected) =>
-  entries.map(([value, text]) => `<option value="${value}"${value === selected ? " selected" : ""}>${escapeHtml(text)}</option>`).join("");
-const cropOptions = (selected) =>
-  optionList([["", "登録していない品目"], ...state().crops.map((crop) => [crop.id, cropLabel(crop)])], selected || "");
-
-// 並べ直しの欄に出す基準と日。手で選んだものがあればそれを、なければ初期値を使う
-function arrangeFor(owner) {
-  const chosen = arrangeChoice.get(ownerKey(owner)) || {};
-  const mode = chosen.mode || Object.keys(ARRANGE_MODES[kindOf(owner)])[0];
-  return { mode, date: chosen.date ?? arrangeDefault(owner, mode) };
-}
-
-// 並べ直しの欄、指摘、作業の表、「作業を追加」。区画の作業と、作付の作業で同じ形
-function worksBlock(owner) {
-  const kind = kindOf(owner);
-  const works = worksOf(owner);
-  const mine = problems.filter((problem) => (owner.block_id ? problem.block_id === owner.block_id : problem.planting_id === owner.planting_id));
-  const flagged = new Set(mine.map((problem) => problem.work_id).filter(Boolean));
-  const warnings = mine
-    .map((problem) => {
-      const index = works.findIndex((work) => work.id === problem.work_id);
-      const where = index >= 0 ? `${index + 1}. ${escapeHtml(typeLabel(works[index].work_type))}: ` : "";
-      return `<li>${where}${escapeHtml(problem.message)}</li>`;
-    })
-    .join("");
-  const choice = arrangeFor(owner);
-  const actuals = currentActuals();
-  // 実績の列。記録から求めた開始日と終了日。始めただけなら「〜」で終わる
-  const actualText = (work) => {
-    if (isActivePlan() && work.cancelled_on) {
-      return "取りやめ";
-    }
-    const actual = actuals.get(work.id);
-    if (!actual) {
-      return "-";
-    }
-    if (!actual.end) {
-      return actual.last > actual.start ? `${formatDay(actual.start)}〜${formatDay(actual.last)}（作業中）` : `${formatDay(actual.start)}〜`;
-    }
-    return actual.start === actual.end ? formatDay(actual.start) : `${formatDay(actual.start)}〜${formatDay(actual.end)}`;
-  };
-  // 相手に合う種類を先に、それ以外を後ろに出す
-  const groups = [kind, kind === "block" ? "bed" : "block"];
-  const typeOptions = (selected) =>
-    groups
-      .map((group) => {
-        const types = state().workTypes.filter((type) => (type.scope || "block") === group);
-        return `<optgroup label="${SCOPE_LABELS[group]}">${optionList(types.map((type) => [type.code, type.label]), selected)}</optgroup>`;
-      })
-      .join("");
-  const rows = works.length
-    ? works
-        .map((work, index) => {
-          const days = workDays(work);
-          const previous = works[index - 1];
-          const gap = previous && previous.plan_end && work.plan_start ? diffDays(previous.plan_end, work.plan_start) - 1 : null;
-          return (
-            `<tr data-id="${work.id}" class="${flagged.has(work.id) ? "is-flagged" : ""}">` +
-            `<td>${index + 1}</td>` +
-            `<td><select data-field="work_type">${typeOptions(work.work_type)}</select></td>` +
-            `<td><input type="date" data-field="plan_start" value="${work.plan_start || ""}" /></td>` +
-            `<td><input type="date" data-field="plan_end" value="${work.plan_end || ""}" /></td>` +
-            `<td class="actual-cell">${escapeHtml(actualText(work))}</td>` +
-            `<td class="num">${days ?? "-"}</td>` +
-            `<td class="num">${gap === null ? "-" : gap}</td>` +
-            `<td><input type="text" data-field="note" value="${escapeHtml(work.note)}" /></td>` +
-            `<td class="edit-only actions">` +
-            `<button data-action="up" title="上へ"${index === 0 ? " disabled" : ""}>↑</button>` +
-            `<button data-action="down" title="下へ"${index === works.length - 1 ? " disabled" : ""}>↓</button>` +
-            `<button data-action="delete" title="削除" class="danger">✕</button></td></tr>`
-          );
-        })
-        .join("")
-    : `<tr><td colspan="9" class="muted">作業がまだありません。${kind === "bed" ? "下の「作付を追加」で入れるか" : "ひな形から作るか"}、「作業を追加」で足してください。</td></tr>`;
-  return (
-    `<div class="row edit-only schedule-tools"${works.length ? "" : " hidden"}>` +
-    `<select data-field="arrange-mode" aria-label="並べ直しの基準">${optionList(Object.entries(ARRANGE_MODES[kind]), choice.mode)}</select>` +
-    `<input type="date" data-field="arrange-date" aria-label="基準にする日" value="${choice.date}" />` +
-    `<button class="chip-btn" data-action="arrange">並べ直す</button></div>` +
-    `<ul class="error warning-list">${warnings}</ul>` +
-    `<div class="table-scroll"><table class="work-table"><thead><tr><th></th><th>作業</th><th>開始日</th><th>終了日</th><th>実績</th><th>日数</th>` +
-    `<th>前との間隔</th><th>メモ</th><th class="edit-only"></th></tr></thead><tbody>${rows}</tbody></table></div>` +
-    `<button class="text-btn edit-only" data-action="add-work">＋ 作業を追加</button>`
-  );
-}
-
-// 作付 1 つぶんの欄。見出しの行に、折りたたみ、品目、削除。その下に並べ直しの欄と作業の表
-function plantingSection(planting) {
-  const works = processOnly(plantingWorks(planting.id));
-  const crop = cropOf(planting);
-  const closed = folded.has(planting.id);
-  const end = harvestEnd(works);
-  const range = worksRange(works);
-  const info = end
-    ? `収穫完了予定日: ${formatDay(end)}`
-    : works.length
-      ? "収穫完了予定日: 未定（「収穫」の終了日を入れると決まります）"
-      : "まだ作業がありません。下で日を決めて「作付を追加」を押すと、この作付にひな形の作業が入ります。";
-  // たたんだときは、期間と作業の数だけを見出しの行に出す
-  const brief = closed ? `<span class="muted">${range ? `${formatDay(range.start)}〜${formatDay(range.end)}` : "日付なし"}、作業 ${works.length} 件</span>` : "";
-  return (
-    `<section class="work-section${sel.plantingId === planting.id ? " is-current" : ""}" data-planting="${planting.id}">` +
-    `<div class="row section-head">` +
-    `<button class="fold-btn" data-action="fold" aria-expanded="${!closed}" title="${closed ? "開く" : "たたむ"}">${closed ? "▸" : "▾"}</button>` +
-    `<h3>作付 ${planting.seq}</h3>` +
-    `<span class="view-only">${escapeHtml(planting.crop_name)}</span>` +
-    `<label class="inline-field edit-only">この作付の品目<select data-field="crop">${cropOptions(crop?.id)}</select>` +
-    `<input type="text" data-field="crop_name" placeholder="品目の名前" value="${escapeHtml(planting.crop_name)}"${crop ? " hidden" : ""} /></label>` +
-    `<button class="text-btn danger edit-only" data-action="delete-planting">この作付を削除</button>${brief}</div>` +
-    `<p class="muted">${escapeHtml(numbersText(planting))} ／ ${info}</p>` +
-    `<div class="section-body"${closed ? " hidden" : ""}>${worksBlock({ planting_id: planting.id })}</div></section>`
-  );
-}
-
-// 区画の作業の欄。ひな形から作る欄は、ここにだけある
-function blockSection(block) {
-  return (
-    `<section class="work-section" data-block="${block.id}">` +
-    `<div class="row section-head"><h3>${escapeHtml(block.name)}の作業（畝立ての前まで）</h3></div>` +
-    `<div class="section-body">` +
-    `<div class="row edit-only schedule-tools">` +
-    `<select data-field="template" aria-label="ひな形">${optionList(Object.entries(TEMPLATES.block).map(([key, item]) => [key, item.label]), template.key)}</select>` +
-    `<label class="inline-field">最初の作業の日<input type="date" data-field="template-start" value="${template.start}" /></label>` +
-    `<button class="chip-btn" data-action="template">ひな形から作る</button></div>` +
-    `${worksBlock({ block_id: block.id })}</div></section>`
-  );
-}
-
-function renderEditor() {
-  const blocks = state().blocks;
-  const beds = blockBeds(sel.blockId);
-  draw($("scheduleBlock"), blocks.map((block) => `<option value="${block.id}">${escapeHtml(block.name)}</option>`).join(""));
-  $("scheduleBlock").value = sel.blockId;
-  draw(
-    $("scheduleTarget"),
-    `<option value="block">区画の作業（畝立ての前まで）</option>` +
-    beds
-      .map((bed) => {
-        const crops = bedPlantings(bed.id).map((planting) => planting.crop_name).filter(Boolean).join(" → ");
-        return `<option value="${bed.id}">畝${bed.seq}${crops ? `（${escapeHtml(crops)}）` : ""}</option>`;
-      })
-      .join("")
-  );
-  $("scheduleTarget").value = sel.target;
-
-  const onBed = sel.target !== "block";
-  const plantings = onBed ? bedPlantings(sel.target) : [];
-  $("addPlantingBar").hidden = !onBed;
-  if (onBed) {
-    // 追加する作付の品目。選んだままにしておく（同じ品目を続けて足せるように）
-    const choice = $("newCropSelect").value;
-    draw($("newCropSelect"), cropOptions(state().crops.some((item) => item.id === choice) ? choice : ""));
-    // 日付の初期値は、畝、作付の数、品目、基準が変わったときに入れ直す（手で直した日は、それまで保つ）
-    const adding = [sel.target, plantings.length, plantings.at(-1)?.id, $("newCropSelect").value, $("newPlantingMode").value, state().works.length].join("|");
-    if (addingFor !== adding) {
-      addingFor = adding;
-      $("newPlantingDate").value = newPlantingDefault();
-    }
-  }
-  // 畝では、作付を上から順に並べる。足すたびに下へ伸びる
-  draw(
-    $("editorSections"),
-    onBed
-      ? plantings.map(plantingSection).join("") ||
-        '<p class="muted">この畝には作付がまだありません。下で品目と日を決めて「作付を追加」を押すと、畝立てから残渣処理までの作業が入った作付ができます。</p>'
-      : blockSection(blocks.find((block) => block.id === sel.blockId))
-  );
-}
-
-// 並べ直しの基準にする日の初期値
-function arrangeDefault(owner, mode) {
-  const works = worksOf(owner);
-  if (mode === "plant") {
-    return works.find((work) => work.work_type === "plant")?.plan_start || "";
-  }
-  if (mode === "before") {
-    // この区画の畝のうち、いちばん早く始まる最初の作付の開始日
-    const starts = blockBeds(owner.block_id)
-      .map((bed) => bedPlantings(bed.id)[0])
-      .filter(Boolean)
-      .map((planting) => worksRange(processOnly(plantingWorks(planting.id)))?.start)
-      .filter(Boolean);
-    return starts.sort()[0] || "";
-  }
-  return works.find((work) => work.plan_start)?.plan_start || "";
-}
-
-function arrange(owner, mode, date) {
-  const works = worksOf(owner);
-  if (!date) {
-    notify("基準にする日を入れてください。");
-    return;
-  }
-  let result;
-  if (mode === "before") {
-    result = scheduleBefore(works, typesFor(owner), date);
-  } else if (mode === "plant") {
-    const index = works.findIndex((work) => work.work_type === "plant");
-    if (index < 0) {
-      notify("この作付には「定植・播種」の作業がありません。");
-      return;
-    }
-    result = scheduleAnchored(works, typesFor(owner), index, date);
-  } else {
-    result = scheduleForward(works, typesFor(owner), date);
-  }
-  // 並べ直したあとは、欄の日を結果に合わせて出し直す
-  record({
-    kind: "work.arrange",
-    target: owner.block_id ? ["block", owner.block_id] : ["planting", owner.planting_id],
-    text: `${ownerName(owner)}の作業を並べ直した（${ARRANGE_MODES[kindOf(owner)][mode]}: ${fullDay(date)}）`,
-  });
-  arrangeChoice.delete(ownerKey(owner));
-  run(() => replaceWorks(owner, result));
-}
-
-function renderTypes() {
+// 作業の種類と目安の日数の表（「品目」の画面にある）
+export function renderTypes() {
   draw(
     $("typeRows"),
     state()
@@ -923,8 +816,8 @@ function newWork(owner, workType, seq) {
 const ownedBy = (work, owner) => (owner.block_id ? work.block_id === owner.block_id : work.planting_id === owner.planting_id);
 
 // ある区画または作付の作業を、まるごと入れ替えて保存する
-// 入れ替えるのは工程の作業だけ。管理作業（防除などの計画）は「作業の計画」の表に出していないので、そのまま残す
-// （入れ替えの相手に含めると、表に出ていない管理作業の計画が、なくなった行として消えてしまう）
+// 入れ替えるのは工程の作業だけ。管理作業（防除などの計画）は、そのまま残す
+// （入れ替えの相手に含めると、管理作業の計画が、なくなった行として消えてしまう）
 async function replaceWorks(owner, works) {
   const replaced = (work) => ownedBy(work, owner) && !isManagement(work.work_type);
   const old = state().works.filter(replaced);
@@ -935,24 +828,6 @@ async function replaceWorks(owner, works) {
   state().works = [...state().works.filter((work) => !replaced(work)), ...works];
   await store().remove("works", old.filter((work) => !kept.has(work.id)).map((work) => work.id));
   await store().upsert("works", works);
-}
-
-async function applyTemplate(blockId) {
-  const owner = { block_id: blockId };
-  if (
-    worksOf(owner).length &&
-    !(await confirmAction({ message: "いまの作業を、ひな形の内容に置き換えます。いまの作業は消えます。", name: `${ownerName(owner)}の作業 ${worksOf(owner).length} 件`, action: "置き換える" }))
-  ) {
-    return;
-  }
-  record({ kind: "work.template", target: ["block", blockId], text: `${ownerName(owner)}の作業を、ひな形「${TEMPLATES.block[template.key].label}」から作成` });
-  run(async () => {
-    let works = TEMPLATES.block[template.key].codes.map((code, index) => newWork(owner, code, index + 1));
-    if (template.start) {
-      works = scheduleForward(works, state().workTypes, template.start);
-    }
-    await replaceWorks(owner, works);
-  });
 }
 
 // 作付のひな形の作業（日付なし）。品目を登録してあれば、マルチを張るかどうかでひな形を選ぶ。
@@ -988,231 +863,6 @@ async function fillPlanting(planting, timing = {}) {
   await replaceWorks(owner, works);
 }
 
-// 「作付を追加」の日付の初期値。いちばん早く始められる日から並べたときの、定植・播種の日（または最初の作業の日）
-function newPlantingDefault() {
-  const plantings = bedPlantings(sel.target);
-  const last = plantings.at(-1);
-  // 作業のない作付が最後にあれば、足すのではなく、その作付に入れる
-  const seq = last && !plantingWorks(last.id).length ? last.seq : (last?.seq || 0) + 1;
-  const earliest = earliestStart(state().beds.find((bed) => bed.id === sel.target), seq);
-  if (!earliest || $("newPlantingMode").value === "forward") {
-    return earliest;
-  }
-  const crop = state().crops.find((item) => item.id === $("newCropSelect").value);
-  const dated = scheduleForward(draftWorks(crop).works, typesForCrop(state().workTypes, crop, []), earliest);
-  return dated.find((work) => work.work_type === "plant")?.plan_start || earliest;
-}
-
-// 作付を足す。「追加する作付の品目」で選んだ品目の作付を作り、ひな形の作業まで入れる。
-// 作業のない作付がもうあるときは、新しく足さずに、その作付に品目と作業を入れる
-function addPlanting() {
-  const plantings = bedPlantings(sel.target);
-  const last = plantings.at(-1);
-  const crop = state().crops.find((item) => item.id === $("newCropSelect").value);
-  const timing = { mode: $("newPlantingMode").value, date: $("newPlantingDate").value };
-  const empty = last && !plantingWorks(last.id).length ? last : null;
-  if (last && !empty && !harvestEnd(plantingWorks(last.id))) {
-    notify(
-      `作付 ${last.seq}${last.crop_name ? `（${last.crop_name}）` : " "}の収穫完了予定日が決まっていません。\n` +
-        "次の作付を足す前に、その作付に「収穫」の作業を入れ、終了日を入れてください。"
-    );
-    return;
-  }
-  run(async () => {
-    let planting = empty;
-    if (planting && crop) {
-      planting.crop_id = crop.id;
-      planting.crop_name = crop.name;
-      await store().upsert("plantings", [planting]);
-    } else if (!planting) {
-      planting = await newPlanting(sel.target, crop?.name || "", crop?.id || null);
-    }
-    sel.plantingId = planting.id;
-    await fillPlanting(planting, timing);
-    record({ kind: "planting.add", target: ["planting", planting.id], text: `${ownerName({ planting_id: planting.id })}を追加`, after: rangeText(plantingWorks(planting.id)) });
-  });
-}
-
-async function deletePlanting(id) {
-  const planting = state().plantings.find((item) => item.id === id);
-  if (!planting || !(await confirmDelete("この作付と、その作業を削除します。", ownerName({ planting_id: planting.id })))) {
-    return;
-  }
-  if (!state().plantings.includes(planting)) {
-    return;
-  }
-  run(async () => {
-    record({ kind: "planting.delete", text: `${ownerName({ planting_id: planting.id })}を削除` });
-    await store().remove("plantings", [planting.id]);
-    state().plantings = state().plantings.filter((item) => item.id !== planting.id);
-    state().works = state().works.filter((work) => work.planting_id !== planting.id);
-    folded.delete(planting.id);
-    if (sel.plantingId === planting.id) {
-      sel.plantingId = null;
-    }
-  });
-}
-
-// 作付の品目を選び直す。cropId が空なら「登録していない品目」（名前は残す）
-function changeCrop(plantingId, cropId) {
-  const planting = state().plantings.find((item) => item.id === plantingId);
-  const crop = state().crops.find((item) => item.id === cropId);
-  const was = planting.crop_name || "品目なし";
-  planting.crop_id = crop?.id || null;
-  if (crop) {
-    planting.crop_name = crop.name;
-  }
-  record({
-    kind: "planting.crop",
-    target: ["planting", planting.id],
-    text: `${placeName(planting)}の品目を変更`,
-    before: was,
-    after: crop ? crop.name : `${planting.crop_name || "品目なし"}（登録していない品目）`,
-  });
-  run(async () => {
-    await store().upsert("plantings", [planting]);
-    // まだ作業のない作付なら、選んだ品目のひな形で作業を入れる。作業があれば、そのままにする
-    if (crop && !plantingWorks(planting.id).length) {
-      await fillPlanting(planting);
-    }
-  });
-}
-
-function addWork(owner) {
-  const works = worksOf(owner);
-  const last = works.at(-1);
-  const first = state().workTypes.find((type) => (type.scope || "block") === kindOf(owner)) || state().workTypes[0];
-  const work = newWork(owner, first.code, works.length + 1);
-  if (last && last.plan_end) {
-    work.plan_start = addDays(last.plan_end, 1 + (typeFor(owner, last.work_type)?.min_gap_days || 0));
-    work.plan_end = addDays(work.plan_start, first.default_days - 1);
-  }
-  record({ kind: "work.add", target: ["work", work.id], text: `${ownerName(owner)}に、作業「${first.label}」を追加` });
-  run(() => replaceWorks(owner, [...works, work]));
-}
-
-function changeWork(id, field, value) {
-  const work = state().works.find((item) => item.id === id);
-  const was = field === "work_type" ? typeLabel(work.work_type) : field === "note" ? null : rangeText([work]);
-  if (field === "work_type" || field === "note") {
-    work[field] = value;
-  } else {
-    work[field] = value || null;
-    // 開始日だけ入れたら、目安の日数で終了日を入れる。開始日を動かしたら、日数を保って終了日も動かす
-    if (field === "plan_start" && value) {
-      const kept = daysBeforeEdit && daysBeforeEdit.id === id ? daysBeforeEdit.days : null;
-      work.plan_end = addDays(value, (kept || typeFor(ownerOf(work), work.work_type)?.default_days || 1) - 1);
-    }
-  }
-  record({
-    kind: field === "work_type" ? "work.type" : field === "note" ? "work.note" : "work.date",
-    target: ["work", id],
-    text: `${ownerName(ownerOf(work))}の「${typeLabel(work.work_type)}」の${field === "work_type" ? "種類" : field === "note" ? "メモ" : "日付"}を変更`,
-    before: was,
-    after: field === "work_type" ? typeLabel(work.work_type) : field === "note" ? null : rangeText([work]),
-  });
-  daysBeforeEdit = null;
-  run(() => store().upsert("works", [work]));
-}
-
-function workAction(id, action) {
-  const owner = ownerOf(state().works.find((work) => work.id === id));
-  const works = worksOf(owner);
-  const index = works.findIndex((work) => work.id === id);
-  if (action === "delete") {
-    record({ kind: "work.delete", text: `${ownerName(owner)}の作業「${typeLabel(works[index].work_type)}」を削除` });
-    run(() => replaceWorks(owner, works.filter((work) => work.id !== id)));
-    return;
-  }
-  const other = action === "up" ? index - 1 : index + 1;
-  if (other < 0 || other >= works.length) {
-    return;
-  }
-  record({ kind: "work.order", target: owner.block_id ? ["block", owner.block_id] : ["planting", owner.planting_id], text: `${ownerName(owner)}の作業の順番を変更` });
-  [works[index], works[other]] = [works[other], works[index]];
-  run(() => replaceWorks(owner, works));
-}
-
-// 「作業の計画」の欄の中の操作。欄は描くたびに作り直すので、外側でまとめて受ける
-function initEditor() {
-  const root = $("editorSections");
-  const ownerAt = (element) => {
-    const section = element.closest(".work-section");
-    return section ? (section.dataset.block ? { block_id: section.dataset.block } : { planting_id: section.dataset.planting }) : null;
-  };
-
-  root.addEventListener("click", (event) => {
-    const owner = ownerAt(event.target);
-    if (!owner) {
-      return;
-    }
-    // 触った作付を、貼り付けの入れ先などに使う「いまの作付」にする
-    if (owner.planting_id && sel.plantingId !== owner.planting_id) {
-      sel.plantingId = owner.planting_id;
-      root.querySelectorAll(".work-section").forEach((section) => section.classList.toggle("is-current", section.dataset.planting === sel.plantingId));
-    }
-    const action = event.target.closest("[data-action]")?.dataset.action;
-    const row = event.target.closest("tr[data-id]");
-    const section = event.target.closest(".work-section");
-    const field = (name) => section.querySelector(`[data-field="${name}"]`).value;
-    if (action === "fold") {
-      if (!folded.delete(owner.planting_id)) {
-        folded.add(owner.planting_id);
-      }
-      renderSchedule();
-    } else if (action === "delete-planting") {
-      deletePlanting(owner.planting_id);
-    } else if (action === "arrange") {
-      arrange(owner, field("arrange-mode"), field("arrange-date"));
-    } else if (action === "template") {
-      applyTemplate(owner.block_id);
-    } else if (action === "add-work") {
-      addWork(owner);
-    } else if (row && action) {
-      workAction(row.dataset.id, action);
-    }
-  });
-
-  root.addEventListener("change", (event) => {
-    const owner = ownerAt(event.target);
-    const name = event.target.dataset.field;
-    const row = event.target.closest("tr[data-id]");
-    if (!owner || !name) {
-      return;
-    }
-    if (row) {
-      changeWork(row.dataset.id, name, event.target.value);
-    } else if (name === "crop") {
-      changeCrop(owner.planting_id, event.target.value);
-    } else if (name === "crop_name") {
-      const planting = state().plantings.find((item) => item.id === owner.planting_id);
-      const was = planting.crop_name || "品目なし";
-      planting.crop_name = event.target.value.trim();
-      record({ kind: "planting.crop", target: ["planting", planting.id], text: `${placeName(planting)}の品目を変更`, before: was, after: planting.crop_name || "品目なし" });
-      run(() => store().upsert("plantings", [planting]));
-    } else if (name === "arrange-mode") {
-      // 基準を変えたら、日もその基準の初期値に入れ直す
-      const date = arrangeDefault(owner, event.target.value);
-      arrangeChoice.set(ownerKey(owner), { mode: event.target.value, date });
-      event.target.closest(".work-section").querySelector('[data-field="arrange-date"]').value = date;
-    } else if (name === "arrange-date") {
-      arrangeChoice.set(ownerKey(owner), { ...arrangeFor(owner), date: event.target.value });
-    } else if (name === "template") {
-      template.key = event.target.value;
-    } else if (name === "template-start") {
-      template.start = event.target.value;
-    }
-  });
-
-  root.addEventListener("focusin", (event) => {
-    // 開始日を動かす前の日数を覚えておく
-    const row = event.target.closest("tr[data-id]");
-    if (row && event.target.dataset.field === "plan_start") {
-      daysBeforeEdit = { id: row.dataset.id, days: workDays(state().works.find((item) => item.id === row.dataset.id)) };
-    }
-  });
-}
-
 // ---- 工程表の上での操作 ----
 // 帯を選び、ドラッグで日をずらす。別の行へドラッグすると、その区画や畝へ移す（Ctrl でコピー）
 
@@ -1245,7 +895,7 @@ function selectRow(row) {
 
 // 「＋ 入力する」で、工程表で選んだ行を対象に入れて開くための値。畝なら今日その畝にある作付、区画なら区画
 export function selectedRowPreset() {
-  if (!rowSel || $("scheduleView").hidden || !isActivePlan()) {
+  if (!rowSel || !ganttShown() || !isActivePlan()) {
     return {};
   }
   const [kind, id] = rowSel.split(":");
@@ -1604,13 +1254,19 @@ function initGanttEditing() {
   gantt.addEventListener("pointerup", finishActual);
   gantt.addEventListener("pointercancel", finishActual);
 
-  // 名前のリンク（区画の名前、畝の番号、品目の名前）は、詳細を開く。
-  // 帯のない所を押すと、帯の選択を外して、その行を選ぶ（下の「作業の計画」は切り替えない）
+  // 名前のリンク: 区画の名前は日程の画面でその区画を、畝の番号と品目の名前は作付の詳細を開く。
+  // 帯のない所を押すと、帯の選択を外して、その行を選ぶ
   gantt.addEventListener("click", (event) => {
     const link = event.target.closest("[data-detail]");
     if (link) {
       event.preventDefault();
-      ctx.openDetail(link.dataset.detail, link.dataset.id);
+      if (link.dataset.detail === "block") {
+        // 区画の名前: 日程の画面で、その区画を開く
+        openInSchedule("block", link.dataset.id);
+        ctx.showView("schedule");
+      } else {
+        ctx.openDetail(link.dataset.detail, link.dataset.id);
+      }
       return;
     }
     const row = event.target.closest(".gantt-row");
@@ -1646,15 +1302,19 @@ function initGanttEditing() {
   let resizeTimer = null;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => !$("scheduleView").hidden && renderGantt(), 200);
+    resizeTimer = setTimeout(() => ganttShown() && state().blocks.length && renderGantt(), 200);
   });
 
   $("copyPickedBtn").addEventListener("click", () => copyPicked(false));
   $("cutPickedBtn").addEventListener("click", () => copyPicked(true));
   $("pastePickedBtn").addEventListener("click", pastePicked);
   $("deletePickedBtn").addEventListener("click", deletePicked);
+  // 最後に押した所が工程表の欄か。圃場図の画面では、そのときだけキーを工程表で受ける（図の操作と取り合わない）
+  document.addEventListener("pointerdown", (event) => {
+    ganttFocused = Boolean(event.target.closest?.("#ganttPanel"));
+  }, true);
   document.addEventListener("keydown", (event) => {
-    if ($("scheduleView").hidden || !canEdit() || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
+    if (!ganttShown() || (ganttOnMap() && !ganttFocused) || !canEdit() || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
       return;
     }
     const command = event.ctrlKey || event.metaKey;
@@ -1697,21 +1357,28 @@ export function initSchedule(context) {
       }
     },
     flagged: (kind, id) => problems.some((problem) => (kind === "block" ? problem.block_id === id : problemBed(problem) === id)),
-    open: (kind, id) => {
+    // 畝の図形を押したとき: その畝を選ぶ（図の上の「選んだ畝を…」のボタンの相手）
+    select: (kind, id) => {
       openInSchedule(kind, id);
       renderSchedule();
     },
+    // 区画の作業の欄: 窓の工程の計画をその区画で開く。畝の下の作付の欄: その作付（なければ今の作付）の詳細を開く。
+    // 作付のない畝は、窓の工程の計画をその畝で開く（作付を足せる）
+    open: (kind, id, plantingId = null) => {
+      if (kind === "block") {
+        openProcessPlan("block", id);
+        return;
+      }
+      const planting = (plantingId && state().plantings.find((item) => item.id === plantingId)) || bedPlantingNow(id);
+      if (planting) {
+        ctx.openDetail("planting", planting.id);
+      } else {
+        openLogEditor(null, { tab: "process", bedId: id });
+      }
+    },
   });
 
-  $("scheduleBlock").addEventListener("change", (event) => {
-    Object.assign(sel, { blockId: event.target.value, target: "block", plantingId: null });
-    renderSchedule();
-  });
-  $("scheduleTarget").addEventListener("change", (event) => {
-    Object.assign(sel, { target: event.target.value, plantingId: null });
-    renderSchedule();
-  });
-  initEditor();
+  $("schedulePicker").addEventListener("change", (event) => onPick(event.target.value));
   initGanttEditing();
   $("weekList").addEventListener("click", onWeekClick);
   $("lateList").addEventListener("click", onWeekClick);
@@ -1740,20 +1407,12 @@ export function initSchedule(context) {
   $("gantt").addEventListener("pointerleave", () => {
     tip.hidden = true;
   });
-  $("addPlantingBtn").addEventListener("click", addPlanting);
-  for (const id of ["newCropSelect", "newPlantingMode"]) {
-    $(id).addEventListener("change", () => {
-      $("newPlantingDate").value = newPlantingDefault();
-    });
-  }
   $("ganttPdfBtn").addEventListener("click", printGantt);
+  // 圃場図の「警告」の、確認が必要な点の行
   $("problemList").addEventListener("click", (event) => {
     const item = event.target.closest("li[data-id]");
     if (item) {
-      openInSchedule(item.dataset.kind, item.dataset.id);
-      renderSchedule();
-      const section = $("editorSections").querySelector(`[data-planting="${sel.plantingId}"]`) || $("editorSections");
-      section.scrollIntoView({ block: "center", behavior: "smooth" });
+      openProblemTarget(item.dataset.kind, item.dataset.id);
     }
   });
   $("typeRows").addEventListener("change", (event) => {

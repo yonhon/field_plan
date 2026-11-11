@@ -29,7 +29,7 @@
       </div>
       <nav id="viewTabs" class="control-group" aria-label="画面の切り替え" hidden>
         <button class="tab-btn is-active" data-view="map">圃場図<span id="mapBadge" class="tab-badge" hidden></span></button>
-        <button class="tab-btn" data-view="schedule">日程<span id="scheduleBadge" class="tab-badge" hidden></span></button>
+        <button class="tab-btn" data-view="schedule">日程</button>
         <button class="tab-btn" data-view="crops">品目</button>
         <button class="tab-btn" data-view="diary">日記</button>
         <button class="tab-btn" data-view="journal">履歴</button>
@@ -66,6 +66,36 @@
 
     <main id="appView" class="layout" hidden>
       <section class="map-area">
+        <!-- 圃場の全体の情報。警告、今週やること、最近の実績を、図の上に並べる -->
+        <div class="map-overview">
+          <section id="alertPanel" class="panel problem-panel" hidden>
+            <div class="panel-heading">
+              <h2>警告</h2>
+              <p id="alertCount" class="muted"></p>
+            </div>
+            <ul id="warnings" class="problem-list" hidden></ul>
+            <ul id="problemList" class="problem-list"></ul>
+          </section>
+
+          <section class="panel">
+            <div id="lateBox" class="late-box" hidden>
+              <h2 id="lateTitle">遅れている作業</h2>
+              <ul id="lateList" class="week-list"></ul>
+            </div>
+            <h2 id="weekTitle">今週やること</h2>
+            <ul id="weekList" class="week-list"></ul>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <h2 id="logTitle">最近の実績</h2>
+              <button id="logToggle" class="text-btn" hidden>すべて</button>
+            </div>
+            <p id="logNote" class="muted" hidden></p>
+            <ul id="logList" class="week-list log-list"></ul>
+          </section>
+        </div>
+
         <div class="toolbar edit-only" role="group" aria-label="操作">
           <!-- 道具は全体で 1 つだけ選べる。組ごとにつなげ、使い終えると「選択・移動」に戻る -->
           <span class="seg"><button class="mode-btn is-active" data-mode="select" aria-pressed="true">選択・移動</button></span>
@@ -118,7 +148,6 @@
           </span>
         </div>
         <p id="hint" class="hint edit-only"></p>
-        <ul id="warnings" class="map-warnings" hidden></ul>
         <div class="map-frame">
           <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="圃場図"></svg>
           <button id="mapPdfBtn" class="chip-btn map-pdf" title="圃場の全体を、下絵なしで PDF にします">PDF出力</button>
@@ -126,6 +155,31 @@
             <div class="scale-bar"><span id="scaleBarLine"></span><span id="scaleBarLabel"></span></div>
             <button id="fitBtn" class="chip-btn">全体を表示</button>
           </div>
+        </div>
+
+        <!-- 工程表の欄。圃場図ではすべての区画と畝を、日程の画面では選んだ区画だけを描く（1 つの欄を、開いた画面へ移す） -->
+        <div id="ganttSlotMap">
+          <section id="ganttPanel" class="panel">
+            <div class="panel-heading">
+              <h2>工程表</h2>
+              <div class="row">
+                <div id="ganttModes" class="seg" role="group" aria-label="工程表の表示" hidden></div>
+                <div id="ganttRanges" class="seg" role="group" aria-label="工程表の表示期間"></div>
+                <p class="muted">プラン: <span id="schedulePlanName"></span></p>
+                <button id="ganttPdfBtn" class="chip-btn" title="工程表の全体を PDF にします">PDF出力</button>
+              </div>
+            </div>
+            <p id="ganttModeNote" class="muted" hidden></p>
+            <div class="row edit-only gantt-tools">
+              <span id="pickInfo" class="muted"></span>
+              <button id="copyPickedBtn" class="chip-btn">コピー</button>
+              <button id="cutPickedBtn" class="chip-btn">切り取り</button>
+              <button id="pastePickedBtn" class="chip-btn">貼り付け</button>
+              <button id="deletePickedBtn" class="text-btn danger">削除</button>
+            </div>
+            <p class="muted edit-only">行や帯を押すと、その区画（畝）を選びます。選んだ行は、貼り付けの入れ先と、圃場図の右下の「＋ 入力する」の対象になります。帯は Ctrl を押しながらで複数選べ（同じ行の中）、ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。管理作業（防除、除草など）の帯は、押すと計画の窓も開き、Ctrl を押しながら横に動かして離すと、その日へコピーします。区画の名前を押すと、日程の画面でその区画を開きます。畝・品目の名前を押すと、作付の詳細を開きます。</p>
+            <div id="gantt"></div>
+          </section>
         </div>
       </section>
 
@@ -252,44 +306,36 @@
     </main>
 
     <main id="scheduleView" class="schedule" hidden>
-      <section id="problemPanel" class="panel problem-panel" hidden>
-        <div class="panel-heading">
-          <h2>確認が必要な点</h2>
-          <p id="problemCount" class="muted"></p>
-        </div>
-        <ul id="problemList" class="problem-list"></ul>
-      </section>
-
-      <section class="panel">
-        <div id="lateBox" class="late-box" hidden>
-          <h2 id="lateTitle">遅れている作業</h2>
-          <ul id="lateList" class="week-list"></ul>
-        </div>
-        <h2 id="weekTitle">今週やること</h2>
-        <ul id="weekList" class="week-list"></ul>
-      </section>
-
-      <section class="panel">
-        <div class="panel-heading">
-          <h2 id="logTitle">最近の実績</h2>
-          <button id="logToggle" class="text-btn" hidden>すべて</button>
-        </div>
-        <p id="logNote" class="muted" hidden></p>
-        <ul id="logList" class="week-list log-list"></ul>
-      </section>
+      <!-- 区画か畝を選ぶ欄。畝を選ぶと作付の詳細の画面になり、この欄もそちらの上へ移す（placePicker） -->
+      <div id="pickerSlotSchedule">
+        <section id="pickerPanel" class="panel picker-panel">
+          <label class="inline-field picker-field">区画・畝<select id="schedulePicker" aria-label="区画か畝"></select></label>
+        </section>
+      </div>
 
       <p id="scheduleEmpty" class="muted" hidden>圃場図で耕起対象区画を作ると、ここで区画と畝の日程を作れます。</p>
 
       <div id="scheduleBody" class="schedule-body">
+        <!-- 区画の頭（前後の区画、名前と面積・畝・苗、入力と日記のボタン、表示の切り替え）。planting-view.js が描く -->
+        <div id="blockHead" class="block-head"></div>
+        <!-- 苗と肥料の集計（この区画）。頭の面積・畝・苗の行を押すと開く -->
+        <section id="blockSummary" class="panel" hidden>
+          <h2>苗と肥料の集計（この区画）</h2>
+          <div class="table-scroll">
+            <table class="work-table summary-table">
+              <thead><tr><th>品目</th><th>作付の数</th><th>面積（㎡）</th><th>苗数</th><th>肥料</th></tr></thead>
+              <tbody id="cropSummary"></tbody>
+            </table>
+          </div>
+          <p id="fertilizerSummary" class="muted"></p>
+        </section>
+
         <section class="panel">
           <div class="panel-heading">
             <h2>区画と畝</h2>
-            <div class="row">
-              <select id="scheduleBlock" aria-label="区画"></select>
-              <label class="inline-field">表示日<input id="stripDate" type="date" /></label>
-            </div>
+            <label class="inline-field">表示日<input id="stripDate" type="date" /></label>
           </div>
-          <p class="muted edit-only">畝や区画の作業をクリックすると、下で編集できます。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わります。数字をクリックすると、畝幅や隙間を cm で指定できます。図の中の「＋」を押すと、その場所に下の畝幅と隙間で畝を足します。畝の追加、移動、削除は、この図だけで行います。</p>
+          <p class="muted edit-only">区画の作業の欄を押すと、その区画の工程の計画を窓で開きます。畝の下の作付の欄を押すと、その作付の詳細を開きます。畝を押すと、その畝を選びます（下の「選んだ畝を…」のボタンの相手）。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わります。数字をクリックすると、畝幅や隙間を cm で指定できます。図の中の「＋」を押すと、その場所に下の畝幅と隙間で畝を足します。畝の追加、移動、削除は、この図だけで行います。</p>
           <div class="row edit-only strip-tools">
             <select id="stripCrop" aria-label="足す畝の品目"></select>
             <label class="inline-field">畝幅（cm）<input id="stripWidth" type="number" min="1" value="70" /></label>
@@ -323,74 +369,20 @@
           <div class="strip-scroll"><div id="strip" class="strip"></div></div>
         </section>
 
-        <section class="panel">
-          <div class="panel-heading">
-            <h2>作業の計画</h2>
-            <select id="scheduleTarget" aria-label="区画の作業か、畝か"></select>
-          </div>
-          <!-- 区画なら区画の作業、畝なら作付ごとの欄が、上から順に並ぶ（schedule-view.js が描く） -->
-          <div id="editorSections"></div>
-          <!-- 畝のとき: 次の作付を足す欄。作付がまだなければ、これだけが出る -->
-          <div id="addPlantingBar" class="row edit-only add-planting">
-            <label class="inline-field">追加する作付の品目
-              <select id="newCropSelect"></select>
-            </label>
-            <select id="newPlantingMode" aria-label="日付の基準">
-              <option value="plant">定植・播種をこの日に始める（前は逆算）</option>
-              <option value="forward">最初の作業をこの日に始める</option>
-            </select>
-            <input id="newPlantingDate" type="date" aria-label="基準にする日" />
-            <button id="addPlantingBtn" class="chip-btn">作付を追加</button>
-          </div>
-        </section>
+        <!-- 区画の作業の計画と実績（計画にない実績も）、計画との差、日記のボタン（planting-view.js が描く） -->
+        <section id="blockRecord" class="panel"></section>
 
-        <section class="panel">
-          <div class="panel-heading">
-            <h2>工程表</h2>
-            <div class="row">
-              <div id="ganttModes" class="seg" role="group" aria-label="工程表の表示" hidden></div>
-              <div id="ganttRanges" class="seg" role="group" aria-label="工程表の表示期間"></div>
-              <p class="muted">プラン: <span id="schedulePlanName"></span></p>
-              <button id="ganttPdfBtn" class="chip-btn" title="工程表の全体を PDF にします">PDF出力</button>
-            </div>
-          </div>
-          <p id="ganttModeNote" class="muted" hidden></p>
-          <div class="row edit-only gantt-tools">
-            <span id="pickInfo" class="muted"></span>
-            <button id="copyPickedBtn" class="chip-btn">コピー</button>
-            <button id="cutPickedBtn" class="chip-btn">切り取り</button>
-            <button id="pastePickedBtn" class="chip-btn">貼り付け</button>
-            <button id="deletePickedBtn" class="text-btn danger">削除</button>
-          </div>
-          <p class="muted edit-only">行や帯を押すと、その区画（畝）を選びます。選んだ行は、貼り付けの入れ先と、「＋ 入力する」の対象になります。帯は Ctrl を押しながらで複数選べ（同じ行の中）、ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。管理作業（防除、除草など）の帯は、押すと計画の窓も開き、Ctrl を押しながら横に動かして離すと、その日へコピーします。区画・畝・品目の名前を押すと、詳細を開きます。下の「作業の計画」で開く区画（畝）は、「区画と畝」の図で選びます。</p>
-          <div id="gantt"></div>
-        </section>
+        <!-- 工程表の欄は、日程の画面ではここに移す（placeGantt）。選んだ区画だけを描く -->
+        <div id="ganttSlotSchedule"></div>
 
-        <section id="summaryPanel" class="panel" hidden>
-          <h2>苗と肥料の集計</h2>
-          <div class="table-scroll">
-            <table class="work-table summary-table">
-              <thead><tr><th>品目</th><th>作付の数</th><th>面積（㎡）</th><th>苗数</th><th>肥料</th></tr></thead>
-              <tbody id="cropSummary"></tbody>
-            </table>
-          </div>
-          <p id="fertilizerSummary" class="muted"></p>
-        </section>
-
-        <section class="panel edit-only">
-          <h2>作業の種類と目安の日数</h2>
-          <p class="muted">ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。</p>
-          <table class="type-table">
-            <thead><tr><th>作業</th><th>かかる日数</th><th>あとにあける日数</th></tr></thead>
-            <tbody id="typeRows"></tbody>
-          </table>
-        </section>
       </div>
-
-      <button id="logAddBtn" class="fab" type="button">＋ 入力する</button>
     </main>
 
+    <!-- 圃場図の画面の右下に出す（showView が出し入れする） -->
+    <button id="logAddBtn" class="fab" type="button" hidden>＋ 入力する</button>
+
     <main id="plantingView" class="schedule" hidden>
+      <div id="pickerSlotPlanting"></div>
       <div id="plantingBody" class="schedule-body"></div>
     </main>
 
@@ -410,6 +402,15 @@
         </div>
         <p class="muted">窒素の成分（%）から、肥料の量を計算します。</p>
         <div class="table-scroll"><table id="fertilizerTable" class="work-table crop-table"></table></div>
+      </section>
+
+      <section class="panel edit-only">
+        <h2>作業の種類と目安の日数</h2>
+        <p class="muted">ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。品目を登録した作付では、収穫までの日数などは品目の設定を使います。</p>
+        <table class="type-table">
+          <thead><tr><th>作業</th><th>かかる日数</th><th>あとにあける日数</th></tr></thead>
+          <tbody id="typeRows"></tbody>
+        </table>
       </section>
     </main>
 
@@ -440,7 +441,7 @@
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // Service Worker（sw.js）が一式をそろえて出しているときは、そのまま読む。
       // そうでないとき（初めて開いたとき、?local=1）は、読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js", "toast.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "process-editor.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js", "toast.js"];
       // 新しい版のお知らせの「読み込み直す」。保存を送り終えてから読み込み直す（app.js の finishSaves）。
       // 送れなかったものが残れば、読み込み直さない
       document.getElementById("updateBtn").addEventListener("click", async (event) => {

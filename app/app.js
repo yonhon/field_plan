@@ -43,12 +43,13 @@ import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
-import { initPlantingView, openPlantingDetail, plantingTarget, renderPlantingDetail } from "./planting-view.js";
+import { initProcessEditor } from "./process-editor.js";
+import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
-import { initSchedule, openInSchedule, renderSchedule, selectedRowPreset } from "./schedule-view.js";
+import { currentBlockId, ganttHasFocus, initSchedule, openInSchedule, openProcessPlan, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash, selectedRowPreset } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
 
@@ -759,13 +760,17 @@ function mapWarnings(outside = findOutside()) {
   return warnings;
 }
 
-// 図の上の警告と、「圃場図」のタブの件数。日程の画面で畝を動かしたときも呼ばれる
+// 図の上の「警告」の欄と、「圃場図」のタブの件数。図形のはみ出しと、日程の確認が必要な点（schedule-view.js が描く）を合わせる。
+// 日程の画面で畝を動かしたときや、日程を描き直したときも呼ばれる
 function renderWarnings(outside = findOutside()) {
   const warnings = mapWarnings(outside);
   $("warnings").hidden = warnings.length === 0;
   draw($("warnings"), warnings.map(([id, text]) => `<li data-shape="${id}">${escapeHtml(text)}</li>`).join(""));
-  $("mapBadge").hidden = warnings.length === 0;
-  $("mapBadge").textContent = `⚠${warnings.length}`;
+  const total = warnings.length + problemTotal();
+  $("alertPanel").hidden = total === 0;
+  $("alertCount").textContent = `${total} 件`;
+  $("mapBadge").hidden = total === 0;
+  $("mapBadge").textContent = `⚠${total}`;
 }
 
 // 右側の木の行。圃場の外形、区域、その中の区画、その中の畝の順。
@@ -2600,7 +2605,8 @@ window.addEventListener("resize", renderMap);
 const ARROWS = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
 
 document.addEventListener("keydown", (event) => {
-  if (!state.field || $("appView").hidden || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
+  // 最後に工程表の欄を押したときは、キーは工程表の操作（schedule-view.js）に渡す
+  if (!state.field || $("appView").hidden || ganttHasFocus() || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
     return;
   }
   if (event.key === "Escape") {
@@ -2715,6 +2721,8 @@ $("warnings").addEventListener("click", (event) => {
   const item = event.target.closest("[data-shape]");
   if (item) {
     select(item.dataset.shape);
+    // 警告の欄は図の上にあるので、選んだ図形が見えるよう、図まで送る
+    document.querySelector(".map-frame").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 });
 // 木の行を押すと選んで内容を開き、選んでいる行をもう一度押すと閉じる。▸ は畝の行の出し入れ
@@ -2759,7 +2767,9 @@ $("rotation").addEventListener("change", (event) => {
 // ---- 圃場図と日程の切り替え ----
 
 // 作付の詳細（planting）は、日程のタブの中の画面として扱う
-// 画面の URL。#map、#schedule、#crops、#diary、#journal、作付の詳細は #detail/planting/作付の ID、区画の詳細は #detail/block/区画の ID。
+// 画面の URL。#map、#schedule、#crops、#diary、#journal、作付の詳細は #detail/planting/作付の ID。
+// 日程の画面は、開いている区画を付けて #schedule/block/区画の ID にする。
+// 前にあった区画の詳細（#detail/block/区画の ID）は、日程の画面でその区画を開く
 // 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）
 const VIEW_NAMES = ["map", "schedule", "crops", "diary", "journal"];
 
@@ -2767,7 +2777,11 @@ function routeFromHash() {
   const hash = decodeURIComponent(location.hash.slice(1));
   const detail = /^detail\/(planting|block)\/([\w-]+)$/.exec(hash);
   if (detail) {
-    return { view: "planting", kind: detail[1], id: detail[2] };
+    return detail[1] === "block" ? { view: "schedule", block: detail[2] } : { view: "planting", kind: detail[1], id: detail[2] };
+  }
+  const block = /^schedule\/block\/([\w-]+)$/.exec(hash);
+  if (block) {
+    return { view: "schedule", block: block[1] };
   }
   return VIEW_NAMES.includes(hash) ? { view: hash } : null;
 }
@@ -2777,12 +2791,14 @@ function hashOf(view) {
     const target = plantingTarget();
     return `#detail/${target.kind}/${target.id}`;
   }
-  return `#${view}`;
+  return view === "schedule" ? scheduleHash() : `#${view}`;
 }
 
 function openRoute(route, mode) {
   if (route.view === "planting") {
     openPlantingDetail(route.kind, route.id);
+  } else if (route.block) {
+    openInSchedule("block", route.block);
   }
   showView(route.view, { history: mode });
 }
@@ -2803,17 +2819,29 @@ function showView(view, { history: mode = "push" } = {}) {
   $("cropsView").hidden = view !== "crops";
   $("diaryView").hidden = view !== "diary";
   $("journalView").hidden = view !== "journal";
+  // 右下の「＋ 入力する」は圃場図だけ（日程の画面と作付の詳細では、頭の「＋ 作業を入力」を使う）
+  $("logAddBtn").hidden = view !== "map";
+  // 工程表の欄は 1 つで、圃場図と日程の画面のうち、開いた方へ移す（描くのは renderSchedule）
+  if (view === "map" || view === "schedule") {
+    placeGantt(view);
+  }
+  // 区画・畝の欄は、日程の画面と作付の詳細の上に出す
+  if (view === "schedule" || view === "planting") {
+    placePicker(view);
+  }
   if (view === "map") {
     render();
+    renderSchedule(); // 今週やること、警告、工程表（すべての区画）
+    renderLogs();
     renderWeatherSettings();
   } else if (view === "schedule") {
     renderSchedule();
-    renderLogs();
   } else if (view === "planting") {
     renderPlantingDetail();
     window.scrollTo(0, 0);
   } else if (view === "crops") {
     renderCrops();
+    renderTypes();
   } else if (view === "diary") {
     renderDiary();
   } else {
@@ -2881,12 +2909,15 @@ function openTarget(entry) {
   if (kind === "crop" || kind === "fertilizer") {
     showView("crops");
   } else if (kind === "planting" && state.plantings.some((item) => item.id === id)) {
+    // 作付と作業: 日程の画面でその区画を開き、窓の工程の計画をその作付（区画）で開く
     openInSchedule("planting", id);
     showView("schedule");
+    openProcessPlan("planting", id);
   } else if (kind === "work" && state.works.some((item) => item.id === id)) {
     const work = state.works.find((item) => item.id === id);
     openInSchedule(work.block_id ? "block" : "planting", work.block_id || work.planting_id);
     showView("schedule");
+    openProcessPlan(work.block_id ? "block" : "planting", work.block_id || work.planting_id);
   } else if (["zone", "block", "bed"].includes(kind) && findShape(id)) {
     showView("map");
     select(id);
@@ -2972,6 +3003,9 @@ async function startApp() {
     },
     setStatus,
     renderWarnings,
+    showView,
+    renderBlockRecord,
+    plantingTarget,
     openDetail: (kind, id) => {
       openPlantingDetail(kind, id);
       showView("planting");
@@ -2984,9 +3018,11 @@ async function startApp() {
     refreshDiaryWorks();
   };
   initLogs({ state, activePlanData, setStatus, onLogsChanged: refreshRecords, selectedTarget: selectedRowPreset });
+  initProcessEditor({ state, setStatus, refresh: refreshRecords, currentBlockId });
   initPlantingView({
     state,
     showView,
+    renderPicker: () => renderPicker("planting"),
     openInSchedule,
     setStatus,
     refresh: refreshRecords,
@@ -2994,13 +3030,13 @@ async function startApp() {
   initWeather({ state, setStatus, onWeatherChanged: renderPlantingDetail });
   renderWeatherSettings();
   syncWeather();
-  // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホは作業の確認が主なので日程、PC は圃場図。
+  // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホも PC も圃場図（今週やることが図の上にある）。
   // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）。履歴の画面は、読み込んでから開く
   const route = routeFromHash();
   if (route && route.view !== "journal") {
     openRoute(route, "replace");
   } else if (!route) {
-    showView(window.matchMedia("(max-width: 800px)").matches ? "schedule" : "map", { history: "replace" });
+    showView("map", { history: "replace" });
   }
   initCrops({ state, setStatus });
   initDiary({ state, setStatus });

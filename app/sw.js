@@ -24,6 +24,7 @@ const FILES = [
   "print.js",
   "logs.js",
   "log-view.js",
+  "process-editor.js",
   "planting-view.js",
   "pesticide.js",
   "rac.js",

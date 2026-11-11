@@ -8,6 +8,7 @@ import { SPEC_FIELDS, formatAmount, logEnd, perHoleScale, perHoleUnit, productAm
 import * as famic from "./pesticide.js";
 import { draw } from "./draw.js";
 import { holesOf } from "./crops.js";
+import { confirmDiscard, processChange, processClick, processDirty, processHtml, processPreset, saveProcess, startProcess } from "./process-editor.js";
 
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (text) =>
@@ -25,6 +26,7 @@ let showAll = false;
 let dialog = null;
 let draft = null; // 窓で入れている記録
 let data = null; // 実際に使うプランの区画・畝・作付・作業
+let activeReady = false; // 実際に使うプランを読めたか。読めないときは「工程の計画」のタブだけを使える
 // 窓を開くと、ブラウザーの履歴に窓のぶんを 1 つ積む。戻るを押すと、ページを離れたり裏の画面が変わったりせず、窓だけが閉じる。
 // inHistory: 積んだ履歴がまだ残っているか。skipPop: 窓を閉じて自分で戻した分の popstate を、画面の切り替えに渡さない
 let inHistory = false;
@@ -143,16 +145,21 @@ export function renderLogs() {
 
 // ---- 記録を入れる窓 ----
 
-async function loadData() {
+// quiet なら、読めなくても知らせない（「工程の計画」のタブだけで開くとき）
+async function loadData(quiet = false) {
   if (!state().field.active_plan_id) {
-    notify("実績や管理作業の計画を入力するには、先に圃場図の「プラン」の欄で、実際に使うプランを決めてください。");
+    if (!quiet) {
+      notify("実績や管理作業の計画を入力するには、先に圃場図の「プラン」の欄で、実際に使うプランを決めてください。");
+    }
     return false;
   }
   try {
     data = await ctx.activePlanData();
     return true;
   } catch (error) {
-    notify(`実際に使うプランを読み込めませんでした: ${error.message}`);
+    if (!quiet) {
+      notify(`実際に使うプランを読み込めませんでした: ${error.message}`);
+    }
     return false;
   }
 }
@@ -298,25 +305,75 @@ export function logForWork(workId) {
 // 窓を開く。log を渡すとその記録を直す。
 // preset.works を渡すと、その計画の作業（同じ種類、畝ごと）の記録として、種類と対象とつながりを入れて開く。
 // preset.plantingId を渡すと、その作付の畝を対象に入れて開く
+// 「作業を入力する」の窓を開く。preset.tab で初めのタブを選ぶ（"process" 工程の計画、"plan" 管理作業の計画、なければ実績）。
+// 実際に使うプランがない（読めない）ときは、計画の作業や記録から開いたのでなければ、「工程の計画」のタブだけで開く
 export async function openLogEditor(log = null, preset = {}) {
-  if (!(await loadData())) {
+  const free = !log && !preset.works?.length && !preset.planWork;
+  activeReady = await loadData(free);
+  if (!activeReady && !free) {
     return;
   }
+  if (free && (preset.tab === "process" || !activeReady)) {
+    draft = processDraft(preset);
+  } else if (!makeDraft(log, preset)) {
+    return;
+  }
+  if (!dialog) {
+    build();
+  }
+  renderDialog();
+  dialog.showModal();
+  // 開くと、ブラウザーは最初のボタン（閉じる）に入力の位置を置き、iPad の Chrome ではそこに枠が出る。見出しに置き直す
+  dialog.querySelector("#logDialogTitle")?.focus({ preventScroll: true });
+  if (!inHistory) {
+    history.pushState({ ...history.state, fieldPlanDialog: true }, "", location.href);
+    inHistory = true;
+  }
+  updateTotals();
+  refreshUses(); // 直す記録の農薬は、使用基準を読み込んでから、使い方と指摘を出す
+}
+
+// 「工程の計画」のタブの書きかけ。中身は process-editor.js が持つ
+function processDraft(preset) {
+  startProcess(preset);
+  return { kind: "process", switchable: true, preset, id: null, planWorks: [], cancellable: [] };
+}
+
+// 書きかけが、開いたとき（タブを替えたとき）から変わったか
+const draftSnapshot = () =>
+  JSON.stringify({
+    date: draft.date,
+    end: draft.end_date,
+    type: draft.work_type,
+    spec: draft.spec,
+    note: draft.note,
+    finishes: draft.finishes,
+    mode: draft.mode,
+    beds: [...draft.beds],
+    blocks: [...draft.blocks],
+    linked: [...draft.linked],
+    spray: draft.spray,
+    inputs: draft.inputs.map(({ kind, name, reg_no, dilution, amount, unit, method, fertilizer_id, per_hole }) => ({ kind, name, reg_no, dilution, amount, unit, method, fertilizer_id, per_hole })),
+  });
+const isDirty = () => Boolean(draft) && (draft.kind === "process" ? processDirty() : draftSnapshot() !== draft.baseline);
+
+// 管理作業の計画と実績の書きかけを作る。作れなければ false
+function makeDraft(log, preset) {
   const presetWorks = !log && preset.works?.length ? preset.works : [];
   // 管理作業の計画を直すときは、一緒に入力した計画（まとまり）ごと開く
   // 計画の行は、読み込んだ実際に使うプランのものに置き換える（開いているプランが違うときに、古い行を直さないように）
   const planWork = !log && preset.planWork ? data.works.find((work) => work.id === preset.planWork.id) || null : null;
   if (preset.planWork && !planWork) {
     notify("管理作業の計画は、実際に使うプランのものだけを直せます。");
-    return;
+    return false;
   }
   const planWorks = planWork ? (planWork.batch_id ? data.works.filter((work) => work.batch_id === planWork.batch_id) : [planWork]) : [];
   const source = planWork || presetWorks[0] || null; // 予定の中身（detail）を入れる元の計画
   const type = log?.work_type || source?.work_type || "";
   draft = {
     id: log?.id || null,
-    // plan は管理作業の計画、actual は実績。「入力する」のボタンから開いたときだけ、窓の上で切り替えられる（初めは計画）
-    kind: planWork || (!log && !presetWorks.length) ? "plan" : "actual",
+    // plan は管理作業の計画、actual は実績。「入力する」のボタンから開いたときだけ、窓の上で切り替えられる（初めは実績。preset.tab が "plan" なら計画）
+    kind: planWork || (!log && !presetWorks.length && preset.tab === "plan") ? "plan" : "actual",
     switchable: !log && !planWork && !presetWorks.length,
     planWork,
     planWorks,
@@ -393,19 +450,58 @@ export async function openLogEditor(log = null, preset = {}) {
   if (!draft.inputs.length && type) {
     draft.inputs = defaultInputs(type);
   }
-  if (!dialog) {
-    build();
+  draft.preset = preset;
+  draft.baseline = draftSnapshot();
+  return true;
+}
+
+// タブを替える。書きかけがあれば、捨ててよいかを確かめてから、新しいタブの書きかけを作る
+// 管理作業の計画と実績は、同じ形の書きかけ（日付、作業の種類、対象、資材、メモ）を使うので、入れたまま行き来できる。
+// ただし実績から計画へは、作業の種類が管理作業でない（定植・播種など）か、つなぐ計画に印を付けているときは持っていけない
+function carryable(kind) {
+  if (!["plan", "actual"].includes(draft.kind) || !["plan", "actual"].includes(kind)) {
+    return false;
+  }
+  if (kind === "actual") {
+    return true;
+  }
+  return (!draft.work_type || isManagement(draft.work_type)) && !linkedWorks(pickedItems()).length;
+}
+
+async function switchKind(kind) {
+  if (!draft || kind === draft.kind) {
+    return;
+  }
+  // 入れた内容をそのまま持っていけるときは、確かめずに切り替える（日付や対象は、そのまま次のタブの値になる）
+  if (carryable(kind)) {
+    draft.kind = kind;
+    draft.linked = new Set();
+    renderDialog();
+    updateTotals();
+    refreshUses();
+    return;
+  }
+  if (isDirty() && !(await confirmDiscard("捨てて切り替える"))) {
+    return;
+  }
+  // 相手は引き継ぐ（工程の計画で選んでいた区画や畝、または開いたときの相手）
+  const preset = { ...(draft.kind === "process" ? processPreset() : draft.preset), tab: kind };
+  if (kind === "process") {
+    draft = processDraft(preset);
+  } else {
+    makeDraft(null, preset);
   }
   renderDialog();
-  dialog.showModal();
-  // 開くと、ブラウザーは最初のボタン（閉じる）に入力の位置を置き、iPad の Chrome ではそこに枠が出る。見出しに置き直す
-  dialog.querySelector("#logDialogTitle")?.focus({ preventScroll: true });
-  if (!inHistory) {
-    history.pushState({ ...history.state, fieldPlanDialog: true }, "", location.href);
-    inHistory = true;
-  }
   updateTotals();
-  refreshUses(); // 直す記録の農薬は、使用基準を読み込んでから、使い方と指摘を出す
+  refreshUses();
+}
+
+// 閉じる（「閉じる」「キャンセル」、Esc）。書きかけがあれば、捨ててよいかを確かめる
+async function requestClose() {
+  if (isDirty() && !(await confirmDiscard("捨てて閉じる"))) {
+    return;
+  }
+  dialog.close();
 }
 
 function defaultInputs(type) {
@@ -469,7 +565,12 @@ function build() {
   dialog.addEventListener("click", onClick);
   dialog.addEventListener("change", onChange);
   dialog.addEventListener("input", onInput);
-  // Esc で閉じたときも、入れかけの内容は捨てる（確かめない）。窓の外を押しても閉じない
+  // Esc: 書きかけがあれば、捨ててよいかを確かめる
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    requestClose();
+  });
+  // 窓の外を押しても閉じない
   dialog.addEventListener("close", () => {
     draft = null;
     // 次に開いたとき、前に開いていたときの位置へ戻さないよう、中身を空にする
@@ -484,7 +585,7 @@ function build() {
 }
 
 // ブラウザーの戻る・進む（popstate）を、窓で受け持ったら true。true のときは、画面を切り替えない。
-// 窓を開いているときに戻ると、窓を閉じる。入れかけの内容は、Esc で閉じたときと同じく、確かめずに捨てる
+// 窓を開いているときに戻ると、窓を閉じる
 export function handleLogDialogPop() {
   if (skipPop) {
     skipPop = false;
@@ -492,29 +593,62 @@ export function handleLogDialogPop() {
   }
   if (inHistory) {
     inHistory = false;
-    dialog?.close();
+    // 書きかけがあれば、捨ててよいかを確かめる。続けるなら、取り消された履歴を積み直す
+    if (isDirty()) {
+      confirmDiscard("捨てて閉じる").then((ok) => {
+        if (ok) {
+          dialog?.close();
+        } else {
+          history.pushState({ ...history.state, fieldPlanDialog: true }, "", location.href);
+          inHistory = true;
+        }
+      });
+    } else {
+      dialog?.close();
+    }
     return true;
   }
   return false;
 }
 
+// 窓の上のタブ。「入力する」のボタンから開いたときだけ出す
+function kindTabs() {
+  if (!draft.switchable) {
+    return "";
+  }
+  const tab = (kind, label, disabled = false) =>
+    `<button type="button" class="chip-btn${draft.kind === kind ? " is-on" : ""}" data-act="kind" data-kind="${kind}" aria-pressed="${draft.kind === kind}"${disabled ? " disabled" : ""}>${label}</button>`;
+  return (
+    `<div class="log-kinds log-tabs seg" role="group" aria-label="入力するもの">${tab("process", "工程の計画")}${tab("plan", "管理作業の計画", !activeReady)}${tab("actual", "実績", !activeReady)}</div>` +
+    (activeReady ? "" : '<p class="muted">管理作業の計画と実績は、実際に使うプランを決めると入力できます。</p>')
+  );
+}
+
+const footButtons = () =>
+  `<span class="log-spacer"></span><button type="button" class="text-btn" data-act="close">キャンセル</button>` +
+  `<button type="button" class="primary-btn" data-act="save">保存する</button>`;
+
 function renderDialog() {
+  if (draft.kind === "process") {
+    draw(
+      dialog,
+      `<div class="log-head"><h2 id="logDialogTitle" tabindex="-1">${dialogTitle()}</h2>` +
+      `<button type="button" class="text-btn" data-act="close" aria-label="閉じる">閉じる</button></div>` +
+      `<div class="log-body">${kindTabs()}${processHtml()}<p class="error" id="logError" role="alert"></p></div>` +
+      `<div class="log-foot">${footButtons()}</div>`
+    );
+    return;
+  }
   applyPerHole();
   const choices = currentChoices();
   const items = pickedItems(choices);
   const area = items.reduce((sum, item) => sum + (item.area_m2 || 0), 0);
-  const plan = activePlan();
   draw(
     dialog,
     `<div class="log-head"><h2 id="logDialogTitle" tabindex="-1">${dialogTitle()}</h2>` +
     `<button type="button" class="text-btn" data-act="close" aria-label="閉じる">閉じる</button></div>` +
     `<div class="log-body">` +
-    (draft.switchable
-      ? `<div class="log-kinds seg" role="group" aria-label="入力するもの">` +
-        `<button type="button" class="chip-btn${draft.kind === "plan" ? " is-on" : ""}" data-act="kind" data-kind="plan" aria-pressed="${draft.kind === "plan"}">計画</button>` +
-        `<button type="button" class="chip-btn${draft.kind === "actual" ? " is-on" : ""}" data-act="kind" data-kind="actual" aria-pressed="${draft.kind === "actual"}">実績</button></div>`
-      : "") +
-    `<p class="muted">${draft.kind === "plan" ? "管理作業（防除、追肥、除草、灌水、株の手入れ、その他）の計画を、" : ""}プラン「${escapeHtml(plan?.name || "")}」の畝${draft.kind === "plan" ? "に入れます。工程の作業の計画は、日程の画面の「作業の計画」で入れます。" : "につなぎます。"}</p>` +
+    kindTabs() +
     planScopeSection() +
     `<label>${draft.kind === "plan" ? "予定の日" : "作業をした日"}<span class="log-date"><input type="date" data-f="date" value="${draft.date}" required />` +
     `<button type="button" class="chip-btn" data-act="today">本日</button></span></label>` +
@@ -540,8 +674,7 @@ function renderDialog() {
     `<div class="log-foot">${draft.id ? '<button type="button" class="text-btn danger" data-act="delete">この実績を削除</button>' : ""}` +
     `${draft.planWorks.length ? '<button type="button" class="text-btn danger" data-act="deletePlan">この計画を消す</button>' : ""}` +
     `${!draft.id && draft.cancellable.length ? '<button type="button" class="text-btn danger" data-act="cancelWork">この作業を取りやめる</button>' : ""}` +
-    `<span class="log-spacer"></span><button type="button" class="text-btn" data-act="close">キャンセル</button>` +
-    `<button type="button" class="primary-btn" data-act="save">入力する</button></div>`
+    `${footButtons()}</div>`
   );
   // 品目の一部の畝だけを選んでいるときは、品目のチェックを「一部」の表示にする
   dialog.querySelectorAll('[data-act="group"]').forEach((box) => {
@@ -553,6 +686,9 @@ function renderDialog() {
 }
 
 function dialogTitle() {
+  if (draft.switchable) {
+    return "作業を入力する";
+  }
   if (draft.kind === "plan") {
     return draft.planWorks.length ? "計画を直す" : "計画を入力する";
   }
@@ -592,7 +728,7 @@ function planCopySection() {
 }
 
 function typeSection() {
-  // 計画で入れられるのは管理作業だけ（工程の作業の計画は「作業の計画」の表で入れる）
+  // 計画で入れられるのは管理作業だけ（工程の作業の計画は「工程の計画」のタブで入れる）
   const usable = draft.kind === "plan" ? allTypes().filter((type) => isManagement(type.code)) : allTypes();
   const quick = QUICK_TYPES.filter((code) => usable.some((type) => type.code === code));
   const others = usable.filter((type) => !quick.includes(type.code));
@@ -843,7 +979,7 @@ function harvestStartOf(plantingId) {
 
 // 選んだ農薬の使用基準を、対象の品目に合わせて読み込み直す（対象を変えたとき）
 function refreshUses() {
-  if (!famic.famicEnabled() || !draft) {
+  if (!famic.famicEnabled() || !draft || draft.kind === "process") {
     return;
   }
   const groups = sprayGroups();
@@ -891,7 +1027,7 @@ function linkSection(items) {
 
 // 液の量の合計と、希釈倍率から計算した製品の量を、描き直さずに書き換える
 function updateTotals() {
-  if (!dialog || !draft) {
+  if (!dialog || !draft || draft.kind === "process") {
     return;
   }
   // 1 穴あたりの量から出した量は、欄と文を、描き直さずに入れ替える（打っている欄を作り直さないため）
@@ -984,13 +1120,19 @@ function applySuggestedDilution(input) {
 }
 
 function onClick(event) {
+  // 「工程の計画」のタブの中の操作は、process-editor.js が受ける
+  if (draft?.kind === "process" && processClick(event, renderDialog)) {
+    return;
+  }
   const button = event.target.closest("[data-act]");
   if (!button || button.tagName === "INPUT") {
     return;
   }
   const act = button.dataset.act;
   if (act === "close") {
-    dialog.close();
+    requestClose();
+  } else if (act === "save" && draft.kind === "process") {
+    saveProcessDraft();
   } else if (act === "today") {
     setDate(localToday());
   } else if (act === "todayEnd") {
@@ -1002,14 +1144,7 @@ function onClick(event) {
   } else if (act === "type") {
     setType(button.dataset.code);
   } else if (act === "kind") {
-    draft.kind = button.dataset.kind;
-    if (draft.kind === "plan" && draft.work_type && !isManagement(draft.work_type)) {
-      draft.work_type = "";
-      draft.spec = {};
-      draft.inputs = [];
-    }
-    renderDialog();
-    updateTotals();
+    switchKind(button.dataset.kind);
   } else if (act === "item") {
     const items = new Set(draft.spec.items || []);
     items.has(button.dataset.item) ? items.delete(button.dataset.item) : items.add(button.dataset.item);
@@ -1165,6 +1300,10 @@ function setDate(date) {
 }
 
 function onChange(event) {
+  if (draft?.kind === "process") {
+    processChange(event, renderDialog);
+    return;
+  }
   const el = event.target;
   if (el.dataset.f === "date") {
     if (el.value) {
@@ -1231,6 +1370,9 @@ function onChange(event) {
 }
 
 function onInput(event) {
+  if (draft?.kind === "process") {
+    return;
+  }
   const el = event.target;
   if (el.dataset.famicFilter !== undefined) {
     // 作物名の絞り込み: 一覧だけを描き直す（入れている文字を消さないため）
@@ -1266,6 +1408,18 @@ function onInput(event) {
     draft.spray[el.dataset.spray] = num(el.value);
     updateTotals();
   }
+}
+
+// 「工程の計画」のタブの書きかけを保存して、窓を閉じる
+async function saveProcessDraft() {
+  try {
+    await saveProcess();
+  } catch (error) {
+    showError(`保存できませんでした: ${error.message}`);
+    ctx.setStatus("");
+    return;
+  }
+  dialog.close();
 }
 
 function showError(text) {

@@ -68,10 +68,9 @@ const near = (actual, expected, label) => assert.ok(Math.abs(actual - expected) 
 
 test("防除の入力: 農薬・作物名・使い方を選んでも、窓の中の位置が変わらない", options, async () => {
   await page.loadApp(seed());
-  await page.click('.tab-btn[data-view="schedule"]');
   await page.click("#logAddBtn");
-  // 窓は計画で開く。計画、実績の順に並ぶ
-  assert.deepEqual(await page.run(`[...document.querySelectorAll('dialog.log-dialog [data-act="kind"]')].map((el) => el.textContent + (el.classList.contains("is-on") ? "*" : ""))`), ["計画*", "実績"]);
+  // 窓は実績で開く。工程の計画、管理作業の計画、実績の順に並ぶ
+  assert.deepEqual(await page.run(`[...document.querySelectorAll('dialog.log-dialog [data-act="kind"]')].map((el) => el.textContent + (el.classList.contains("is-on") ? "*" : ""))`), ["工程の計画", "管理作業の計画", "実績*"]);
   await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
   await page.click('dialog.log-dialog [data-act="type"][data-code="spray"]');
   await page.click('dialog.log-dialog [data-act="group"]');
@@ -128,8 +127,7 @@ test("農薬名の後ろのアイコン: 実績の一覧、検索の結果、選
     targets: [{ id: "t1", log_id: "log1", planting_id: "pl1", bed_id: "bed1", block_id: null, work_id: null, label: "", crop_name: "試験菜", area_m2: null, spray_l: null }],
   }];
   await page.loadApp(data);
-  await page.click('.tab-btn[data-view="schedule"]');
-  // 実績の一覧: 登録番号のある農薬は、その分類。名前だけで入れた農薬は「−」
+  // 実績の一覧は圃場図にある（開いた画面のまま）。登録番号のある農薬は、その分類。名前だけで入れた農薬は「−」
   const LOGGED = '#logList svg[data-rac="IRAC:4A"]';
   await page.waitFor(`Boolean(document.querySelector(${JSON.stringify(LOGGED)}))`, "実績の一覧のアイコン");
   assert.match(await page.run(`document.querySelector(${JSON.stringify(LOGGED)}).closest(".pesticide-name").textContent`), /^試験乳剤/);
@@ -196,8 +194,8 @@ test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴
   const length = await page.run("history.length");
   const isOpen = 'Boolean(document.querySelector("dialog.log-dialog[open]"))';
 
-  // 開いたら、入力の位置は見出し（閉じるボタンではない）
-  await page.click("#logAddBtn");
+  // 日程の画面では、区画の頭の「＋ 作業を入力」で開く。開いたら、入力の位置は見出し（閉じるボタンではない）
+  await page.click('#blockHead [data-act="record"]');
   await page.waitFor(isOpen, "窓が開く");
   assert.equal(await page.run("document.activeElement.id"), "logDialogTitle");
   assert.equal(await page.run("history.length"), length + 1);
@@ -206,11 +204,11 @@ test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴
   await page.run("history.back()");
   await page.waitFor(`!${isOpen}`, "戻るで窓が閉じる");
   await page.run("new Promise((resolve) => setTimeout(resolve, 200))");
-  assert.equal(await page.run("location.hash"), "#schedule");
+  assert.equal(await page.run("location.hash"), "#schedule/block/b1");
   assert.equal(await page.run('document.querySelector(".tab-btn.is-active").dataset.view'), "schedule");
 
   // もう一度開いて、閉じるボタンで閉じる: 積んだ履歴を取り消し、そのあとの戻るは前の画面（圃場図）へ
-  await page.click("#logAddBtn");
+  await page.click('#blockHead [data-act="record"]');
   await page.waitFor(isOpen, "窓がもう一度開く");
   await page.click('dialog.log-dialog .log-head [data-act="close"]');
   await page.waitFor(`!${isOpen}`, "閉じるで窓が閉じる");
@@ -224,15 +222,21 @@ test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴
 
 test("株の手入れ・その他の中身は、作業の種類のすぐ下（対象の上）に出る", options, async () => {
   await page.loadApp(seed());
-  await page.click('.tab-btn[data-view="schedule"]');
   await page.click("#logAddBtn");
   await page.click('dialog.log-dialog [data-act="type"][data-code="care"]');
   const headings = () => page.run('[...document.querySelectorAll("dialog.log-dialog .log-section > h3, dialog.log-dialog .log-section-head > h3")].map((h) => h.textContent)');
   const order = await headings();
   assert.deepEqual(order.slice(order.indexOf("作業の種類"), order.indexOf("作業の種類") + 3), ["作業の種類", "中身", "対象"]);
   assert.ok(await page.run('Boolean(document.querySelector(\'dialog.log-dialog [data-act="item"][data-item="鉢上げ"]\'))'), "鉢上げを選べる");
-  // 閉じると履歴を 1 つ戻す。戻り終わるのを待ってから次のテストへ
+  // 書きかけのまま閉じると、捨ててよいかを確かめる。「入力を続ける」なら窓は開いたまま
   await page.click('dialog.log-dialog [data-act="close"]');
+  await page.waitFor(`document.querySelector("dialog.notice[open] .notice-text")?.textContent.includes("まだ保存していない入力")`, "捨ててよいかの確かめ");
+  await page.click('dialog.notice [data-action="cancel"]');
+  await page.waitFor(`!document.querySelector("dialog.notice[open]") && Boolean(document.querySelector("dialog.log-dialog[open]"))`, "窓は開いたまま");
+  // 「捨てて閉じる」で閉じると履歴を 1 つ戻す。戻り終わるのを待ってから次のテストへ
+  await page.click('dialog.log-dialog [data-act="close"]');
+  await page.click('dialog.notice [data-action="delete"]');
+  await page.waitFor(`!document.querySelector("dialog.log-dialog[open]")`, "窓が閉じる");
   await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
   assert.deepEqual(page.errors, []);
 });
@@ -243,7 +247,6 @@ test("1 穴あたりの量: 選んだ畝の穴の数を掛けた量で記録し�
   Object.assign(data.crops[0], { plant_gap_cm: 20, row_count: 2 });
   data.fertilizers = [{ id: "fe1", name: "試験の肥料", n_pct: 10, p_pct: 10, k_pct: 10 }];
   await page.loadApp(data);
-  await page.click('.tab-btn[data-view="schedule"]');
   await page.click("#logAddBtn");
   await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
   await page.click('dialog.log-dialog [data-act="type"][data-code="topdress"]');
@@ -286,7 +289,6 @@ test("1 穴あたりの量: 選んだ畝の穴の数を掛けた量で記録し�
 
 test("1 穴あたりの量: 苗数が分からない畝があれば、保存せずに知らせる", options, async () => {
   await page.loadApp(seed());
-  await page.click('.tab-btn[data-view="schedule"]');
   await page.click("#logAddBtn");
   await page.click('dialog.log-dialog [data-act="type"][data-code="topdress"]');
   await page.click('dialog.log-dialog [data-act="group"]');
@@ -300,5 +302,43 @@ test("1 穴あたりの量: 苗数が分からない畝があれば、保存せ�
   assert.match(await page.run(`document.getElementById("logError").textContent`), /苗数が分からない畝: A 畝1 試験菜/);
   assert.equal(await page.run(`Boolean(document.querySelector("dialog.log-dialog[open]"))`), true);
   assert.deepEqual((await page.saved()).works, []);
+  assert.deepEqual(page.errors, []);
+});
+
+// 管理作業の計画と実績は、入れた内容をそのまま持って行き来できる。持っていけない（実績で定植・播種を選んだ）ときだけ確かめる
+test("入力の窓: 実績と管理作業の計画は、入れた内容のまま行き来できる", options, async () => {
+  await page.loadApp(seed());
+  await page.click("#logAddBtn");
+  const DIALOG = "dialog.log-dialog[open]";
+  const state = () =>
+    page.run(`JSON.stringify({
+      kind: document.querySelector('${DIALOG} [data-act="kind"].is-on')?.dataset.kind,
+      type: document.querySelector('${DIALOG} [data-act="type"].is-on')?.dataset.code || "",
+      beds: document.querySelectorAll('${DIALOG} [data-act="bed"].is-on').length,
+      notice: Boolean(document.querySelector("dialog.notice[open]")),
+    })`);
+  await page.click(`${DIALOG} [data-act="type"][data-code="spray"]`);
+  await page.click(`${DIALOG} [data-act="group"]`);
+  const before = JSON.parse(await state());
+  assert.equal(before.kind, "actual");
+  assert.ok(before.beds > 0, "畝を選んでいる");
+
+  await page.click(`${DIALOG} [data-act="kind"][data-kind="plan"]`);
+  await page.waitFor(`document.querySelector('${DIALOG} [data-act="kind"].is-on')?.dataset.kind === "plan"`, "管理作業の計画へ");
+  assert.deepEqual(JSON.parse(await state()), { ...before, kind: "plan" }, "確かめずに、防除と畝を持っていく");
+  await page.click(`${DIALOG} [data-act="kind"][data-kind="actual"]`);
+  await page.waitFor(`document.querySelector('${DIALOG} [data-act="kind"].is-on')?.dataset.kind === "actual"`, "実績へ戻る");
+  assert.deepEqual(JSON.parse(await state()), before);
+
+  // 定植・播種は計画のタブでは選べないので、持っていけない。捨ててよいかを確かめる
+  await page.click(`${DIALOG} [data-act="type"][data-code="plant"]`);
+  await page.click(`${DIALOG} [data-act="kind"][data-kind="plan"]`);
+  await page.waitFor(`document.querySelector('dialog.notice[open] [data-action="delete"]')?.textContent === "捨てて切り替える"`, "捨ててよいかの確かめ");
+  await page.click('dialog.notice [data-action="cancel"]');
+  await page.waitFor(`!document.querySelector("dialog.notice[open]")`, "確かめを閉じる");
+  assert.equal(await page.run(`document.querySelector('${DIALOG} [data-act="kind"].is-on').dataset.kind`), "actual");
+  await page.click(`${DIALOG} .log-head [data-act="close"]`);
+  await page.click('dialog.notice [data-action="delete"]');
+  await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
   assert.deepEqual(page.errors, []);
 });

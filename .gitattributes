@@ -1,0 +1,14 @@
+# 文字のファイルは、リポジトリでも手元でも LF に揃える。
+# Windows で CRLF のファイルを作ってしまっても、コミットのときに LF に直る
+* text=auto eol=lf
+
+# 画像、PDF、フォントは、文字として扱わない
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
