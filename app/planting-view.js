@@ -1,5 +1,6 @@
-// 「作付の詳細」の画面。作付 1 つ（または区画 1 つ）について、計画と実績を 1 つの画面で見る。
-// 工程表の行の名前から開く。表示（計画／実績／計画と実績）は工程表と共有する
+// 「作付の詳細」の画面。作付 1 つについて、計画と実績を 1 つの画面で見る。
+// 工程表の行の名前や、日程の「区画・畝」の欄で畝を選んで開く。表示（計画／実績／計画と実績）は工程表と共有する。
+// 区画の計画と実績の表（日程の画面で区画を選んだときの「区画の作業の計画と実績」）も、ここで描く（renderBlockRecord）
 import { plantingNumbers, plantingSpec } from "./crops.js";
 import { notify } from "./dialog.js";
 import { record } from "./journal.js";
@@ -60,18 +61,21 @@ export function openPlantingDetail(kind, id) {
 // 開いている作付（区画）。画面の URL に書く
 export const plantingTarget = () => ({ ...target });
 
-// 開いている相手の、区画・畝・作付と、計画の作業、記録
-function context() {
+// 日程の画面の「区画の作業の計画と実績」で描いている区画の ID
+let recordBlockId = null;
+
+// 開いている相手（t。初めは作付の詳細で開いている相手）の、区画・畝・作付と、計画の作業、記録
+function context(t = target) {
   const s = state();
-  if (target.kind === "block") {
-    const block = s.blocks.find((item) => item.id === target.id);
+  if (t.kind === "block") {
+    const block = s.blocks.find((item) => item.id === t.id);
     if (!block) {
       return null;
     }
     const works = s.works.filter((work) => work.block_id === block.id).sort(bySeq);
     return { block, bed: null, planting: null, works, ownWorks: works, matches: blockTarget(block.id) };
   }
-  const planting = s.plantings.find((item) => item.id === target.id);
+  const planting = s.plantings.find((item) => item.id === t.id);
   const bed = planting && s.beds.find((item) => item.id === planting.bed_id);
   const block = bed && s.blocks.find((item) => item.id === bed.block_id);
   if (!block) {
@@ -167,11 +171,13 @@ export function renderPlantingDetail() {
   if (!ctx || $("plantingView").hidden) {
     return;
   }
+  // 上の「区画・畝」の欄も、開いている作付に合わせる
+  ctx.renderPicker?.();
   const c = context();
   if (!c) {
     draw(
       $("plantingBody"),
-      '<p class="muted">この作付（区画）は、いま開いているプランにはありません。上の「日程」のタブで、工程表に戻れます。</p>'
+      '<p class="muted">この作付は、いま開いているプランにはありません。上の「区画・畝」の欄で、区画か畝を選んでください。</p>'
     );
     return;
   }
@@ -192,6 +198,35 @@ export function renderPlantingDetail() {
     `</div><aside class="detail-aside">${asideHtml(c, active)}</aside></div>`
   );
   fitHead();
+}
+
+// 日程の画面で区画を選んだときの「区画の作業の計画と実績」。区画の作業の計画と、それにつながる実績、
+// 計画にない実績（区画に入れた記録）、計画との差（実績に合わせて後ろを並べ直すボタン）、日記のボタン。
+// 表示（計画／実績／計画と実績）は工程表と同じ
+export function renderBlockRecord(blockId) {
+  recordBlockId = blockId;
+  if (!ctx || !blockId || $("scheduleView").hidden) {
+    return;
+  }
+  const c = context({ kind: "block", id: blockId });
+  if (!c) {
+    draw($("blockRecord"), "");
+    return;
+  }
+  const mode = ganttMode();
+  const active = isActivePlan();
+  const actuals = currentActuals();
+  const logs = active ? (state().logs || []).filter((log) => log.targets.some(c.matches)) : [];
+  wx = null; // 区画には定植の日がないので、気温の列は出さない
+  const note = active ? tableNote(mode) : "実績は、実際に使うプランを開くと出せます。";
+  draw(
+    $("blockRecord"),
+    `<div class="panel-heading"><h2>区画の作業の計画と実績</h2><div class="row">` +
+    `${active ? `<div class="seg" role="group" aria-label="表示">${modeButtons(mode)}</div>` : ""}${diaryButtonHtml(c, active)}</div></div>` +
+    (note ? `<p class="muted">${note}</p>` : "") +
+    (active ? diffHtml(c, actuals).replace('<section class="panel detail-diff">', '<div class="detail-diff block-diff">').replace(/<\/section>$/, "</div>") : "") +
+    tableHtml(c, active ? mode : "plan", actuals, logs)
+  );
 }
 
 // ---- 日記 ----
@@ -223,6 +258,7 @@ function diaryButtonHtml(c, active) {
         if (diary.key === key) {
           diary.rows = rows;
           renderPlantingDetail();
+          renderBlockRecord(recordBlockId);
         }
       })
       .catch((error) => {
@@ -741,12 +777,12 @@ function logRow(c, log, mode) {
 
 // 計画の日付を押したとき、計画を直す窓を開く。管理作業（防除など）の計画は、実際に使うプランなら入力の窓（計画を直す）で、
 // 中身や対象まで直せる。工程の作業（畝立て、定植など）は、開始日、終了日、メモを直す
-function openWorkPlanEditor(work) {
+function openWorkPlanEditor(work, t = target) {
   if (isManagement(work.work_type) && isActivePlan()) {
     openPlanEditor(work);
     return;
   }
-  const c = context();
+  const c = context(t);
   const place = c ? `${c.block.name}${c.bed && !work.block_id ? ` 畝${c.bed.seq}` : ""}` : "";
   const name = workName(anyTypeLabel(work.work_type), work.detail?.spec);
   const box = document.createElement("dialog");
@@ -818,8 +854,8 @@ function openWorkPlanEditor(work) {
   box.showModal();
 }
 
-async function reschedule() {
-  const c = context();
+async function reschedule(t = target) {
+  const c = context(t);
   if (!c) {
     return;
   }
@@ -840,7 +876,7 @@ async function reschedule() {
     const name = c.planting ? `${c.block.name} 畝${c.bed.seq}（${c.planting.crop_name}）` : c.block.name;
     record({
       kind: "work.reschedule",
-      target: [c.planting ? "planting" : "block", target.id],
+      target: [c.planting ? "planting" : "block", t.id],
       text: `${name}の後ろの作業 ${moved.length} 件を、実績に合わせて ${Math.abs(shift.days)} 日${shift.days > 0 ? "後ろ" : "前"}へずらした`,
     });
     ctx.setStatus("並べ直しました");
@@ -855,9 +891,16 @@ function onClick(event) {
   if (!el) {
     return;
   }
+  // 日程の画面の「区画の作業の計画と実績」で押したときは、その区画が相手
+  const t = event.currentTarget.id === "blockRecord" ? { kind: "block", id: recordBlockId } : target;
   if (el.dataset.ganttMode) {
     setGanttMode(el.dataset.ganttMode);
-    renderPlantingDetail();
+    // 表示は工程表と共有する。日程の画面で押したときは、工程表も描き直す
+    if (event.currentTarget.id === "blockRecord") {
+      ctx.refresh();
+    } else {
+      renderPlantingDetail();
+    }
     return;
   }
   if (el.dataset.log) {
@@ -872,7 +915,7 @@ function onClick(event) {
     event.preventDefault();
     const work = state().works.find((item) => item.id === el.dataset.planEdit);
     if (work) {
-      openWorkPlanEditor(work);
+      openWorkPlanEditor(work, t);
     }
     return;
   }
@@ -900,20 +943,21 @@ function onClick(event) {
     renderPlantingDetail();
     window.scrollTo(0, 0);
   } else if (act === "diary") {
-    const c = context();
+    const c = context(t);
     if (c) {
       openDiary(c);
     }
   } else if (act === "record") {
     openLogEditor(null, { plantingId: target.id });
   } else if (act === "reschedule") {
-    reschedule();
+    reschedule(t);
   }
 }
 
 export function initPlantingView(context) {
   ctx = context;
   $("plantingBody").addEventListener("click", onClick);
+  $("blockRecord").addEventListener("click", onClick);
   // 幅が変わったら（ウィンドウの大きさ、スマホの向き）、頭が 1 行に収まるかを測り直す
   let width = 0;
   new ResizeObserver(([entry]) => {

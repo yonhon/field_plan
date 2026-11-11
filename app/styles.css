@@ -3524,3 +3524,52 @@ button.diary-work:hover {
   color: var(--muted);
   font-size: 12px;
 }
+
+/* ---- 日程の画面の、区画・畝の欄（作付の詳細の上にも移す） ---- */
+.picker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.picker-field {
+  flex-wrap: wrap;
+  font-weight: 700;
+}
+
+.picker-field select {
+  max-width: 100%;
+  min-width: min(100%, 20em);
+  font-size: 15px;
+}
+
+/* 作付の詳細では、区画・畝の欄と作付の頭の間をあける */
+#pickerSlotPlanting .picker-panel {
+  margin-bottom: 12px;
+}
+
+/* 折りたたみの欄（作業の種類と目安の日数）。見出しを押して開く */
+.fold-panel > summary {
+  cursor: pointer;
+}
+
+.fold-panel > summary h2 {
+  display: inline;
+}
+
+.fold-panel[open] > summary {
+  margin-bottom: 8px;
+}
+
+/* 区画の作業の計画と実績の中の、計画との差 */
+.block-diff {
+  margin: 8px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.block-diff h2 {
+  font-size: 14px;
+  margin-bottom: 6px;
+}

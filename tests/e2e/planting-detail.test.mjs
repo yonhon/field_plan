@@ -132,7 +132,21 @@ test("圃場図で畝を選ぶと「作付の詳細を開く」、区画を選�
   await page.waitFor(`document.getElementById("selectionTitle").textContent === "選択中: A"`, "区画を選ぶ");
   assert.equal(await page.run(`document.getElementById("openScheduleBtn").textContent`), "日程で開く");
   await page.click("#openScheduleBtn");
-  await page.waitFor(`location.hash === "#schedule" && !document.getElementById("scheduleView").hidden`, "日程が開く");
+  // URL には、開いた区画が付く
+  await page.waitFor(`location.hash === "#schedule/block/b1" && !document.getElementById("scheduleView").hidden`, "日程が開く");
+  assert.equal(await page.run(`document.getElementById("schedulePicker").value`), "block:b1");
+
+  // 区画・畝の欄で畝を選ぶと、その畝の作付の詳細を開き、欄も詳細の上に移る。区画を選ぶと、日程の画面に戻る
+  const pick = (value) =>
+    page.run(`(() => { const s = document.getElementById("schedulePicker"); s.value = "${value}"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await pick("bed:bed2");
+  await page.waitFor(`location.hash === "#detail/planting/pl2" && !document.getElementById("plantingView").hidden`, "畝2 の作付の詳細");
+  assert.equal(await page.run(`document.getElementById("pickerPanel").parentElement.id`), "pickerSlotPlanting");
+  assert.equal(await page.run(`document.getElementById("schedulePicker").value`), "bed:bed2");
+  await pick("block:b1");
+  await page.waitFor(`location.hash === "#schedule/block/b1" && !document.getElementById("scheduleView").hidden`, "区画の日程に戻る");
+  assert.equal(await page.run(`document.getElementById("pickerPanel").parentElement.id`), "pickerSlotSchedule");
+  assert.deepEqual(page.errors, []);
 });
 
 test("定植の仕様が品目の設定値と違えば、計画と実績の欄に添え書きが出る", options, async () => {

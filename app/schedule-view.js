@@ -187,7 +187,102 @@ export function renderSchedule() {
   renderStrip();
   renderGantt();
   renderEditor();
+  ctx.renderBlockRecord(sel.blockId);
   renderTypes();
+  if (!$("scheduleView").hidden) {
+    renderPicker("schedule");
+    // 開いている区画を URL に書く（再読み込みしても同じ区画を開く）。「区画と畝」の図で区画を替えたときも書き換える
+    if (location.hash !== scheduleHash()) {
+      history.replaceState(history.state, "", scheduleHash());
+    }
+  }
+}
+
+// 日程の画面の URL。区画を選んでいれば #schedule/block/区画の ID
+export const scheduleHash = () => (sel.blockId ? `#schedule/block/${sel.blockId}` : "#schedule");
+
+// ---- 区画・畝の欄 ----
+
+// 区画か畝を選ぶ欄を、日程（"schedule"）か作付の詳細（"planting"）の上へ移す
+export function placePicker(view) {
+  const slot = $(view === "planting" ? "pickerSlotPlanting" : "pickerSlotSchedule");
+  if ($("pickerPanel").parentElement !== slot) {
+    slot.append($("pickerPanel"));
+  }
+}
+
+// 畝を選んだときに開く作付。今日その畝にある作付、なければ最後の作付
+const bedPlantingNow = (bedId) => {
+  const plantings = bedPlantings(bedId);
+  return plantingOnDate(plantings, state().works, localToday(), state().logs || []) || plantings.at(-1) || null;
+};
+
+// 区画・畝の欄を描く。日程の画面では選んでいる区画、作付の詳細では開いている作付の畝を選んだ形にする。
+// 確認が必要な点のある区画と畝には ⚠ を付け、その区画（畝）の確認が必要な点を欄の下に並べる
+export function renderPicker(view) {
+  if (!ctx) {
+    return;
+  }
+  const blocks = state().blocks;
+  $("pickerPanel").hidden = !blocks.length;
+  if (!blocks.length) {
+    return;
+  }
+  const blockOfProblem = (problem) => problem.block_id || state().beds.find((bed) => bed.id === problemBed(problem))?.block_id;
+  const mark = (on) => (on ? " ⚠" : "");
+  draw(
+    $("schedulePicker"),
+    blocks
+      .map((block) => {
+        const beds = blockBeds(block.id)
+          .map((bed) => {
+            const crops = bedPlantings(bed.id).map((planting) => planting.crop_name).filter(Boolean).join(" → ");
+            const flagged = problems.some((problem) => problemBed(problem) === bed.id);
+            return `<option value="bed:${bed.id}">${escapeHtml(`${block.name} 畝${bed.seq}${crops ? ` ${crops}` : ""}${mark(flagged)}`)}</option>`;
+          })
+          .join("");
+        const flagged = problems.some((problem) => blockOfProblem(problem) === block.id);
+        return `<optgroup label="${escapeHtml(block.name)}"><option value="block:${block.id}">${escapeHtml(`${block.name}（区画の全体）${mark(flagged)}`)}</option>${beds}</optgroup>`;
+      })
+      .join("")
+  );
+  let shown;
+  if (view === "planting") {
+    const target = ctx.plantingTarget();
+    const bedId = state().plantings.find((planting) => planting.id === target.id)?.bed_id;
+    $("schedulePicker").value = bedId ? `bed:${bedId}` : "";
+    shown = bedId ? problems.filter((problem) => problemBed(problem) === bedId) : [];
+  } else {
+    $("schedulePicker").value = `block:${sel.blockId}`;
+    shown = problems.filter((problem) => blockOfProblem(problem) === sel.blockId);
+  }
+  $("pickerProblems").hidden = !shown.length;
+  draw($("pickerProblems"), problemItems(shown));
+}
+
+// 区画・畝の欄で選んだとき。区画なら日程の画面でその区画を、畝ならその畝の作付の詳細を開く。
+// 作付のない畝は、日程の画面の「作業の計画」で、その畝（作付を足す欄）を開く
+function onPick(value) {
+  const [kind, id] = value.split(":");
+  if (kind === "block") {
+    Object.assign(sel, { blockId: id, target: "block", plantingId: null });
+    ctx.showView("schedule");
+    return;
+  }
+  const bed = state().beds.find((item) => item.id === id);
+  if (!bed) {
+    return;
+  }
+  const planting = bedPlantingNow(id);
+  if (planting) {
+    // 日程の画面に戻ったときも、この畝の区画を開く
+    Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: planting.id });
+    ctx.openDetail("planting", planting.id);
+  } else {
+    Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: null });
+    ctx.showView("schedule");
+    $("editorSections").scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 }
 
 // 圃場図の上に出す、圃場の全体の情報（今週やること、遅れている作業、確認が必要な点と、タブの件数）。
@@ -332,10 +427,15 @@ function ownerName(problem) {
 
 const problemBed = (problem) => state().plantings.find((item) => item.id === problem.planting_id)?.bed_id;
 
-// 同じ内容の指摘は、場所をまとめて 1 行にする（コピーした畝は同じ指摘が並ぶため）
+// 圃場図の「警告」の欄の、確認が必要な点（すべての区画）
 function renderProblems() {
+  draw($("problemList"), problemItems(problems));
+}
+
+// 確認が必要な点の行（HTML）。同じ内容の指摘は、場所をまとめて 1 行にする（コピーした畝は同じ指摘が並ぶため）
+function problemItems(list) {
   const groups = new Map();
-  for (const problem of problems) {
+  for (const problem of list) {
     const work = state().works.find((item) => item.id === problem.work_id);
     const text = `${work ? `${typeLabel(work.work_type)}: ` : ""}${problem.message}`;
     const key = `${problem.block_id ? "block" : "bed"}|${text}`;
@@ -344,17 +444,14 @@ function renderProblems() {
     }
     groups.get(key).items.push(problem);
   }
-  draw(
-    $("problemList"),
-    [...groups.values()]
-      .map(({ text, items }) => {
-        const first = items[0];
-        const where = items.length > 1 ? `${ownerName(first)} ほか ${items.length - 1} か所` : ownerName(first);
-        const target = first.block_id ? `data-kind="block" data-id="${first.block_id}"` : `data-kind="planting" data-id="${first.planting_id}"`;
-        return `<li ${target}><strong>${escapeHtml(where)}</strong>${escapeHtml(text)}</li>`;
-      })
-      .join("")
-  );
+  return [...groups.values()]
+    .map(({ text, items }) => {
+      const first = items[0];
+      const where = items.length > 1 ? `${ownerName(first)} ほか ${items.length - 1} か所` : ownerName(first);
+      const target = first.block_id ? `data-kind="block" data-id="${first.block_id}"` : `data-kind="planting" data-id="${first.planting_id}"`;
+      return `<li ${target}><strong>${escapeHtml(where)}</strong>${escapeHtml(text)}</li>`;
+    })
+    .join("");
 }
 
 // 工程表の表示。plan（計画）、act（実績）、both（計画と実績）。工程表と作付の詳細で共有し、ブラウザーが圃場ごとに覚える
@@ -681,10 +778,10 @@ function numbersText(planting) {
   return parts.join(" ／ ");
 }
 
-// プラン全体の、品目ごとの苗数と、肥料ごとの量
+// 選んでいる区画の、品目ごとの苗数と、肥料ごとの量（「区画と畝」の中の折りたたみ）
 function renderSummary() {
-  const summary = summarize({ ...state(), logs: state().logs || [] });
-  $("summaryPanel").hidden = summary.crops.length === 0;
+  const summary = summarize({ ...state(), beds: blockBeds(sel.blockId), logs: state().logs || [] });
+  $("summaryFold").hidden = summary.crops.length === 0;
   const number = (value, digits = 0) => value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   draw(
     $("cropSummary"),
@@ -841,8 +938,6 @@ function blockSection(block) {
 function renderEditor() {
   const blocks = state().blocks;
   const beds = blockBeds(sel.blockId);
-  draw($("scheduleBlock"), blocks.map((block) => `<option value="${block.id}">${escapeHtml(block.name)}</option>`).join(""));
-  $("scheduleBlock").value = sel.blockId;
   draw(
     $("scheduleTarget"),
     `<option value="block">区画の作業（畝立ての前まで）</option>` +
@@ -1747,10 +1842,7 @@ export function initSchedule(context) {
     },
   });
 
-  $("scheduleBlock").addEventListener("change", (event) => {
-    Object.assign(sel, { blockId: event.target.value, target: "block", plantingId: null });
-    renderSchedule();
-  });
+  $("schedulePicker").addEventListener("change", (event) => onPick(event.target.value));
   $("scheduleTarget").addEventListener("change", (event) => {
     Object.assign(sel, { target: event.target.value, plantingId: null });
     renderSchedule();
@@ -1791,16 +1883,18 @@ export function initSchedule(context) {
     });
   }
   $("ganttPdfBtn").addEventListener("click", printGantt);
-  $("problemList").addEventListener("click", (event) => {
+  // 確認が必要な点の行（圃場図の「警告」と、区画・畝の欄の下）: 日程の画面に移って、その区画か作付の作業を開く
+  const openProblem = (event) => {
     const item = event.target.closest("li[data-id]");
     if (item) {
-      // 一覧は圃場図にある。日程の画面に移って、その区画か作付の作業を開く
       openInSchedule(item.dataset.kind, item.dataset.id);
       ctx.showView("schedule");
       const section = $("editorSections").querySelector(`[data-planting="${sel.plantingId}"]`) || $("editorSections");
       section.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-  });
+  };
+  $("problemList").addEventListener("click", openProblem);
+  $("pickerProblems").addEventListener("click", openProblem);
   $("typeRows").addEventListener("change", (event) => {
     const row = event.target.closest("tr[data-code]");
     const value = Number(event.target.value);

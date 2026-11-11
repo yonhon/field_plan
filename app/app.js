@@ -43,12 +43,12 @@ import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog
 import { initHistory, resetHistory } from "./history.js";
 import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
-import { initPlantingView, openPlantingDetail, plantingTarget, renderPlantingDetail } from "./planting-view.js";
+import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
 import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
-import { ganttHasFocus, initSchedule, openInSchedule, placeGantt, problemTotal, renderSchedule, selectedRowPreset } from "./schedule-view.js";
+import { ganttHasFocus, initSchedule, openInSchedule, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, scheduleHash, selectedRowPreset } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
 
@@ -2766,7 +2766,9 @@ $("rotation").addEventListener("change", (event) => {
 // ---- 圃場図と日程の切り替え ----
 
 // 作付の詳細（planting）は、日程のタブの中の画面として扱う
-// 画面の URL。#map、#schedule、#crops、#diary、#journal、作付の詳細は #detail/planting/作付の ID、区画の詳細は #detail/block/区画の ID。
+// 画面の URL。#map、#schedule、#crops、#diary、#journal、作付の詳細は #detail/planting/作付の ID。
+// 日程の画面は、開いている区画を付けて #schedule/block/区画の ID にする。
+// 前にあった区画の詳細（#detail/block/区画の ID）は、日程の画面でその区画を開く
 // 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）
 const VIEW_NAMES = ["map", "schedule", "crops", "diary", "journal"];
 
@@ -2774,7 +2776,11 @@ function routeFromHash() {
   const hash = decodeURIComponent(location.hash.slice(1));
   const detail = /^detail\/(planting|block)\/([\w-]+)$/.exec(hash);
   if (detail) {
-    return { view: "planting", kind: detail[1], id: detail[2] };
+    return detail[1] === "block" ? { view: "schedule", block: detail[2] } : { view: "planting", kind: detail[1], id: detail[2] };
+  }
+  const block = /^schedule\/block\/([\w-]+)$/.exec(hash);
+  if (block) {
+    return { view: "schedule", block: block[1] };
   }
   return VIEW_NAMES.includes(hash) ? { view: hash } : null;
 }
@@ -2784,12 +2790,14 @@ function hashOf(view) {
     const target = plantingTarget();
     return `#detail/${target.kind}/${target.id}`;
   }
-  return `#${view}`;
+  return view === "schedule" ? scheduleHash() : `#${view}`;
 }
 
 function openRoute(route, mode) {
   if (route.view === "planting") {
     openPlantingDetail(route.kind, route.id);
+  } else if (route.block) {
+    openInSchedule("block", route.block);
   }
   showView(route.view, { history: mode });
 }
@@ -2814,6 +2822,10 @@ function showView(view, { history: mode = "push" } = {}) {
   // 工程表の欄は 1 つで、圃場図と日程の画面のうち、開いた方へ移す（描くのは renderSchedule）
   if (view === "map" || view === "schedule") {
     placeGantt(view);
+  }
+  // 区画・畝の欄は、日程の画面と作付の詳細の上に出す
+  if (view === "schedule" || view === "planting") {
+    placePicker(view);
   }
   if (view === "map") {
     render();
@@ -2986,6 +2998,8 @@ async function startApp() {
     setStatus,
     renderWarnings,
     showView,
+    renderBlockRecord,
+    plantingTarget,
     openDetail: (kind, id) => {
       openPlantingDetail(kind, id);
       showView("planting");
@@ -3001,6 +3015,7 @@ async function startApp() {
   initPlantingView({
     state,
     showView,
+    renderPicker: () => renderPicker("planting"),
     openInSchedule,
     setStatus,
     refresh: refreshRecords,

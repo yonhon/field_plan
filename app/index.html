@@ -306,16 +306,22 @@
     </main>
 
     <main id="scheduleView" class="schedule" hidden>
+      <!-- 区画か畝を選ぶ欄。畝を選ぶと作付の詳細の画面になり、この欄もそちらの上へ移す（placePicker） -->
+      <div id="pickerSlotSchedule">
+        <section id="pickerPanel" class="panel picker-panel">
+          <label class="inline-field picker-field">区画・畝<select id="schedulePicker" aria-label="区画か畝"></select></label>
+          <!-- 選んだ区画（畝）の、確認が必要な点 -->
+          <ul id="pickerProblems" class="problem-list" hidden></ul>
+        </section>
+      </div>
+
       <p id="scheduleEmpty" class="muted" hidden>圃場図で耕起対象区画を作ると、ここで区画と畝の日程を作れます。</p>
 
       <div id="scheduleBody" class="schedule-body">
         <section class="panel">
           <div class="panel-heading">
             <h2>区画と畝</h2>
-            <div class="row">
-              <select id="scheduleBlock" aria-label="区画"></select>
-              <label class="inline-field">表示日<input id="stripDate" type="date" /></label>
-            </div>
+            <label class="inline-field">表示日<input id="stripDate" type="date" /></label>
           </div>
           <p class="muted edit-only">畝や区画の作業をクリックすると、下で編集できます。畝はドラッグで左右に動かせ、端をドラッグすると幅が変わります。数字をクリックすると、畝幅や隙間を cm で指定できます。図の中の「＋」を押すと、その場所に下の畝幅と隙間で畝を足します。畝の追加、移動、削除は、この図だけで行います。</p>
           <div class="row edit-only strip-tools">
@@ -349,6 +355,16 @@
             <p class="muted">手前は、圃場図の「圃場の外形」で決めた視点に近い側の端です。この図の左右も、その視点から見た左右です。手前の隙間は、区画の手前の端から畝の端までの距離です。足した畝の長さと前後の位置は、いまある最後の畝に合わせて入ります。</p>
           </details>
           <div class="strip-scroll"><div id="strip" class="strip"></div></div>
+          <details id="summaryFold" class="strip-detail" hidden>
+            <summary>苗と肥料の集計（この区画）</summary>
+            <div class="table-scroll">
+              <table class="work-table summary-table">
+                <thead><tr><th>品目</th><th>作付の数</th><th>面積（㎡）</th><th>苗数</th><th>肥料</th></tr></thead>
+                <tbody id="cropSummary"></tbody>
+              </table>
+            </div>
+            <p id="fertilizerSummary" class="muted"></p>
+          </details>
         </section>
 
         <section class="panel">
@@ -372,28 +388,20 @@
           </div>
         </section>
 
-        <!-- 工程表の欄は、日程の画面ではここに移す（showGantt）。選んだ区画だけを描く -->
+        <!-- 区画の作業の計画と実績（計画にない実績も）、計画との差、日記のボタン（planting-view.js が描く） -->
+        <section id="blockRecord" class="panel"></section>
+
+        <!-- 工程表の欄は、日程の画面ではここに移す（placeGantt）。選んだ区画だけを描く -->
         <div id="ganttSlotSchedule"></div>
 
-        <section id="summaryPanel" class="panel" hidden>
-          <h2>苗と肥料の集計</h2>
-          <div class="table-scroll">
-            <table class="work-table summary-table">
-              <thead><tr><th>品目</th><th>作付の数</th><th>面積（㎡）</th><th>苗数</th><th>肥料</th></tr></thead>
-              <tbody id="cropSummary"></tbody>
-            </table>
-          </div>
-          <p id="fertilizerSummary" class="muted"></p>
-        </section>
-
-        <section class="panel edit-only">
-          <h2>作業の種類と目安の日数</h2>
+        <details class="panel fold-panel edit-only">
+          <summary><h2>作業の種類と目安の日数</h2></summary>
           <p class="muted">ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。</p>
           <table class="type-table">
             <thead><tr><th>作業</th><th>かかる日数</th><th>あとにあける日数</th></tr></thead>
             <tbody id="typeRows"></tbody>
           </table>
-        </section>
+        </details>
       </div>
     </main>
 
@@ -401,6 +409,7 @@
     <button id="logAddBtn" class="fab" type="button" hidden>＋ 入力する</button>
 
     <main id="plantingView" class="schedule" hidden>
+      <div id="pickerSlotPlanting"></div>
       <div id="plantingBody" class="schedule-body"></div>
     </main>
 

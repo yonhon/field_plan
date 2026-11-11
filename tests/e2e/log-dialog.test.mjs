@@ -205,7 +205,7 @@ test("入力の窓: 戻るで窓だけが閉じ、ボタンで閉じると履歴
   await page.run("history.back()");
   await page.waitFor(`!${isOpen}`, "戻るで窓が閉じる");
   await page.run("new Promise((resolve) => setTimeout(resolve, 200))");
-  assert.equal(await page.run("location.hash"), "#schedule");
+  assert.equal(await page.run("location.hash"), "#schedule/block/b1");
   assert.equal(await page.run('document.querySelector(".tab-btn.is-active").dataset.view'), "schedule");
 
   // もう一度開いて、閉じるボタンで閉じる: 積んだ履歴を取り消し、そのあとの戻るは前の画面（圃場図）へ
