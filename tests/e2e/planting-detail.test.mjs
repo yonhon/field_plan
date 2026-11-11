@@ -91,6 +91,43 @@ test("圃場図の品目名を押すと、その作付の詳細が開く", optio
   assert.equal(await page.run(`document.querySelector(".tab-btn.is-active").dataset.view`), "schedule");
 });
 
+test("畝の番号の所を押すと、作付の詳細には移らず、畝を選ぶ", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="map"]');
+  await page.waitFor(`Boolean(document.querySelector("#map .map-label.is-linked"))`, "品目名のある文字");
+  // 番号（1 文字目）の位置を、本物のマウスの操作で押す
+  const point = await page.run(`(() => {
+    const text = document.querySelector("#map .map-label.is-linked");
+    const box = text.getExtentOfChar(0);
+    const p = new DOMPoint(box.x + box.width / 2, box.y + box.height / 2).matrixTransform(text.getScreenCTM());
+    const world = new DOMPoint(p.x, p.y).matrixTransform(document.getElementById("map").getScreenCTM().inverse());
+    return [world.x, -world.y];
+  })()`);
+  await page.clickMap(point);
+  await page.waitFor(`document.querySelector('#map polygon[data-shape="bed1"]').classList.contains("is-selected")`, "畝を選ぶ");
+  assert.equal(await page.run(`location.hash`), "#map");
+});
+
+test("圃場図で畝を選ぶと「作付の詳細を開く」、区画を選ぶと「日程で開く」が出る", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="map"]');
+  // 畝1 の、文字のない所を押す
+  await page.clickMap([3.5, 4]);
+  await page.waitFor(`document.getElementById("selectionTitle").textContent === "選択中: A 畝1"`, "畝を選ぶ");
+  assert.equal(await page.run(`document.getElementById("bedFields").textContent.includes("日程の「区画と畝」で行います")`), false);
+  assert.equal(await page.run(`document.getElementById("openScheduleBtn").textContent`), "作付の詳細を開く");
+  await page.click("#openScheduleBtn");
+  await page.waitFor(`location.hash === "#detail/planting/pl1" && !document.getElementById("plantingView").hidden`, "作付の詳細が開く");
+
+  // 区画は、これまでどおり日程の画面で開く
+  await page.click('.tab-btn[data-view="map"]');
+  await page.clickMap([30, 10]);
+  await page.waitFor(`document.getElementById("selectionTitle").textContent === "選択中: A"`, "区画を選ぶ");
+  assert.equal(await page.run(`document.getElementById("openScheduleBtn").textContent`), "日程で開く");
+  await page.click("#openScheduleBtn");
+  await page.waitFor(`location.hash === "#schedule" && !document.getElementById("scheduleView").hidden`, "日程が開く");
+});
+
 test("定植の仕様が品目の設定値と違えば、計画と実績の欄に添え書きが出る", options, async () => {
   await page.loadApp(seed());
   await openFromMap("pl1");

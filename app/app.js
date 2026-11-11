@@ -541,9 +541,9 @@ function renderMap(scale) {
     );
   }
 
-  // html を渡すと、text の代わりに中身として使う（品目名のリンクの tspan など）
-  const label = (point, text, size = fontSize, attrs = "", html = escapeHtml(text)) =>
-    `<text class="map-label" x="${point[0]}" y="${-point[1]}" font-size="${size}" stroke-width="${size / 4}" ${attrs}>${html}</text>`;
+  // html を渡すと、text の代わりに中身として使う（品目名のリンクの tspan など）。extra は class に足す名前
+  const label = (point, text, size = fontSize, attrs = "", html = escapeHtml(text), extra = "") =>
+    `<text class="map-label${extra ? ` ${extra}` : ""}" x="${point[0]}" y="${-point[1]}" font-size="${size}" stroke-width="${size / 4}" ${attrs}>${html}</text>`;
   const outside = findOutside();
   const strays = new Set([...outside.zones, ...outside.blocks, ...outside.beds].map((item) => item.id));
   // 選択の印と、入れ物からはみ出している印
@@ -617,7 +617,19 @@ function renderMap(scale) {
         const text = `${bed.seq}${name ? ` ${name}` : ""}`;
         // 品目名は、押すと作付の詳細を開くリンクにする（印刷では、ただの文字）
         const html = name && !printing ? `${bed.seq} <tspan class="map-link" data-detail="${planting.id}">${escapeHtml(name)}</tspan>` : escapeHtml(text);
-        parts.push(label(center, text, Math.min(fontSize, Math.max(size.width * 0.85, 9 / z)), `transform="rotate(${degrees} ${center[0]} ${-center[1]})"`, html));
+        // 品目名のある文字は、文字ごと押せるようにする（is-linked）。WebKit（iPad、iPhone）は、押せない text の中の
+        // tspan だけを押せるようにしても効かないため。番号の所を押したときは、今までどおり畝を選ぶ（data-shape）
+        const linked = html !== escapeHtml(text);
+        parts.push(
+          label(
+            center,
+            text,
+            Math.min(fontSize, Math.max(size.width * 0.85, 9 / z)),
+            `transform="rotate(${degrees} ${center[0]} ${-center[1]})"${linked ? ` data-shape="${bed.id}"` : ""}`,
+            html,
+            linked ? "is-linked" : ""
+          )
+        );
       }
     }
   };
@@ -918,7 +930,9 @@ function renderSelection() {
   $("edgeTable").hidden = kind === "bed";
   $("deleteVertexBtn").hidden = kind === "bed";
   $("deleteShapeBtn").hidden = kind === "bed";
-  $("openScheduleBtn").hidden = kind !== "block" && kind !== "bed";
+  // 区画は日程の画面で開く。畝は、図に出ている作付（表示日の作付）の詳細を開く。作付のない畝には出さない
+  $("openScheduleBtn").hidden = !(kind === "block" || (kind === "bed" && plantingOn(item)));
+  $("openScheduleBtn").textContent = kind === "bed" ? "作付の詳細を開く" : "日程で開く";
   $("deleteShapeBtn").textContent = { outline: "外形を削除", zone: "区域を削除", block: "区画を削除", bed: "畝を完全に削除" }[kind];
   $("shapeInfo").textContent = "";
 
@@ -2599,8 +2613,15 @@ $("deletePlanBtn").addEventListener("click", deletePlan);
 $("deleteVertexBtn").addEventListener("click", deleteSelectedVertex);
 $("deleteShapeBtn").addEventListener("click", deleteSelectedShape);
 $("openScheduleBtn").addEventListener("click", () => {
-  openInSchedule(findShape(state.selected).kind, state.selected);
-  showView("schedule");
+  const { kind, item } = findShape(state.selected);
+  const planting = kind === "bed" ? plantingOn(item) : null;
+  if (planting) {
+    openPlantingDetail("planting", planting.id);
+    showView("planting");
+  } else if (kind === "block") {
+    openInSchedule(kind, state.selected);
+    showView("schedule");
+  }
 });
 
 $("viewDate").addEventListener("change", (event) => {

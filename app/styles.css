@@ -972,7 +972,13 @@ body.plan-busy #scheduleView {
 }
 
 /* 辺の長さの数字。クリックすると数値で指定できる */
-/* 圃場図の畝の品目名。押すと作付の詳細を開く。図の文字として読むので、見た目はまわりの文字と同じにする */
+/* 圃場図の畝の品目名。押すと作付の詳細を開く。図の文字として読むので、見た目はまわりの文字と同じにする。
+   品目名のある文字（is-linked）は、文字ごと押せるようにする。WebKit（iPad、iPhone）は、押せない文字の中の
+   tspan だけを押せるようにしても効かない。番号の所は、畝を選ぶ（app.js の data-shape） */
+.map-label.is-linked {
+  pointer-events: auto;
+}
+
 .map-link {
   pointer-events: auto;
   cursor: pointer;

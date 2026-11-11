@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "app");
 const LOCAL_KEY = "field_plan_local";
 const WAIT_MS = 5000;
+const SEND_MS = 20000;
 const POLL_MS = 25;
 const TYPES = {
   ".html": "text/html",
@@ -53,7 +54,15 @@ async function devtoolsPort(profile) {
   const file = join(profile, "DevToolsActivePort");
   for (let i = 0; i < WAIT_MS / POLL_MS; i += 1) {
     if (existsSync(file)) {
-      const port = readFileSync(file, "utf8").split("\n")[0].trim();
+      // Chrome が書いている途中は、Windows では開けない（EBUSY）。少し待って読み直す
+      let port = "";
+      try {
+        port = readFileSync(file, "utf8").split("\n")[0].trim();
+      } catch (error) {
+        if (error.code !== "EBUSY" && error.code !== "EPERM") {
+          throw error;
+        }
+      }
       if (port) {
         return port;
       }
@@ -81,19 +90,58 @@ function connect(url) {
       errors.push(exception?.description?.split("\n")[0] || text);
     }
   };
+  // 返事を待つのは SEND_MS まで。返事が来ないと、テストがいつまでも止まったままになる
   const send = (method, params = {}) =>
     new Promise((resolve, reject) => {
       const id = nextId++;
-      waiting.set(id, (message) => (message.error ? reject(new Error(`${method}: ${message.error.message}`)) : resolve(message.result)));
+      const timer = setTimeout(() => {
+        waiting.delete(id);
+        reject(new Error(`${method}: ${SEND_MS / 1000} 秒待っても、Chrome から返事がありませんでした`));
+      }, SEND_MS);
+      waiting.set(id, (message) => {
+        clearTimeout(timer);
+        message.error ? reject(new Error(`${method}: ${message.error.message}`)) : resolve(message.result);
+      });
       socket.send(JSON.stringify({ id, method, params }));
     });
-  return new Promise((resolve) => {
-    socket.onopen = () => resolve({ send, errors, close: () => socket.close() });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Chrome につながりませんでした")), WAIT_MS);
+    socket.onopen = () => {
+      clearTimeout(timer);
+      resolve({ send, errors, close: () => socket.close() });
+    };
+    socket.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("Chrome につながりませんでした"));
+    };
   });
 }
 
-// Chrome を開き、テストで使う操作を返す。終わったら close を呼ぶ
+// 開いた Chrome の、操作する画面（page）の一覧を取る。起動の直後は、画面がまだ一覧にないことがある
+async function pageTarget(port) {
+  for (let i = 0; i < WAIT_MS / POLL_MS; i += 1) {
+    const targets = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(WAIT_MS) }).then((response) => response.json());
+    const found = targets.find((target) => target.type === "page");
+    if (found) {
+      return found;
+    }
+    await sleep(POLL_MS);
+  }
+  throw new Error("Chrome の画面が見つかりませんでした");
+}
+
+// Chrome を開き、テストで使う操作を返す。終わったら close を呼ぶ。
+// 起動に失敗したら（Windows で、まれに起動の途中で止まる）、1 回だけ開き直す
 export async function openBrowser() {
+  try {
+    return await launch();
+  } catch (error) {
+    console.error(`Chrome の起動に失敗したので、開き直します: ${error.message}`);
+    return launch();
+  }
+}
+
+async function launch() {
   const server = await serveApp();
   const profile = mkdtempSync(join(tmpdir(), "field-plan-e2e-"));
   const chrome = spawn(
@@ -101,14 +149,22 @@ export async function openBrowser() {
     ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--window-size=1500,1100", "about:blank"],
     { stdio: "ignore" }
   );
-  const port = await devtoolsPort(profile);
-  const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
-  const page = await connect(targets.find((target) => target.type === "page").webSocketDebuggerUrl);
-  await page.send("Page.enable");
-  await page.send("Runtime.enable");
-  // 外のサーバーが遅いと、スクリプトが待たされて起動が遅れる。?local=1 では要らないので読まない
-  await page.send("Network.enable");
-  await page.send("Network.setBlockedURLs", { urls: ["*cdn.jsdelivr.net*", "*fonts.googleapis.com*", "*fonts.gstatic.com*"] });
+  // つなぐ前に失敗したら、Chrome とサーバーを止める。残ると、テストのプロセスが終わらない
+  let page;
+  try {
+    const port = await devtoolsPort(profile);
+    page = await connect((await pageTarget(port)).webSocketDebuggerUrl);
+    await page.send("Page.enable");
+    await page.send("Runtime.enable");
+    // 外のサーバーが遅いと、スクリプトが待たされて起動が遅れる。?local=1 では要らないので読まない
+    await page.send("Network.enable");
+    await page.send("Network.setBlockedURLs", { urls: ["*cdn.jsdelivr.net*", "*fonts.googleapis.com*", "*fonts.gstatic.com*"] });
+  } catch (error) {
+    page?.close();
+    chrome.kill();
+    server.close();
+    throw error;
+  }
 
   const run = async (expression) => {
     const { result, exceptionDetails } = await page.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
