@@ -604,6 +604,21 @@ create table if not exists field.weather_daily (
   primary key (station, date)
 );
 
+-- ---- ニュース ----
+
+-- 県のページ（病害虫防除技術センターの「新着更新情報」、農業研究センターの「お知らせ」）に載った記事。
+-- 取り込み係が 1 日 2 回読んで、新しい記事を足す（scripts/fetch-news.mjs）。画面は「確認」で read_at を入れる
+create table if not exists field.news (
+  key text primary key,                -- 記事を見分ける文字列。新着更新情報は出典・日付・リンク、お知らせは出典・見出し
+  source text not null,                -- nogyo（新着更新情報）、kenkyu（お知らせ）
+  title text not null,                 -- リンクの文（お知らせは見出し）
+  url text not null,
+  posted date,                         -- ページに書かれた日付。読めなければ空
+  label text not null default '',      -- 新着、更新など
+  first_seen timestamptz not null default now(),
+  read_at timestamptz                  -- 確認した日時。空なら未読
+);
+
 -- 操作の記録。計画の表の行を足す・変える・消すたびに、DB が変える前と後の行をそのまま残す。
 -- 開発日誌のための変更の記録（changes）とは別で、事故を調べたり、消えた行を戻したりするために使う。
 -- 画面からは読み書きしない（許可を作らない）。DB が一緒に消した行（区画を消したときの畝など）も残る。
@@ -716,7 +731,7 @@ begin
   foreach t in array array[
     'fields', 'backdrops', 'plans', 'zones', 'blocks', 'work_types',
     'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'dev_notes',
-    'work_logs', 'work_log_targets', 'work_log_inputs', 'weather_daily'
+    'work_logs', 'work_log_targets', 'work_log_inputs', 'weather_daily', 'news'
   ] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists owner_all on field.%I', t);
@@ -761,6 +776,12 @@ end $$;
 drop policy if exists importer_all on field.weather_daily;
 create policy importer_all on field.weather_daily for all to authenticated
   using (field.is_importer()) with check (field.is_importer());
+
+-- ニュースは、読むことと足すことだけ（確認した印は変えない）
+drop policy if exists importer_read on field.news;
+create policy importer_read on field.news for select to authenticated using (field.is_importer());
+drop policy if exists importer_insert on field.news;
+create policy importer_insert on field.news for insert to authenticated with check (field.is_importer());
 
 -- 下絵の画像の置き場。地番や氏名が写っていることがあるので、非公開にする
 insert into storage.buckets (id, name, public) values ('field-plan', 'field-plan', false)

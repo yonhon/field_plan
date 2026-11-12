@@ -4384,6 +4384,29 @@ dialog.field-settings::backdrop {
   padding: 2px 4px;
 }
 
+/* ニュース。日付は短いので、作業の行ほど幅を取らない */
+.news-list .news-date {
+  min-width: 6.5em;
+}
+
+.news-title {
+  font-weight: 700;
+}
+
+.news-title a {
+  color: inherit;
+}
+
+.news-label {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e3f0ef;
+  color: #084f54;
+  font-size: 11px;
+  font-weight: 500;
+}
+
 /* スマホ: 高さを決めず、中身に合わせる（欄の中の送りと、画面の送りが重ならないように） */
 @media (max-width: 800px) {
   .wt-body {

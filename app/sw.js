@@ -36,6 +36,7 @@ const FILES = [
   "diary-view.js",
   "user-menu.js",
   "field-plans.js",
+  "news-view.js",
   "toast.js",
   "icons/A_mark_color.svg",
   "icons/favicon-32.png",

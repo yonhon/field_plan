@@ -77,13 +77,14 @@
             <ul id="problemList" class="problem-list"></ul>
           </section>
 
-          <!-- 遅れている作業・今週やること・最近の実績のタブ。PC では欄の高さを決め（図の位置が日によって動かないように）、
+          <!-- 遅れている作業・今週やること・最近の実績・ニュースのタブ。PC では欄の高さを決め（図の位置が日によって動かないように）、
                はみ出す分は欄の中で送る。スマホでは中身に合わせる。初めは「今週やること」を開く -->
           <section class="panel work-tabs">
             <div class="wt-tabs" role="tablist" aria-label="作業">
               <button type="button" role="tab" class="wt-tab" data-wtab="late" aria-selected="false">遅れている作業<span id="lateBadge" class="wt-alert" hidden></span></button>
               <button type="button" role="tab" class="wt-tab is-on" data-wtab="week" aria-selected="true">今週やること</button>
               <button type="button" role="tab" class="wt-tab" data-wtab="log" aria-selected="false">最近の実績</button>
+              <button type="button" role="tab" class="wt-tab" data-wtab="news" aria-selected="false">ニュース<span id="newsBadge" class="wt-alert" hidden></span></button>
             </div>
             <div class="wt-body">
               <div class="wt-panel" data-wpanel="late" hidden>
@@ -98,6 +99,12 @@
                 <div class="wt-log-head"><span id="logTitle" class="muted">最近の実績</span><button id="logToggle" class="text-btn" hidden>すべて</button></div>
                 <p id="logNote" class="muted" hidden></p>
                 <ul id="logList" class="week-list log-list"></ul>
+              </div>
+              <!-- 県のページの新しい記事（news-view.js）。「確認」で既読へ移る -->
+              <div class="wt-panel" data-wpanel="news" hidden>
+                <div class="wt-log-head"><span id="newsTitle" class="muted">未読</span><button id="newsToggle" class="text-btn">既読を見る</button></div>
+                <p id="newsEmpty" class="muted wt-note" hidden></p>
+                <ul id="newsList" class="week-list news-list"></ul>
               </div>
             </div>
           </section>
@@ -466,7 +473,7 @@
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // Service Worker（sw.js）が一式をそろえて出しているときは、そのまま読む。
       // そうでないとき（初めて開いたとき、?local=1）は、読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "process-editor.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js", "field-plans.js", "toast.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "process-editor.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js", "field-plans.js", "news-view.js", "toast.js"];
       // 新しい版のお知らせの「読み込み直す」。保存を送り終えてから読み込み直す（app.js の finishSaves）。
       // 送れなかったものが残れば、読み込み直さない
       document.getElementById("updateBtn").addEventListener("click", async (event) => {

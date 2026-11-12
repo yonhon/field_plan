@@ -276,6 +276,15 @@ export function createSupabaseStore(client, options) {
         check(await client.from("weather_daily").upsert(rows));
       }
     },
+    // ---- ニュース（県のページの記事。scripts/fetch-news.mjs が足す） ----
+    async loadNews() {
+      return allRows(() => client.from("news").select("*").order("first_seen", { ascending: false }).order("key"));
+    },
+    async markNews(keys, readAt) {
+      if (keys.length) {
+        check(await client.from("news").update({ read_at: readAt }).in("key", keys));
+      }
+    },
     // 2 週間気温予報。ブラウザーから気象庁を読めないので、Supabase の関数を通す
     async twoWeek(station) {
       const { data, error } = await client.functions.invoke("field-weather", { body: { station } });
@@ -425,7 +434,7 @@ export function fetchWithOperation(url, options = {}) {
 }
 
 const QUEUED_WRITES = [
-  "upsert", "remove", "saveField", "saveBackdrop", "saveLog", "deleteLog", "saveWorkType", "saveFieldWeather",
+  "upsert", "remove", "saveField", "saveBackdrop", "saveLog", "deleteLog", "saveWorkType", "saveFieldWeather", "markNews",
   "createField", "deleteField", "createPlan", "renamePlan", "deletePlan", "setActivePlan",
   "diarySaveDay", "diaryAddPhoto",
 ];
@@ -705,6 +714,18 @@ export function createLocalStore({ strict = false } = {}) {
         const key = (row) => `${row.station}|${row.date}`;
         const fresh = new Set(rows.map(key));
         data.weather = [...(data.weather || []).filter((row) => !fresh.has(key(row))), ...rows];
+      });
+    },
+    async loadNews() {
+      return (read().news || []).map((item) => ({ ...item }));
+    },
+    async markNews(keys, readAt) {
+      update((data) => {
+        for (const item of data.news || []) {
+          if (keys.includes(item.key)) {
+            item.read_at = readAt;
+          }
+        }
       });
     },
     async twoWeek() {

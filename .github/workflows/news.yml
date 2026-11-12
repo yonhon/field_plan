@@ -1,0 +1,27 @@
+name: Fetch news
+
+# 県のページ（病害虫防除技術センターの「新着更新情報」、農業研究センターの「お知らせ」）を読み、
+# 新しい記事を DB に足す（scripts/fetch-news.mjs）。画面の「ニュース」のタブに未読として出る。
+# 取り込み係の利用者でログインして入れる。秘密の値 FIELD_IMPORTER_EMAIL と FIELD_IMPORTER_PASSWORD が要る
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7 22,7 * * *" # 日本時間の 7:07 と 16:07
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Fetch
+        env:
+          FIELD_IMPORTER_EMAIL: ${{ secrets.FIELD_IMPORTER_EMAIL }}
+          FIELD_IMPORTER_PASSWORD: ${{ secrets.FIELD_IMPORTER_PASSWORD }}
+        run: node scripts/fetch-news.mjs

@@ -47,6 +47,7 @@ import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { initProcessEditor } from "./process-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
+import { initNews } from "./news-view.js";
 import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
@@ -3430,6 +3431,7 @@ async function startApp() {
   initWeather({ state, setStatus, onWeatherChanged: renderPlantingDetail });
   renderWeatherSettings();
   syncWeather();
+  initNews({ state, setStatus });
   // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホも PC も圃場図（今週やることが図の上にある）。
   // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）。履歴の画面は、読み込んでから開く
   const route = routeFromHash();
