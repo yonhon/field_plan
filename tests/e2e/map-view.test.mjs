@@ -61,7 +61,7 @@ async function selectAndDrag() {
 test("作図の道具が出ていない幅では、選んだ区画をなぞっても、区画は動かない", options, async () => {
   await page.viewport(390);
   await openMap();
-  assert.equal(await page.run(`getComputedStyle(document.querySelector("#appView .toolbar")).display`), "none");
+  assert.equal(await page.run(`getComputedStyle(document.getElementById("mapEditBtn")).display`), "none", "スマホの幅では「図を編集」を出さない");
   const view = await page.run(`document.getElementById("map").getAttribute("viewBox")`);
   await selectAndDrag();
   // 保存は少し遅れて送るので、送るはずの時間を待ってから見る
@@ -71,17 +71,46 @@ test("作図の道具が出ていない幅では、選んだ区画をなぞっ�
   assert.notEqual(await page.run(`document.getElementById("map").getAttribute("viewBox")`), view);
 });
 
-test("作図の道具が出ている幅では、選んだ区画をなぞると、区画と畝が動く", options, async () => {
+test("PC の幅でも、「図を編集」を押す前は、選んだ区画をなぞっても動かない。角の丸も出さない", options, async () => {
   await openMap();
+  await page.clickMap(INSIDE);
+  await page.waitFor(`document.querySelector('#map [data-shape="b1"]').classList.contains("is-selected")`, "ふだんの図でも区画を選べる");
+  assert.equal(await page.run(`document.querySelectorAll("#map .handle").length`), 0);
+  await page.dragMap(INSIDE, 80);
+  await sleep(900);
+  assert.deepEqual(await savedX(), { block: BLOCK[0][0], bed: BED[0][0] });
+});
+
+test("「図を編集」を押すと、選んだ区画をなぞると、区画と畝が動く。「完了」で帯が消える", options, async () => {
+  await openMap();
+  await page.click("#mapEditBtn");
+  assert.equal(await page.run(`document.getElementById("mapBand").hidden`), false);
+  assert.equal(await page.run(`document.querySelector('#mapBand .mode-btn[data-mode="select"]').classList.contains("is-active")`), true, "初めは選択・移動");
   await selectAndDrag();
   await page.waitFor(`(() => { const data = JSON.parse(localStorage.getItem("field_plan_local")); return data.beds[0].shape[0][0] !== ${BED[0][0]}; })()`, "畝が動いて保存される");
   const moved = await savedX();
   assert.notEqual(moved.block, BLOCK[0][0]);
   assert.ok(Math.abs(moved.block - BLOCK[0][0] - (moved.bed - BED[0][0])) < 1e-9, "区画と畝が同じだけ動く");
+  await page.click("#mapEditDone");
+  assert.equal(await page.run(`document.getElementById("mapBand").hidden`), true);
+  assert.equal(await page.run(`document.getElementById("mapEditBtn").hidden`), false);
+});
+
+test("区域のメニュー: 種類と描き方を選ぶと、メニューが閉じて、その道具になる", options, async () => {
+  await openMap();
+  await page.click("#mapEditBtn");
+  await page.click('[data-map-menu="zone"]');
+  assert.equal(await page.run(`document.getElementById("zoneMenu").hidden`), false);
+  await page.click('#zoneMenu input[value="path"]');
+  await page.click('#zoneMenu .mode-btn[data-mode="rect"]');
+  assert.equal(await page.run(`document.getElementById("zoneMenu").hidden`), true);
+  assert.equal(await page.run(`document.querySelector('[data-map-menu="zone"]').classList.contains("is-active")`), true, "区域のボタンを選んだ色にする");
+  assert.deepEqual(page.errors, []);
 });
 
 test("「読み込み直す」は、送り残しの保存を送り終えてから読み込み直す", options, async () => {
   await openMap();
+  await page.click("#mapEditBtn");
   await selectAndDrag();
   // 保存を送る前（600 ms 以内）に、新しい版のお知らせの「読み込み直す」を押す
   await page.run(`window.beforeReload = true; document.getElementById("updateToast").hidden = false`);

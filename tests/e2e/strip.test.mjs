@@ -258,6 +258,7 @@ test("閉じる前: 保存が終わっていなければ確かめ、終わって
 
 test("区域を作ってすぐ区画にする: 区域の保存を待たずに操作しても、両方保存される", options, async () => {
   await page.loadApp({ ...seed(0), zones: [], blocks: [] });
+  await page.click("#mapEditBtn");
   await page.setValue("#sizeAlong", "10");
   await page.setValue("#sizeDepth", "5");
   await page.run(`document.querySelector('.mode-btn[data-mode="size"]').click()`);
@@ -314,6 +315,7 @@ async function openGroups() {
   const data = seed(1);
   data.zones.push({ ...data.zones[0], id: "z2", shape: [[2, 2], [38, 2], [38, 18], [2, 18]] });
   await page.loadApp(data);
+  await page.click("#mapEditBtn");
 }
 
 const shapeX = async (table, id) => (await page.saved())[table].find((row) => row.id === id).shape[0][0];

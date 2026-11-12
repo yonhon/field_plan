@@ -110,67 +110,85 @@
           </section>
         </div>
 
-        <div class="toolbar edit-only" role="group" aria-label="操作">
-          <!-- 道具は全体で 1 つだけ選べる。組ごとにつなげ、使い終えると「選択・移動」に戻る -->
-          <span class="seg"><button class="mode-btn is-active" data-mode="select" aria-pressed="true">選択・移動</button></span>
-          <span class="zone-tool">
-            <span class="tool-label">外形</span>
-            <span class="seg"><button class="mode-btn" data-mode="outline" aria-pressed="false">外形を描く</button></span>
-          </span>
-          <span class="zone-tool">
-            <span class="tool-label">区域</span>
-            <select id="zoneKind" aria-label="区域の種類">
-              <option value="tillable">有効圃場</option>
-              <option value="shed">物置</option>
-              <option value="well">井戸</option>
-              <option value="path">通路</option>
-              <option value="residue">残渣処理場</option>
-              <option value="other">その他</option>
-            </select>
-            <span class="seg" role="group" aria-label="区域の描き方">
-              <button class="mode-btn" data-mode="zone" aria-pressed="false">多角形</button>
-              <button class="mode-btn" data-mode="rect" aria-pressed="false">四角形</button>
-              <button class="mode-btn" data-mode="size" aria-pressed="false">寸法を指定</button>
-            </span>
-          </span>
-          <span id="sizeTools" class="size-tools" hidden>
-            <label>辺に沿う長さ（m）<input id="sizeAlong" type="number" min="0.1" step="0.1" value="10" /></label>
-            <label>奥行き（m）<input id="sizeDepth" type="number" min="0.1" step="0.1" value="5" /></label>
-          </span>
-          <span id="draftTools" hidden>
-            <button id="draftDone" class="primary-btn">確定</button>
-            <button id="draftCancel" class="text-btn">取り消し</button>
-          </span>
-        </div>
-        <div class="toolbar toolbar-second">
-          <label class="inline-field">表示日<input id="viewDate" type="date" /></label>
-          <!-- 下絵の表示の切り替え。圃場の設定の窓の中の切り替えと同じもの（スマホでも出す） -->
-          <label class="inline-field check backdrop-toggle"><input class="backdrop-visible" type="checkbox" checked />下絵を表示</label>
-          <span class="zone-tool edit-only">
-            <span class="tool-label">耕起対象区画</span>
-            <span class="seg" role="group" aria-label="耕起対象区画の作り方">
-              <button class="mode-btn" data-mode="block" aria-pressed="false">有効圃場を区画にする</button>
-              <button class="mode-btn" data-mode="split" aria-pressed="false">線で分ける</button>
-              <button class="mode-btn" data-mode="blockrect" aria-pressed="false">区画を描く</button>
-            </span>
-          </span>
-          <span id="splitTools" class="size-tools edit-only" hidden>
-            <label>分ける線の向き
-              <select id="splitSide">
-                <option value="short">短い辺に平行</option>
-                <option value="long">長い辺に平行</option>
-              </select>
-            </label>
-          </span>
-        </div>
-        <!-- 図の操作の説明。ふだんは閉じておく（圃場の設定の窓を開いているあいだは、説明だけを窓の中へ移して出す） -->
-        <details id="hintFold" class="strip-detail hint-fold edit-only">
-          <summary>操作の説明</summary>
-          <p id="hint" class="hint"></p>
-        </details>
         <div class="map-frame">
+          <!-- 図の上に重ねる欄。編集中は道具の帯、その下に表示日・下絵と、図を編集・PDF出力（帯の高さに合わせて下がる） -->
+          <div class="map-top">
+          <!-- 図の編集の道具の帯。「図を編集」で出し、「完了」で隠す。ふだんの図は、選ぶ・見るだけ（動かさない）。
+               道具は全体で 1 つだけ選べ、使い終えると「選択・移動」に戻る。スマホの幅では出さない。外形は圃場の設定の窓で描く -->
+          <div id="mapBand" class="map-band edit-only" role="group" aria-label="図の編集" hidden>
+            <div class="map-band-row">
+              <span class="seg"><button class="mode-btn is-active" data-mode="select" aria-pressed="true">選択・移動</button></span>
+              <span class="seg">
+                <button class="mode-btn map-dd" data-map-menu="zone" aria-expanded="false">区域</button>
+                <button class="mode-btn map-dd" data-map-menu="block" aria-expanded="false">耕起対象区画</button>
+              </span>
+              <!-- 図の操作の説明。ふだんは閉じておく（圃場の設定の窓を開いているあいだは、説明だけを窓の中へ移して出す） -->
+              <details id="hintFold" class="hint-fold">
+                <summary>操作の説明</summary>
+                <p id="hint" class="hint"></p>
+              </details>
+              <span class="map-band-space"></span>
+              <span class="muted map-band-state">編集中</span>
+              <button id="mapEditDone" class="primary-btn">完了</button>
+            </div>
+            <div id="zoneMenu" class="map-menu" data-menu-of="zone" hidden>
+              <h4>区域の種類</h4>
+              <div class="map-menu-kinds">
+                <label><input type="radio" name="zoneKind" value="tillable" checked />有効圃場</label>
+                <label><input type="radio" name="zoneKind" value="shed" />物置</label>
+                <label><input type="radio" name="zoneKind" value="well" />井戸</label>
+                <label><input type="radio" name="zoneKind" value="path" />通路</label>
+                <label><input type="radio" name="zoneKind" value="residue" />残渣処理場</label>
+                <label><input type="radio" name="zoneKind" value="other" />その他</label>
+              </div>
+              <h4>描き方</h4>
+              <div class="map-menu-row">
+                <button class="chip-btn mode-btn" data-mode="zone" aria-pressed="false">多角形</button>
+                <button class="chip-btn mode-btn" data-mode="rect" aria-pressed="false">四角形</button>
+                <button class="chip-btn mode-btn" data-mode="size" aria-pressed="false">寸法を指定</button>
+              </div>
+            </div>
+            <div id="blockMenu" class="map-menu" data-menu-of="block" hidden>
+              <h4>耕起対象区画の作り方</h4>
+              <div class="map-menu-col">
+                <button class="chip-btn mode-btn" data-mode="block" aria-pressed="false">有効圃場を区画にする</button>
+                <button class="chip-btn mode-btn" data-mode="split" aria-pressed="false">線で分ける</button>
+                <button class="chip-btn mode-btn" data-mode="blockrect" aria-pressed="false">区画を描く</button>
+              </div>
+            </div>
+            <!-- 選んだ道具の入力（寸法、分ける線の向き、描いている途中の確定）。使うときだけ出す -->
+            <div class="map-band-sub">
+              <span id="sizeTools" class="size-tools" hidden>
+                <label>辺に沿う長さ（m）<input id="sizeAlong" type="number" min="0.1" step="0.1" value="10" /></label>
+                <label>奥行き（m）<input id="sizeDepth" type="number" min="0.1" step="0.1" value="5" /></label>
+              </span>
+              <span id="splitTools" class="size-tools" hidden>
+                <label>分ける線の向き
+                  <select id="splitSide">
+                    <option value="short">短い辺に平行</option>
+                    <option value="long">長い辺に平行</option>
+                  </select>
+                </label>
+              </span>
+              <span id="draftTools" hidden>
+                <button id="draftDone" class="primary-btn">確定</button>
+                <button id="draftCancel" class="text-btn">取り消し</button>
+              </span>
+            </div>
+          </div>
+            <div class="map-top-row">
+              <!-- 表示日と下絵の切り替え（スマホでも出す）。下絵の切り替えは、圃場の設定の窓の中のものと同じ -->
+              <div class="map-view-tools">
+                <label class="map-chip">表示日<input id="viewDate" type="date" /></label>
+                <label class="map-chip backdrop-toggle"><input class="backdrop-visible" type="checkbox" checked />下絵</label>
+              </div>
+              <div class="map-actions">
+                <button id="mapEditBtn" class="chip-btn edit-only" title="区域や耕起対象区画を描いたり、動かしたりします">✎ 図を編集</button>
+                <button id="mapPdfBtn" class="chip-btn map-pdf" title="圃場の全体を、下絵なしで PDF にします">PDF出力</button>
+              </div>
+            </div>
+          </div>
           <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="圃場図"></svg>
-          <button id="mapPdfBtn" class="chip-btn map-pdf" title="圃場の全体を、下絵なしで PDF にします">PDF出力</button>
           <div class="map-overlay">
             <div class="scale-bar"><span id="scaleBarLine"></span><span id="scaleBarLabel"></span></div>
             <button id="fitBtn" class="chip-btn">全体を表示</button>
@@ -361,6 +379,7 @@
           <!-- 日記の「編集 ｜ プレビュー」と同じ、中身の枠の真上につなげたタブ -->
           <div class="fs-tabs" role="tablist" aria-label="圃場の設定">
             <button type="button" role="tab" class="fs-tab is-on" data-fstab="image" aria-selected="true">下絵</button>
+            <button type="button" role="tab" class="fs-tab" data-fstab="outline" aria-selected="false">外形</button>
             <button type="button" role="tab" class="fs-tab" data-fstab="scale" aria-selected="false">計測</button>
             <button type="button" role="tab" class="fs-tab" data-fstab="place" aria-selected="false">位置と向き</button>
             <button type="button" role="tab" class="fs-tab" data-fstab="weather" aria-selected="false">気象</button>
@@ -371,6 +390,21 @@
             </div>
             <label class="check"><input class="backdrop-visible" type="checkbox" checked />下絵を表示</label>
             <p id="backdropRole" class="muted"></p>
+          </div>
+          <!-- 圃場の外形。描く・頂点を動かす・消す。ほかの設定と同じく、「保存する」でまとめて保存する -->
+          <div class="fs-panel" data-fspanel="outline" hidden>
+            <p class="muted">図の上の外形を押すと選べます。角の丸をドラッグすると動き、辺の中ほどの丸をドラッグすると角が増えます。</p>
+            <div class="row wrap">
+              <button type="button" class="chip-btn mode-btn" data-mode="outline">外形を描く</button>
+              <span id="fsDraftTools" hidden>
+                <button type="button" id="fsDraftDone" class="primary-btn">確定</button>
+                <button type="button" id="fsDraftCancel" class="text-btn">取り消し</button>
+              </span>
+            </div>
+            <div class="row wrap">
+              <button type="button" id="fsDeleteVertex" class="chip-btn" disabled>選んだ角を削除</button>
+              <button type="button" id="fsDeleteOutline" class="chip-btn" disabled>選んだ外形を削除</button>
+            </div>
           </div>
           <div class="fs-panel" data-fspanel="scale" hidden>
             <p class="muted">縮尺: <span id="scaleText">-</span></p>

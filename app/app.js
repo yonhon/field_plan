@@ -105,6 +105,7 @@ const SAVE_DELAY_MS = 600;
 
 const state = {
   store: null,
+  mapEditing: false, // 図の編集中（「図を編集」を押してから「完了」まで）。ふだんの図は、選ぶ・見るだけ
   planBusy: false, // プランの作成・切り替えなどの途中
   client: null,
   fields: [],
@@ -492,7 +493,7 @@ function recordMove(key) {
 
 function recordShape(key, was) {
   const kind = isOutline(key) ? "outline" : findShape(key).kind;
-  record({
+  adjustRecord({
     kind: `${kind}.shape`,
     target: isOutline(key) ? [] : [kind, key],
     plan: isOutline(key) ? false : undefined,
@@ -651,7 +652,8 @@ function renderMap(scale) {
 
   const selectedPoints = state.selected ? shapePoints(state.selected) : null;
   const selectedKind = isOutline(state.selected) ? "outline" : state.selected ? findShape(state.selected)?.kind : null;
-  // 畝は四角形のまま扱うので、頂点は動かさない
+  // 畝は四角形のまま扱うので、頂点は動かさない。角と辺の丸は、いま動かせる図形にだけ出す
+  const editable = !printing && shapeEditable(state.selected);
   if (selectedPoints && selectedKind !== "bed") {
     const lengths = edgeLengths(selectedPoints);
     const center = centroid(selectedPoints);
@@ -669,9 +671,12 @@ function renderMap(scale) {
       const offset = hasBeds ? -12 / z : Math.min(14 / z, inward / 2);
       // 長さの数字はクリックできる（数値で長さを決める）
       parts.push(label([mid[0] + ((center[0] - mid[0]) / inward) * offset, mid[1] + ((center[1] - mid[1]) / inward) * offset], formatLength(lengths[i]), fontSize, `data-edge="${i}"`));
-      parts.push(`<circle class="handle mid edit-only" data-mid="${i}" cx="${mid[0]}" cy="${-mid[1]}" r="${4.5 / z}" />`);
+      if (editable) parts.push(`<circle class="handle mid edit-only" data-mid="${i}" cx="${mid[0]}" cy="${-mid[1]}" r="${4.5 / z}" />`);
     });
     selectedPoints.forEach((point, i) => {
+      if (!editable) {
+        return;
+      }
       parts.push(
         `<circle class="handle edit-only${state.selectedVertex === i ? " is-selected" : ""}" data-vertex="${i}" ` +
           `cx="${point[0]}" cy="${-point[1]}" r="${6.5 / z}" />`
@@ -968,8 +973,9 @@ function renderSelection() {
   $("blockFields").hidden = kind !== "block";
   $("bedFields").hidden = kind !== "bed";
   $("edgeTable").hidden = kind === "bed";
-  $("deleteVertexBtn").hidden = kind === "bed";
-  $("deleteShapeBtn").hidden = kind === "bed";
+  // 外形は、圃場の設定の窓の「外形」で消す
+  $("deleteVertexBtn").hidden = kind === "bed" || kind === "outline";
+  $("deleteShapeBtn").hidden = kind === "bed" || kind === "outline";
   // 区画は日程の画面で開く。畝は、図に出ている作付（表示日の作付）の詳細を開く。作付のない畝には出さない
   $("openScheduleBtn").hidden = !(kind === "block" || (kind === "bed" && plantingOn(item)));
   $("openScheduleBtn").textContent = kind === "bed" ? "作付の詳細を開く" : "日程で開く";
@@ -1050,6 +1056,14 @@ function renderSelection() {
 function render() {
   renderMap();
   renderPanel();
+  renderOutlineTools();
+}
+
+// 圃場の設定の窓の「外形」の、選んだ角・外形を消すボタン
+function renderOutlineTools() {
+  const outline = isOutline(state.selected) ? shapePoints(state.selected) : null;
+  $("fsDeleteOutline").disabled = !outline;
+  $("fsDeleteVertex").disabled = !outline || state.selectedVertex === null || outline.length <= 3;
 }
 
 // ---- 保存 ----
@@ -1186,10 +1200,15 @@ function enterMode(mode) {
     button.classList.toggle("is-active", button.dataset.mode === mode);
     button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
   });
+  // 区域・耕起対象区画のメニューのボタンは、その中の道具を選んでいるあいだ、選んだ色にする
+  const group = { zone: "zone", rect: "zone", size: "zone", block: "block", split: "block", blockrect: "block" }[mode];
+  document.querySelectorAll("[data-map-menu]").forEach((button) => button.classList.toggle("is-active", button.dataset.mapMenu === group));
+  closeMapMenus();
   map.classList.toggle("is-drawing", mode !== "select");
   // 圃場の設定の窓の中では、図形を描くときの案内（選択）は出さない
   $("hint").textContent = settings.open && mode === "select" ? "" : HINTS[mode === "scale" && state.backdrop?.fitted ? "scaleFitted" : mode];
-  $("draftTools").hidden = mode !== "outline" && mode !== "zone";
+  $("draftTools").hidden = mode !== "zone";
+  $("fsDraftTools").hidden = mode !== "outline";
   $("sizeTools").hidden = mode !== "size";
   $("splitTools").hidden = mode !== "split";
   render();
@@ -1207,11 +1226,12 @@ function finishDraft() {
   }
   const points = state.draft;
   if (state.mode === "outline") {
+    markStep();
     state.field.outline = [...state.field.outline, points];
     queueSave("field");
     setMode("select");
     const key = outlineKey(state.field.outline.length - 1);
-    record({
+    adjustRecord({
       kind: "outline.draw",
       plan: false,
       text: state.field.outline.length > 1 ? `${shapeName(key)}を描き足した（離れた部分）` : "圃場の外形を描いた",
@@ -1227,7 +1247,7 @@ function addZone(points) {
   const zone = {
     id: crypto.randomUUID(),
     plan_id: state.plan.id,
-    kind: $("zoneKind").value,
+    kind: document.querySelector('input[name="zoneKind"]:checked')?.value || "tillable",
     name: "",
     shape: points,
     note: "",
@@ -1543,6 +1563,7 @@ function deleteSelectedVertex() {
   if (!points || state.selectedVertex === null || points.length <= 3) {
     return;
   }
+  markStep(); // 圃場の設定の窓の中（外形）なら、元に戻すの区切り
   setShapePoints(state.selected, points.filter((_, i) => i !== state.selectedVertex));
   state.selectedVertex = null;
   render();
@@ -1575,9 +1596,10 @@ async function deleteSelectedShape() {
     const rest = state.field.outline.length - 1;
     const message = rest ? `${name}を削除します。ほかの ${rest} つの部分は残ります。` : "圃場の外形を削除します。";
     if ((await confirmDelete(message, name)) && state.selected === id && shapePoints(id)) {
+      markStep();
       state.field.outline = state.field.outline.filter((_, i) => i !== outlineIndex(id));
       queueSave("field");
-      record({ kind: "outline.delete", plan: false, text: `${name}を削除` });
+      adjustRecord({ kind: "outline.delete", plan: false, text: `${name}を削除` });
       select(null);
     }
     return;
@@ -2500,14 +2522,39 @@ function pressedSelected(event) {
   return Boolean(points) && gap === undefined && edge === undefined && pointInPolygon(clientToWorld(event), points);
 }
 
-// 作図の道具（選択・移動、外形を描く、など）が出ているか。スマホやタブレットの幅では出さない（.edit-only）。
-// 出ていないときは、図形を動かしたり描いたりせず、なぞったら図が動くだけにする（見るための画面なので）
+// 図の編集の道具（「図を編集」で出す帯）が出ているか。スマホやタブレットの幅では出さない（.edit-only）。
+// 出ていないときは、図形を動かしたり描いたりせず、なぞったら図が動くだけにする（選ぶ・見るための図なので）
 function drawingToolsShown() {
-  if (settings.open) {
-    return false; // 圃場の設定の窓の中の図は、見るだけ（2 点の距離と、位置合わせのクリックだけ受ける）
+  if (settings.open || !state.mapEditing) {
+    return false; // 圃場の設定の窓の中の図は、外形のほかは見るだけ（2 点の距離と、位置合わせのクリックだけ受ける）
   }
-  const tools = document.querySelector("#appView .toolbar.edit-only");
-  return Boolean(tools) && getComputedStyle(tools).display !== "none";
+  return getComputedStyle($("mapBand")).display !== "none";
+}
+
+// 圃場の設定の窓の「外形」のタブを開いているか。このときだけ、外形を描き、角を動かせる
+const outlineEditing = () => settings.open && document.querySelector("[data-fstab].is-on")?.dataset.fstab === "outline";
+
+// いま、角や辺を動かせる図形か。外形は圃場の設定の窓で、ほかは「図を編集」のあいだだけ
+function shapeEditable(key) {
+  if (!key) {
+    return false;
+  }
+  return outlineEditing() ? isOutline(key) : drawingToolsShown() && !isOutline(key);
+}
+
+// 「図を編集」と「完了」。始めるときも終えるときも、道具は「選択・移動」にする
+function setMapEditing(on) {
+  state.mapEditing = on;
+  map.closest(".map-frame").classList.toggle("is-editing", on);
+  document.body.classList.toggle("map-editing", on);
+  $("mapBand").hidden = !on;
+  $("mapEditBtn").hidden = on;
+  setMode("select");
+}
+
+function closeMapMenus() {
+  document.querySelectorAll(".map-menu").forEach((menu) => (menu.hidden = true));
+  document.querySelectorAll("[data-map-menu]").forEach((button) => button.setAttribute("aria-expanded", "false"));
 }
 
 // 押した位置にある畝の文字。{ bed: 畝の ID, detail: 品目名なら作付の ID }。文字がなければ null。
@@ -2560,20 +2607,24 @@ map.addEventListener("pointerdown", (event) => {
   // 作図の道具が出ていないときは、図形を動かさず、図を動かす（pan）。離したときは、図形を選ぶか、品目名から作付の詳細を開くだけ
   const editing = drawingToolsShown();
   // 圃場の設定の窓では、図形を描く道具は出さないが、下絵の 2 点の距離と位置合わせのクリックは受ける
-  const settingsClick = settings.open && (state.mode === "scale" || state.mode === "align" || state.mode === "areaMeasure");
+  const outlineTab = outlineEditing();
+  const settingsClick = settings.open && (state.mode === "scale" || state.mode === "align" || state.mode === "areaMeasure" || (outlineTab && state.mode === "outline"));
   if (!editing && state.mode !== "select" && !settingsClick) {
     // PC の幅で道具を選んだまま、画面を狭めたとき。道具は見えないので、選択に戻す
     setMode("select");
   }
-  if (editing && state.mode === "select" && target.dataset.vertex !== undefined) {
+  const editable = state.mode === "select" && shapeEditable(state.selected);
+  if (editable && target.dataset.vertex !== undefined) {
     state.selectedVertex = Number(target.dataset.vertex);
-    gesture = { kind: "vertex", index: state.selectedVertex, moved: false, was: sizeText(state.selected) };
+    // 圃場の設定の窓の中では、動かす前の写しを取っておき、動かしたら「元に戻す」の区切りにする
+    gesture = { kind: "vertex", index: state.selectedVertex, moved: false, was: sizeText(state.selected), snap: settings.open ? settingsSnapshot() : null };
     render();
-  } else if (editing && state.mode === "select" && target.dataset.mid !== undefined && !isOutline(state.selected)) {
+  } else if (editable && target.dataset.mid !== undefined && !isOutline(state.selected)) {
     // 区域と区画: 辺を平行に動かして、大きさを変える
     gesture = { kind: "edge", index: Number(target.dataset.mid), last: clientToWorld(event), was: sizeText(state.selected) };
-  } else if (editing && state.mode === "select" && target.dataset.mid !== undefined) {
+  } else if (editable && target.dataset.mid !== undefined) {
     // 圃場の外形: 辺の途中に頂点を足す
+    markStep();
     const index = Number(target.dataset.mid) + 1;
     const points = [...shapePoints(state.selected)];
     points.splice(index, 0, clientToWorld(event));
@@ -2699,7 +2750,12 @@ function endPointer(event) {
     return;
   }
   if (finished && finished.kind === "vertex" && finished.moved) {
+    if (finished.snap && settings.open) {
+      settings.undo.push(finished.snap);
+      settings.redo.length = 0;
+    }
     recordShape(state.selected, finished.was);
+    renderSettingsFoot();
   }
   if (finished && (finished.kind === "move" || finished.kind === "edge")) {
     if (finished.kind === "edge") {
@@ -2750,6 +2806,13 @@ function endPointer(event) {
     return;
   }
   if (state.mode === "select" && settings.open) {
+    // 外形のタブでは、押した位置の外形を選ぶ（区域が上に重なっていても、位置で見る）
+    if (outlineEditing()) {
+      const index = state.field.outline.findIndex((points) => pointInPolygon(world, points));
+      state.selected = index < 0 ? null : outlineKey(index);
+      state.selectedVertex = null;
+      render();
+    }
     return;
   } else if (state.mode === "select") {
     state.selected = finished.shape || null;
@@ -2812,15 +2875,16 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape") {
+    closeMapMenus();
     setMode("select");
   } else if (event.key === "Enter" && (state.mode === "outline" || state.mode === "zone")) {
     finishDraft();
   } else if (event.key === "Backspace" && state.draft.length && (state.mode === "outline" || state.mode === "zone")) {
     state.draft.pop();
     render();
-  } else if (event.key === "Delete" && state.mode === "select") {
+  } else if (event.key === "Delete" && state.mode === "select" && shapeEditable(state.selected)) {
     deleteSelectedVertex();
-  } else if (ARROWS[event.key] && state.mode === "select" && state.selected && !isOutline(state.selected) && !isBed(state.selected)) {
+  } else if (ARROWS[event.key] && state.mode === "select" && drawingToolsShown() && state.selected && !isOutline(state.selected) && !isBed(state.selected)) {
     event.preventDefault();
     nudgeSelected(ARROWS[event.key], event.shiftKey ? NUDGE_M * 10 : NUDGE_M);
   }
@@ -2833,6 +2897,28 @@ document.querySelectorAll(".mode-btn").forEach((button) => {
 });
 $("draftDone").addEventListener("click", finishDraft);
 $("draftCancel").addEventListener("click", () => setMode("select"));
+$("fsDraftDone").addEventListener("click", finishDraft);
+$("fsDraftCancel").addEventListener("click", () => setMode("select"));
+$("fsDeleteVertex").addEventListener("click", deleteSelectedVertex);
+$("fsDeleteOutline").addEventListener("click", deleteSelectedShape);
+$("mapEditBtn").addEventListener("click", () => setMapEditing(true));
+$("mapEditDone").addEventListener("click", () => setMapEditing(false));
+// 区域・耕起対象区画のメニュー。押すと開き、もう一度押すか、ほかの所を押すと閉じる
+document.querySelectorAll("[data-map-menu]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const menu = document.querySelector(`.map-menu[data-menu-of="${button.dataset.mapMenu}"]`);
+    const open = menu.hidden;
+    closeMapMenus();
+    menu.hidden = !open;
+    menu.style.left = `${button.offsetLeft}px`;
+    button.setAttribute("aria-expanded", String(open));
+  });
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!event.target.closest(".map-menu, [data-map-menu]")) {
+    closeMapMenus();
+  }
+});
 $("fitBtn").addEventListener("click", () => {
   fitView();
   renderMap();
@@ -3040,7 +3126,7 @@ async function openFieldSettings() {
   }
   // それまでの図形の保存を先に済ませる（窓を開いているあいだの保存の予約は止めるので）
   await sendPendingSaves();
-  setMode("select");
+  setMapEditing(false);
   Object.assign(settings, { open: true, undo: [], redo: [], transforms: [], records: [] });
   settings.start = settingsSnapshot();
   // 気象の欄を変える前に、元に戻すの区切りを入れる。変えたあとに、下の欄を描き直す
@@ -3067,6 +3153,11 @@ async function requestCloseSettings() {
   }
   cancelWeatherDraft();
   settings.open = false;
+  // 外形のタブで選んだ外形は、圃場図に戻ったら選ばない
+  if (isOutline(state.selected)) {
+    state.selected = null;
+    state.selectedVertex = null;
+  }
   const frame = $("settingsMapSlot").querySelector(".map-frame");
   settings.home.parent.insertBefore(frame, settings.home.next);
   $("hintFold").append($("hint"));
@@ -3157,6 +3248,10 @@ $("fieldSettings").addEventListener("click", (event) => {
     return;
   }
   setMode("select");
+  // 外形のタブで選んだ外形は、ほかのタブでは選ばない（角の丸を出さない）
+  state.selected = null;
+  state.selectedVertex = null;
+  render();
   document.querySelectorAll("[data-fstab]").forEach((item) => {
     item.classList.toggle("is-on", item === tab);
     item.setAttribute("aria-selected", String(item === tab));
