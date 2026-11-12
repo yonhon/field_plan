@@ -227,7 +227,9 @@ test("株の手入れ・その他の中身は、作業の種類のすぐ下（�
   const headings = () => page.run('[...document.querySelectorAll("dialog.log-dialog .log-section > h3, dialog.log-dialog .log-section-head > h3")].map((h) => h.textContent)');
   const order = await headings();
   assert.deepEqual(order.slice(order.indexOf("作業の種類"), order.indexOf("作業の種類") + 3), ["作業の種類", "中身", "対象"]);
-  assert.ok(await page.run('Boolean(document.querySelector(\'dialog.log-dialog [data-act="item"][data-item="鉢上げ"]\'))'), "鉢上げを選べる");
+  for (const item of ["鉢上げ", "補植", "補播", "中耕"]) {
+    assert.ok(await page.run(`Boolean(document.querySelector('dialog.log-dialog [data-act="item"][data-item="${item}"]'))`), `${item}を選べる`);
+  }
   // 書きかけのまま閉じると、捨ててよいかを確かめる。「入力を続ける」なら窓は開いたまま
   await page.click('dialog.log-dialog [data-act="close"]');
   await page.waitFor(`document.querySelector("dialog.notice[open] .notice-text")?.textContent.includes("まだ保存していない入力")`, "捨ててよいかの確かめ");
