@@ -734,9 +734,23 @@ function renderMap(scale) {
     const open = state.mode === "scale" || state.mode === "split" || state.mode === "align";
     const closing = !open && state.draft.length >= 3 ? ` ${svgPoints([state.draft[0]])}` : "";
     parts.push(`<polyline class="draft" points="${svgPoints(state.draft)}${closing}" />`);
+    // 2 点の距離と位置合わせ: 最後に押した点から、マウスの位置まで線を伸ばす（2 点の距離では、その長さも出す）
+    if ((state.mode === "scale" || state.mode === "align") && state.hover && state.draft.length % 2 === 1) {
+      const from = state.draft.at(-1);
+      const to = state.hover;
+      parts.push(`<line class="draft" x1="${from[0]}" y1="${-from[1]}" x2="${to[0]}" y2="${-to[1]}" />`);
+      if (state.mode === "scale") {
+        parts.push(
+          `<text class="map-label draft-label" x="${(from[0] + to[0]) / 2}" y="${-(from[1] + to[1]) / 2}" font-size="${fontSize * 1.1}" ` +
+            `stroke-width="${fontSize / 3}">${distance(from, to).toFixed(2)} m</text>`
+        );
+      }
+    }
     if (state.mode !== "split") {
+      // 2 点の距離と位置合わせで押した点は、下絵の上でも見えるよう、白い縁を付けて大きめに描く
+      const big = state.mode === "scale" || state.mode === "align";
       state.draft.forEach((point) => {
-        parts.push(`<circle class="draft-point" cx="${point[0]}" cy="${-point[1]}" r="${4 / z}" />`);
+        parts.push(`<circle class="draft-point${big ? " is-mark" : ""}" cx="${point[0]}" cy="${-point[1]}" r="${(big ? 6 : 4) / z}" />`);
       });
     }
   }
@@ -924,6 +938,7 @@ function renderPanel() {
       : "この下絵の上で図形を描きます。縮尺や向きを変えると、図形も一緒に伸び縮み・回転します。";
   $("alignTools").hidden = !fitted;
   $("fitShapesBtn").disabled = !state.alignment;
+  $("fitShapesBtn").title = state.alignment ? "" : "先に「図形に位置を合わせる」で、2 組の点を合わせてください";
   renderSettingsFoot();
 }
 
@@ -1149,6 +1164,7 @@ function setMode(mode) {
 function enterMode(mode) {
   state.mode = mode;
   state.draft = [];
+  state.hover = null;
   if (mode !== "select") {
     state.selected = null;
     state.selectedVertex = null;
@@ -1383,6 +1399,7 @@ async function fitShapesToBackdrop() {
   setView({ x: x * factor, y: y * factor, w: w * factor, h: h * factor });
   applyTransform((points) => scalePoints(points, factor));
   adjustRecord({ kind: "field.scale", plan: false, text: "図形を下絵の縮尺に合わせた（すべての図形の大きさが変わる）", after: `${factor.toFixed(4)} 倍` });
+  $("hint").textContent = `図形の大きさを ${factor.toFixed(4)} 倍にして、下絵の縮尺に合わせました。`;
   render();
 }
 
@@ -2582,6 +2599,9 @@ function previewAt(point) {
   } else if (state.mode === "split") {
     const target = splitTarget(point);
     state.draft = (target && cutSegment(target.shape, point, target.angle)) || [];
+  } else if ((state.mode === "scale" || state.mode === "align") && state.draft.length % 2 === 1) {
+    // 2 点の距離と位置合わせ: 押した点から、マウスの位置まで線を伸ばす
+    state.hover = point;
   } else {
     return;
   }
@@ -2727,8 +2747,10 @@ function endPointer(event) {
   } else if (state.mode === "scale") {
     state.draft.push(world);
     if (state.draft.length === 2) {
+      // 2 点を結んだ線を描いてから、実際の距離を尋ねる（尋ねる窓が出ているあいだは、画面が描き直されないため）
+      state.hover = null;
       renderMap();
-      finishScale();
+      setTimeout(finishScale, 60);
       return;
     }
   } else if (state.mode === "outline" || state.mode === "zone") {

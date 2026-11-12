@@ -4273,3 +4273,16 @@ dialog.field-settings::backdrop {
 .fs-map .map-pdf {
   display: none;
 }
+
+/* 押せない丸いボタンは、押せないことが分かるように薄くする */
+.chip-btn:disabled {
+  color: var(--line);
+  cursor: default;
+}
+
+/* 2 点の距離と位置合わせで押した点。下絵の上でも見えるよう、白い縁を付ける */
+.draft-point.is-mark {
+  stroke: #fff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
