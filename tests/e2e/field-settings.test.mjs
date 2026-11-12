@@ -104,3 +104,45 @@ test("圃場の設定: 図形と一緒に回る下絵を回して保存すると
   await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる（保存済みなので確かめない）");
   assert.deepEqual(page.errors, []);
 });
+
+test("圃場の設定: 縮尺のタブで、図の上の 2 点を押して縮尺を合わせ、元に戻せる。気象の欄も元に戻せる", options, async () => {
+  await page.loadApp(seed(true));
+  await page.click("#brandMenu");
+  await page.click('#userMenu [data-action="settings"]');
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG} .map-frame"))`, "設定の窓");
+  await page.click(`${DIALOG} [data-fstab="scale"]`);
+  const scale = () => page.run(`document.getElementById("scaleText").textContent`);
+  const before = await scale();
+
+  // 「2 点の距離で合わせる」を押し、図の上の 2 点を押して、実際の距離を入れる
+  await page.run(`window.prompt = () => "40"`); // 図の上で 20 m の 2 点を、実際は 40 m とする
+  await page.click(`${DIALOG} .mode-btn[data-mode="scale"]`);
+  await page.clickMap([5, 10]);
+  assert.equal(await page.run(`document.querySelector('${DIALOG} .mode-btn[data-mode="scale"]').classList.contains("is-active")`), true, "1 点目のあとも、道具は選んだまま");
+  await page.clickMap([25, 10]);
+  await page.waitFor(`document.getElementById("scaleText").textContent !== ${JSON.stringify(before)}`, "縮尺が変わる");
+  assert.match(await status(), /保存していない調整/);
+  await page.click("#settingsUndo");
+  await page.waitFor(`document.getElementById("scaleText").textContent === ${JSON.stringify(before)}`, "元に戻す");
+
+  // 位置と向きのタブ: 「図形に位置を合わせる」で、下絵の上の目印と図形の上の点を押すと、下絵が動く
+  await page.click(`${DIALOG} [data-fstab="place"]`);
+  await page.click(`${DIALOG} .mode-btn[data-mode="align"]`);
+  await page.clickMap([10, 10]);
+  await page.clickMap([12, 11]);
+  await page.waitFor(`document.getElementById("settingsStatus").textContent.includes("保存していない調整")`, "下絵が動く");
+  await page.run(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await page.click("#settingsUndo");
+  await page.waitFor(`document.getElementById("settingsStatus").textContent === "変更はありません"`, "元に戻す");
+
+  // 気象: 基準点の緯度を変えて、元に戻す
+  await page.click(`${DIALOG} [data-fstab="weather"]`);
+  await page.run(`(() => { const input = document.getElementById("baseLat"); input.value = "26.3"; input.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.waitFor(`!document.getElementById("settingsUndo").disabled`, "気象の変更も元に戻せる");
+  await page.click("#settingsUndo");
+  await page.waitFor(`document.getElementById("baseLat").value === ""`, "緯度が元に戻る");
+  await page.waitFor(`document.getElementById("settingsStatus").textContent === "変更はありません"`, "変更なしに戻る");
+  await page.click("#fieldSettingsClose");
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "確かめずに閉じる");
+  assert.deepEqual(page.errors, []);
+});

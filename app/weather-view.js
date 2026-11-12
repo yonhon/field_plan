@@ -128,26 +128,29 @@ function renderStatus(extra = "") {
 
 // 圃場の設定の窓を開いているあいだは、書きかけ。変えた値は圃場に入れておき（選ぶ欄のつながりに使う）、
 // 窓の「保存する」で、まとめて保存する（commitWeatherDraft）。保存しないで閉じたら、元の値に戻す（cancelWeatherDraft）
-let draft = null; // { before: { base_lat, base_lng, weather }, texts: [変えた項目の文], onChange }
+// hooks.before は欄を変える前（元に戻すの区切り）、hooks.after は変えたあとに呼ぶ
+let draft = null; // { before: { base_lat, base_lng, weather }, texts: [変えた項目の文], hooks }
 
-export function beginWeatherDraft(onChange) {
-  const field = state().field;
-  draft = { before: { base_lat: field.base_lat, base_lng: field.base_lng, weather: { ...(field.weather || {}) } }, texts: [], onChange };
+const weatherOf = (field) => ({ base_lat: field.base_lat ?? null, base_lng: field.base_lng ?? null, weather: { ...(field.weather || {}) } });
+
+export function beginWeatherDraft(hooks = {}) {
+  draft = { before: weatherOf(state().field), texts: [], hooks };
 }
 
-export const weatherDraftDirty = () => Boolean(draft?.texts.length);
-
-// 書きかけを保存する。保存したら、そこを新しい出発点にする
+// 書きかけを保存する（元に戻すで、開いたときの値に戻っていれば保存しない）。保存したら、そこを新しい出発点にする
 export async function commitWeatherDraft() {
-  if (!draft?.texts.length) {
+  const field = state().field;
+  if (!draft || JSON.stringify(weatherOf(field)) === JSON.stringify(draft.before)) {
+    if (draft) {
+      draft.texts = [];
+    }
     return;
   }
-  const field = state().field;
   await state().store.saveFieldWeather(field.id, { base_lat: field.base_lat ?? null, base_lng: field.base_lng ?? null, weather: field.weather || {} });
   for (const text of [...new Set(draft.texts)]) {
     record({ kind: "field.weather", plan: false, target: ["field", field.id], text });
   }
-  draft.before = { base_lat: field.base_lat, base_lng: field.base_lng, weather: { ...(field.weather || {}) } };
+  draft.before = weatherOf(field);
   draft.texts = [];
   syncWeather();
   ctx.onWeatherChanged?.();
@@ -164,13 +167,15 @@ export function cancelWeatherDraft() {
 async function saveSettings(change, text) {
   const field = state().field;
   const before = { base_lat: field.base_lat, base_lng: field.base_lng, weather: { ...weatherSettings() } };
-  change(field);
   if (draft) {
+    draft.hooks.before?.();
+    change(field);
     draft.texts.push(text);
-    draft.onChange?.();
+    draft.hooks.after?.();
     await renderWeatherSettings();
     return;
   }
+  change(field);
   try {
     await state().store.saveFieldWeather(field.id, { base_lat: field.base_lat ?? null, base_lng: field.base_lng ?? null, weather: field.weather || {} });
     record({ kind: "field.weather", plan: false, target: ["field", field.id], text });

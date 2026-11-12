@@ -47,7 +47,7 @@ import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { initProcessEditor } from "./process-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
-import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather, renderWeatherSettings, syncWeather, weatherDraftDirty } from "./weather-view.js";
+import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { currentBlockId, ganttHasFocus, initSchedule, openInSchedule, openProcessPlan, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash, selectedRowPreset } from "./schedule-view.js";
@@ -2530,7 +2530,9 @@ map.addEventListener("pointerdown", (event) => {
   const detail = labelHit?.detail;
   // 作図の道具が出ていないときは、図形を動かさず、図を動かす（pan）。離したときは、図形を選ぶか、品目名から作付の詳細を開くだけ
   const editing = drawingToolsShown();
-  if (!editing && state.mode !== "select") {
+  // 圃場の設定の窓では、図形を描く道具は出さないが、下絵の 2 点の距離と位置合わせのクリックは受ける
+  const settingsClick = settings.open && (state.mode === "scale" || state.mode === "align");
+  if (!editing && state.mode !== "select" && !settingsClick) {
     // PC の幅で道具を選んだまま、画面を狭めたとき。道具は見えないので、選択に戻す
     setMode("select");
   }
@@ -2930,6 +2932,7 @@ function settingsSnapshot() {
     transforms: [...settings.transforms],
     records: [...settings.records],
     view: { ...state.view },
+    weather: { base_lat: state.field.base_lat ?? null, base_lng: state.field.base_lng ?? null, weather: structuredClone(state.field.weather || {}) },
   };
 }
 
@@ -2948,14 +2951,16 @@ function restoreSnapshot(snap) {
   }
   settings.transforms = [...snap.transforms];
   settings.records = [...snap.records];
+  Object.assign(state.field, structuredClone(snap.weather));
   setView(snap.view);
   render();
+  renderWeatherSettings();
 }
 
 // 保存するものが変わったかを見分ける写しの要約（表示の位置や画像の大きさは含めない）
 const settingsKey = (snap) =>
-  JSON.stringify({ backdrop: snap.backdrop && { ...snap.backdrop, size: null }, outline: snap.outline, viewDirs: snap.viewDirs, shapes: snap.shapes, transforms: snap.transforms.length });
-const settingsDirty = () => settings.open && (settingsKey(settingsSnapshot()) !== settingsKey(settings.start) || weatherDraftDirty());
+  JSON.stringify({ backdrop: snap.backdrop && { ...snap.backdrop, size: null }, outline: snap.outline, viewDirs: snap.viewDirs, shapes: snap.shapes, transforms: snap.transforms.length, weather: snap.weather });
+const settingsDirty = () => settings.open && settingsKey(settingsSnapshot()) !== settingsKey(settings.start);
 
 // 調整を 1 回する前に呼ぶ。いまの状態を「元に戻す」の履歴に積む
 function markStep() {
@@ -2992,7 +2997,8 @@ async function openFieldSettings() {
   setMode("select");
   Object.assign(settings, { open: true, undo: [], redo: [], transforms: [], records: [] });
   settings.start = settingsSnapshot();
-  beginWeatherDraft(renderSettingsFoot);
+  // 気象の欄を変える前に、元に戻すの区切りを入れる。変えたあとに、下の欄を描き直す
+  beginWeatherDraft({ before: markStep, after: renderSettingsFoot });
   const frame = document.querySelector("#appView .map-frame");
   settings.home = { parent: frame.parentElement, next: frame.nextSibling };
   $("settingsMapSlot").append($("hint"), frame);
