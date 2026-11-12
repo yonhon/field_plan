@@ -1186,7 +1186,8 @@ function enterMode(mode) {
     button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
   });
   map.classList.toggle("is-drawing", mode !== "select");
-  $("hint").textContent = HINTS[mode === "scale" && state.backdrop?.fitted ? "scaleFitted" : mode];
+  // 圃場の設定の窓の中では、図形を描くときの案内（選択）は出さない
+  $("hint").textContent = settings.open && mode === "select" ? "" : HINTS[mode === "scale" && state.backdrop?.fitted ? "scaleFitted" : mode];
   $("draftTools").hidden = mode !== "outline" && mode !== "zone";
   $("sizeTools").hidden = mode !== "size";
   $("splitTools").hidden = mode !== "split";
@@ -1360,7 +1361,9 @@ function alignStep() {
     // 1 つ目の目印は、いまは図形の上の点にある。次のクリックは、2 組目の下絵の上の目印
     state.draft = [clicks[1], clicks[1]];
     state.alignAt = clicks[1];
-    $("hint").textContent = "向きも合わせるときは、下絵の上の 2 つ目の目印をクリック（1 つ目から離れた点ほど正確です）。位置だけでよければ Esc。";
+    $("hint").textContent =
+      "位置を合わせました。向きも合わせるときは、下絵の上の 2 つ目の目印をクリック（1 つ目から離れた点ほど正確です）。" +
+      "2 組目まで合わせると、図形と下絵の大きさの差も測れ、「図形を下絵の縮尺に合わせる」が使えるようになります。位置だけでよければ Esc。";
     renderMap();
   } else if (clicks.length === 3) {
     $("hint").textContent = "その 2 つ目の目印が来るべき、図形の上の点をクリック。";
@@ -1374,6 +1377,14 @@ function alignStep() {
     adjustRecord({ kind: "backdrop.turn", plan: false, text: "下絵の向きを、図形に合わせた（図形は変わらない）", after: `${round2(backdrop.rotation_deg)} 度` });
     setMode("select");
     const percent = (ratio - 1) * 100;
+    // 窓の中では、測った差と、次にできることを案内に残す
+    if (settings.open) {
+      $("hint").textContent =
+        Math.abs(percent) < 0.5
+          ? `位置と向きを合わせました。図形と下絵の大きさは、ほぼ合っています（差 ${Math.abs(percent).toFixed(1)}%）。`
+          : `位置と向きを合わせました。図形は、下絵の尺度より ${Math.abs(percent).toFixed(1)}% ${percent > 0 ? "大きく" : "小さく"}なっています。` +
+            "図形のほうを直すときは「図形を下絵の縮尺に合わせる」を押します。";
+    }
     notify(
       Math.abs(percent) < 0.5
         ? `図形と下絵の大きさは、ほぼ合っています（差 ${Math.abs(percent).toFixed(1)}%）。`
@@ -3046,7 +3057,7 @@ async function openFieldSettings() {
 
 // 閉じる。保存していない変更があれば、捨ててよいかを確かめる
 async function requestCloseSettings() {
-  if (settingsDirty() && !(await confirmAction({ message: "まだ保存していない設定があります。この設定は消えます。", action: "破棄", cancel: "入力を続ける" }))) {
+  if (settingsDirty() && !(await confirmAction({ message: "まだ保存していない設定があります。この設定は消えます。", action: "捨てて閉じる", cancel: "入力を続ける" }))) {
     return;
   }
   setMode("select");

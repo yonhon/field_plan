@@ -77,7 +77,7 @@ test("圃場の設定: 回転は書きかけで、元に戻す・やり直すで
   // もう一度変えて、保存しないで閉じる: 捨ててよいかを確かめ、開いたときの状態（保存した 10 度）に戻る
   await setRotation(25);
   await page.click("#fieldSettingsClose");
-  assert.equal(await page.run(`document.querySelector('dialog.notice [data-action="delete"]').textContent`), "破棄");
+  assert.equal(await page.run(`document.querySelector('dialog.notice [data-action="delete"]').textContent`), "捨てて閉じる");
   await page.click('dialog.notice [data-action="delete"]');
   await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる");
   assert.equal(await savedRotation(), 10);
@@ -150,6 +150,24 @@ test("圃場の設定: 縮尺のタブで、図の上の 2 点を押して縮尺
   await page.run(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
   await page.click("#settingsUndo");
   await page.waitFor(`document.getElementById("settingsStatus").textContent === "変更はありません"`, "元に戻す");
+
+  // 2 組を合わせると、大きさの差が測れて「図形を下絵の縮尺に合わせる」が押せるようになる。押すと図形の大きさが変わる
+  assert.equal(await page.run(`document.getElementById("fitShapesBtn").disabled`), true, "合わせる前は押せない");
+  await page.click(`${DIALOG} .mode-btn[data-mode="align"]`);
+  for (const point of [[10, 10], [11, 10], [30, 15], [31, 15.5]]) {
+    await page.clickMap(point);
+  }
+  await page.waitFor(`!document.getElementById("fitShapesBtn").disabled`, "押せるようになる");
+  assert.match(await page.run(`document.getElementById("hint").textContent`), /図形を下絵の縮尺に合わせる/);
+  await page.click("dialog.notice[open] [data-action='close']");
+  await page.click("#fitShapesBtn");
+  await page.waitFor(`!document.getElementById("settingsWarn").hidden`, "すべてのプランの図形に当てることの注意");
+  assert.match(await page.run(`document.getElementById("hint").textContent`), /倍にして、下絵の縮尺に合わせました/);
+  // 元に戻すは 3 回ぶん（位置合わせの 1 組目と 2 組目、図形の大きさ）
+  for (let i = 0; i < 3; i += 1) {
+    await page.click("#settingsUndo");
+  }
+  await page.waitFor(`document.getElementById("settingsStatus").textContent === "変更はありません"`, "3 回の元に戻すで、開いたときに戻る");
 
   // 気象: 基準点の緯度を変えて、元に戻す
   await page.click(`${DIALOG} [data-fstab="weather"]`);
