@@ -4359,9 +4359,9 @@ dialog.field-settings::backdrop {
   font-weight: 700;
 }
 
-/* PC: 欄の高さを決め（作業の行で 5 行ぶんほど）、はみ出す分は欄の中で送る */
+/* PC: 欄の高さを決め（作業の行で 3〜4 行ぶん）、はみ出す分は欄の中で送る */
 .wt-body {
-  height: 220px;
+  height: 150px;
   overflow-y: auto;
   padding: 2px 12px;
   border: 1px solid var(--line);
