@@ -130,7 +130,21 @@ test("外形の角を動かすのは、圃場の設定の窓の「外形」だ�
   assert.notEqual(await text("areaField"), "800 ㎡（8.0 a）");
   await page.click("#settingsUndo");
   await page.waitFor(`document.getElementById("areaField").textContent === "800 ㎡（8.0 a）"`, "元に戻す");
+  // 外形を描き足して選んだまま、保存しないで閉じる: 描いた外形はなくなり、窓が閉じる
+  await page.click(`${DIALOG} .mode-btn[data-mode="outline"]`);
+  for (const point of [[5, 5], [15, 5], [15, 10]]) {
+    await page.clickMap(point);
+  }
+  await page.click("#fsDraftDone");
+  await page.waitFor(`document.getElementById("fsDeleteOutline").disabled === false`, "描いた外形を選ぶ");
+  await page.click("#fieldSettingsClose");
+  await page.click(CONFIRM);
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "捨てて閉じる");
+  assert.equal(await page.run(`document.querySelectorAll('#shapeTree li[data-shape^="outline:"]').length`), 1);
+  assert.deepEqual(page.errors, []);
+  await openOutlineTab();
   // ほかのタブに移ると、外形は選ばない
+  await page.clickMap([20, 10]);
   await page.click(`${DIALOG} [data-fstab="scale"]`);
   assert.equal(await page.run(`document.querySelectorAll("#map .handle").length`), 0);
   await page.click("#fieldSettingsClose");

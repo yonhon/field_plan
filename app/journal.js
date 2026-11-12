@@ -18,6 +18,21 @@ let updates = []; // アプリの更新（updates.json の中身）
 const unsaved = new Set(); // まだ保存していない記録
 let saveTimer = null;
 let saving = false;
+let held = null; // 図の編集のあいだ溜めておく記録（record の引数）。保存したら記録し、捨てたら捨てる
+
+// 図の編集を始めるときに呼ぶ。それからの記録は、releaseRecords まで溜めておく
+export function holdRecords() {
+  held = [];
+}
+
+// 溜めた記録を、commit なら記録し、そうでなければ捨てる。溜めるのはやめる
+export function releaseRecords(commit) {
+  const list = held || [];
+  held = null;
+  if (commit) {
+    list.forEach((args) => record(args));
+  }
+}
 
 // 変更を 1 件記録する。
 //   kind    操作の種類（例: "bed.width"）。まとめるときの見分けに使う
@@ -28,6 +43,11 @@ let saving = false;
 //   field   どの圃場での変更か。省くといまの圃場（「圃場とプラン」の窓で、開いていない圃場を直すときに渡す）
 export function record({ kind, target = [], text, before = null, after = null, plan, field }) {
   if (!ctx) {
+    return;
+  }
+  if (held) {
+    // 図の編集の書きかけ。どのプラン・圃場の変更かは、いまのものを覚えておく
+    held.push({ kind, target, text, before, after, plan: plan === false ? false : plan || ctx.state.plan, field: field || ctx.state.field });
     return;
   }
   const { state } = ctx;

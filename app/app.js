@@ -42,7 +42,7 @@ import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
-import { initJournal, record, renderJournal, saveJournalNow } from "./journal.js";
+import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { initProcessEditor } from "./process-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
@@ -1057,6 +1057,7 @@ function render() {
   renderMap();
   renderPanel();
   renderOutlineTools();
+  renderEditFoot();
 }
 
 // 圃場の設定の窓の「外形」の、選んだ角・外形を消すボタン
@@ -1083,11 +1084,15 @@ function queueSave(key) {
   }
   pendingSaves.set(key, currentOperation());
   scheduleSaves();
+  renderEditFoot();
 }
 
 // 保存の状態の文字を出す。送り残しがあるあいだは「保存しました」と出さず、送り残しをもう一度送る。
 // 続きの書き込みがあるあいだも出さない（その書き込みが終わったときに出る）
 function setStatus(text) {
+  if (text === "保存しました" && state.mapEditing) {
+    text = EDIT_UNSAVED; // 図の編集の書きかけは、まだ DB に送っていない
+  }
   if (text === "保存しました" && pendingSaves.size) {
     scheduleSaves();
   } else if (text !== "保存しました" || !state.store.writing()) {
@@ -1127,7 +1132,9 @@ document.addEventListener("app-before-reload", (event) => {
 
 // 保存が終わらないうちに閉じると、変更が消える。閉じる前に送り、確かめる
 window.addEventListener("beforeunload", (event) => {
-  if (pendingSaves.size || state.store?.writing()) {
+  if (mapDraft.ops.length) {
+    event.preventDefault(); // 図の編集を保存していない
+  } else if (pendingSaves.size || state.store?.writing()) {
     sendPendingSaves();
     event.preventDefault();
   }
@@ -1160,7 +1167,7 @@ async function flushSaves() {
       }
     }
     if (!pendingSaves.size) {
-      $("saveStatus").textContent = "保存しました";
+      $("saveStatus").textContent = state.mapEditing ? EDIT_UNSAVED : "保存しました";
     }
   } catch (error) {
     saves.filter(([key]) => !pendingSaves.has(key)).forEach(([key, id]) => pendingSaves.set(key, id));
@@ -2542,8 +2549,64 @@ function shapeEditable(key) {
   return outlineEditing() ? isOutline(key) : drawingToolsShown() && !isOutline(key);
 }
 
-// 「図を編集」と「完了」。始めるときも終えるときも、道具は「選択・移動」にする
-function setMapEditing(on) {
+// ---- 図の編集（書きかけ） ----
+// 「図を編集」から「閉じる」までの変更は書きかけ。DB への書き込み（図形、作業、記録など）と変更の記録は送らずに溜め、
+// 「保存する」で、溜めた順に送る。保存しないで閉じたら、編集を始める前の写しに戻す（DB は変わっていない）。
+// 書き込みは、した時点の操作の ID を付けて送る（DB の操作の記録で、1 回の操作としてまとまる）
+const EDIT_UNSAVED = "図の編集を保存していません";
+const DRAFT_WRITES = ["upsert", "remove", "saveField", "saveLog", "deleteLog", "saveWorkType"];
+const mapDraft = { base: null, ops: [], start: null };
+
+// 編集で変わりうるデータの写し
+function editSnapshot() {
+  return structuredClone({
+    outline: state.field.outline,
+    viewDirs: state.field.view_dirs ?? null,
+    zones: state.zones,
+    blocks: state.blocks,
+    beds: state.beds,
+    plantings: state.plantings,
+    works: state.works,
+    logs: state.logs,
+    crops: state.crops,
+    fertilizers: state.fertilizers,
+    workTypes: state.workTypes,
+  });
+}
+
+function restoreEditSnapshot(snap) {
+  const copy = structuredClone(snap);
+  state.field.outline = copy.outline;
+  state.field.view_dirs = copy.viewDirs;
+  for (const key of ["zones", "blocks", "beds", "plantings", "works", "logs", "crops", "fertilizers", "workTypes"]) {
+    state[key] = copy[key];
+  }
+  if (state.selected && !shapePoints(state.selected)) {
+    state.selected = null;
+  }
+  state.selectedVertex = null;
+  state.draft = [];
+  render();
+  renderSchedule();
+  renderCrops();
+  renderLogs();
+  renderPlantingDetail();
+}
+
+function renderEditFoot() {
+  if (!state.mapEditing) {
+    return;
+  }
+  const dirty = mapDraft.ops.length > 0 || pendingSaves.size > 0;
+  $("mapEditSave").disabled = !dirty;
+  if (dirty) {
+    $("mapEditStatus").textContent = "保存していない変更があります";
+  } else if ($("mapEditStatus").textContent !== "保存しました") {
+    $("mapEditStatus").textContent = "編集中";
+  }
+}
+
+function showMapEditing(on) {
   state.mapEditing = on;
   map.closest(".map-frame").classList.toggle("is-editing", on);
   document.body.classList.toggle("map-editing", on);
@@ -2551,6 +2614,81 @@ function setMapEditing(on) {
   $("mapEditBtn").hidden = on;
   setMode("select");
 }
+
+// 「図を編集」。送り残しを送り終えてから、書き込みを溜める店に替える。道具は「選択・移動」から
+async function startMapEditing() {
+  if (state.mapEditing || settings.open || state.planBusy) {
+    return;
+  }
+  await finishSaves();
+  mapDraft.base = state.store;
+  mapDraft.ops = [];
+  mapDraft.start = editSnapshot();
+  const held = DRAFT_WRITES.filter((name) => mapDraft.base[name]).map((name) => [
+    name,
+    async (...args) => {
+      mapDraft.ops.push({ name, args: structuredClone(args), op: currentOperation() });
+      renderEditFoot();
+    },
+  ]);
+  state.store = { ...mapDraft.base, ...Object.fromEntries(held) };
+  holdRecords();
+  $("mapEditStatus").textContent = "編集中";
+  showMapEditing(true);
+}
+
+// 「保存する」。溜めた書き込みを順に送り、変更の記録も残す。編集は続ける。送れなかった分は残して、次に送る
+async function saveMapEditing() {
+  await sendPendingSaves();
+  $("mapEditStatus").textContent = "保存中…";
+  $("mapEditSave").disabled = true;
+  try {
+    while (mapDraft.ops.length) {
+      const { name, args, op } = mapDraft.ops[0];
+      await duringOperation(op, () => mapDraft.base[name](...args));
+      mapDraft.ops.shift();
+    }
+    releaseRecords(true);
+    holdRecords();
+    mapDraft.start = editSnapshot();
+    $("mapEditStatus").textContent = "保存しました";
+    $("saveStatus").textContent = "保存しました";
+  } catch (error) {
+    $("mapEditStatus").textContent = `保存できませんでした: ${error.message}`;
+    notifySaveFailed(error);
+  }
+  renderEditFoot();
+}
+
+// 「閉じる」。保存していない変更があれば、捨ててよいかを確かめ、捨てると編集を始める前に戻す。閉じたら true
+async function closeMapEditing() {
+  if (!state.mapEditing) {
+    return true;
+  }
+  await sendPendingSaves();
+  const changed = mapDraft.ops.length > 0 && JSON.stringify(editSnapshot()) !== JSON.stringify(mapDraft.start);
+  if (changed && !(await confirmAction({ message: "まだ保存していない図の変更があります。この変更は消えます。", action: "捨てて閉じる", cancel: "編集を続ける" }))) {
+    return false;
+  }
+  // 変更がない（元に戻して始めと同じになった）ときも、溜めた書き込みは送らない
+  mapDraft.ops = [];
+  releaseRecords(false);
+  state.store = mapDraft.base;
+  showMapEditing(false);
+  if (changed) {
+    restoreEditSnapshot(mapDraft.start);
+    resetHistory(); // 元に戻すの履歴には、捨てた変更が入っている
+  }
+  $("saveStatus").textContent = "";
+  return true;
+}
+
+// 図の編集中に、圃場とプランの窓や圃場の設定の窓を開くとき。先に編集を閉じる（保存していなければ確かめる）
+const afterMapEditing = (open) => async () => {
+  if (await closeMapEditing()) {
+    open();
+  }
+};
 
 function closeMapMenus() {
   document.querySelectorAll(".map-menu").forEach((menu) => (menu.hidden = true));
@@ -2901,8 +3039,9 @@ $("fsDraftDone").addEventListener("click", finishDraft);
 $("fsDraftCancel").addEventListener("click", () => setMode("select"));
 $("fsDeleteVertex").addEventListener("click", deleteSelectedVertex);
 $("fsDeleteOutline").addEventListener("click", deleteSelectedShape);
-$("mapEditBtn").addEventListener("click", () => setMapEditing(true));
-$("mapEditDone").addEventListener("click", () => setMapEditing(false));
+$("mapEditBtn").addEventListener("click", startMapEditing);
+$("mapEditSave").addEventListener("click", saveMapEditing);
+$("mapEditDone").addEventListener("click", closeMapEditing);
 // 区域・耕起対象区画のメニュー。押すと開き、もう一度押すか、ほかの所を押すと閉じる
 document.querySelectorAll("[data-map-menu]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -3081,6 +3220,11 @@ function restoreSnapshot(snap) {
       }
     }
   }
+  // 戻した状態にない図形（描いたばかりの外形など）は選ばない。角の番号も変わることがあるので外す
+  if (state.selected && !shapePoints(state.selected)) {
+    state.selected = null;
+  }
+  state.selectedVertex = null;
   settings.transforms = [...snap.transforms];
   settings.records = [...snap.records];
   Object.assign(state.field, structuredClone(snap.weather));
@@ -3126,7 +3270,7 @@ async function openFieldSettings() {
   }
   // それまでの図形の保存を先に済ませる（窓を開いているあいだの保存の予約は止めるので）
   await sendPendingSaves();
-  setMapEditing(false);
+  setMode("select");
   Object.assign(settings, { open: true, undo: [], redo: [], transforms: [], records: [] });
   settings.start = settingsSnapshot();
   // 気象の欄を変える前に、元に戻すの区切りを入れる。変えたあとに、下の欄を描き直す
@@ -3479,7 +3623,7 @@ async function startApp() {
   $("appView").hidden = false;
   $("viewTabs").hidden = false;
   initFieldPlans({ state, notify, ops: fieldPlanOps });
-  setPlaceActions({ choose: openFieldPlans, settings: openFieldSettings });
+  setPlaceActions({ choose: afterMapEditing(openFieldPlans), settings: afterMapEditing(openFieldSettings) });
   renderPlans();
   fitView();
   setMode("select");

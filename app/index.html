@@ -113,7 +113,8 @@
         <div class="map-frame">
           <!-- 図の上に重ねる欄。編集中は道具の帯、その下に表示日・下絵と、図を編集・PDF出力（帯の高さに合わせて下がる） -->
           <div class="map-top">
-          <!-- 図の編集の道具の帯。「図を編集」で出し、「完了」で隠す。ふだんの図は、選ぶ・見るだけ（動かさない）。
+          <!-- 図の編集の道具の帯。「図を編集」で出し、「閉じる」で隠す。ふだんの図は、選ぶ・見るだけ（動かさない）。
+               編集は書きかけで、「保存する」でまとめて保存する。保存しないで閉じると、編集を始める前に戻す。
                道具は全体で 1 つだけ選べ、使い終えると「選択・移動」に戻る。スマホの幅では出さない。外形は圃場の設定の窓で描く -->
           <div id="mapBand" class="map-band edit-only" role="group" aria-label="図の編集" hidden>
             <div class="map-band-row">
@@ -128,8 +129,9 @@
                 <p id="hint" class="hint"></p>
               </details>
               <span class="map-band-space"></span>
-              <span class="muted map-band-state">編集中</span>
-              <button id="mapEditDone" class="primary-btn">完了</button>
+              <span id="mapEditStatus" class="muted map-band-state">編集中</span>
+              <button id="mapEditSave" class="primary-btn" disabled>保存する</button>
+              <button id="mapEditDone" class="text-btn">閉じる</button>
             </div>
             <div id="zoneMenu" class="map-menu" data-menu-of="zone" hidden>
               <h4>区域の種類</h4>

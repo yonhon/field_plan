@@ -265,6 +265,8 @@ test("区域を作ってすぐ区画にする: 区域の保存を待たずに操
   await page.click("#map");
   await page.run(`document.querySelector('.mode-btn[data-mode="block"]').click()`);
   await page.click("#map");
+  await page.click("#mapEditSave");
+  await page.waitFor(`document.getElementById("mapEditStatus").textContent === "保存しました"`, "図の編集の保存");
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).blocks.length === 1`, "区画の保存");
   assert.equal((await page.saved()).zones.length, 1);
   assert.equal(await page.run(`Boolean(${openDialog})`), false);
@@ -333,7 +335,8 @@ test("圃場図: 中身のない区域を選ぶと最上段に見え、ドラッ
   assert.equal(await page.run(isSelected("z2")), true, "押しても区域を選んだまま");
 
   await page.drag("#map", 60);
-  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "移動の保存");
+  await page.click("#mapEditSave");
+  await page.waitFor(`document.getElementById("mapEditStatus").textContent === "保存しました"`, "図の編集の保存");
   assert.notEqual(await shapeX("zones", "z2"), zone);
   assert.equal(await shapeX("blocks", "b1"), block, "ほかの区域の区画は動かない");
   assert.deepEqual(page.errors, []);
@@ -348,7 +351,8 @@ test("圃場図: 区域を選ぶと、区域、区画、畝の順で最上段に
   assert.equal(await drawnInOrder("z2", "z1", "b1", "bed1"), true);
 
   await page.drag("#map", 60);
-  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "移動の保存");
+  await page.click("#mapEditSave");
+  await page.waitFor(`document.getElementById("mapEditStatus").textContent === "保存しました"`, "図の編集の保存");
   assert.notEqual(await shapeX("zones", "z1"), zone, "区域が動く");
   assert.notEqual(await shapeX("blocks", "b1"), block, "中の区画も一緒に動く");
 
