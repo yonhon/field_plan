@@ -750,7 +750,7 @@ function printGantt() {
   copy.querySelectorAll(".is-picked, .is-selected").forEach((element) => element.classList.remove("is-picked", "is-selected"));
   printPage({
     name: "工程表",
-    title: `工程表　プラン: ${$("schedulePlanName").textContent}${ganttBlockId() ? `　${state().blocks.find((block) => block.id === ganttBlockId())?.name || ""}` : ""}　出力日: ${fullDay(localToday())}`,
+    title: `工程表　プラン: ${state().plan.name}${ganttBlockId() ? `　${state().blocks.find((block) => block.id === ganttBlockId())?.name || ""}` : ""}　出力日: ${fullDay(localToday())}`,
     body: `<div style="zoom:${zoom}">${copy.innerHTML}</div>`,
     landscape: true,
   });

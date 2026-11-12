@@ -45,7 +45,7 @@ const opened = () =>
   page.run(`({
     field: document.getElementById("brandMenu").dataset.field,
     plan: document.getElementById("brandMenu").dataset.plan,
-    planName: document.getElementById("schedulePlanName").textContent,
+    planName: document.getElementById("brandPlan").textContent.replace(/ ⚠$/, ""),
   })`);
 
 // ヘッダーのメニューの「圃場とプランを選ぶ…」で窓を開き、その圃場のプランを「開く」

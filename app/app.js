@@ -2190,7 +2190,6 @@ async function deleteField(field) {
 }
 
 function renderPlans() {
-  $("schedulePlanName").textContent = state.plan.name;
   renderPlace();
   renderPlanButtons();
   renderLogs();
