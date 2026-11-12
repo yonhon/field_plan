@@ -4076,8 +4076,10 @@ dialog.field-plans::backdrop {
   font-size: 17px;
 }
 
+/* 窓の高さは決めず（中身に合わせ、上限は 90vh）、中身の欄は中身の高さを基準にする。flex: 1（基準 0）だと、
+   Safari 系（iPad の Chrome も）は高さの決まっていない窓の残りを 0 と計算し、中身の欄が消える */
 .fp-body {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   display: grid;
