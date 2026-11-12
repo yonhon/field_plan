@@ -86,14 +86,13 @@
             <ul id="weekList" class="week-list"></ul>
           </section>
 
-          <section class="panel">
-            <div class="panel-heading">
-              <h2 id="logTitle">最近の実績</h2>
-              <button id="logToggle" class="text-btn" hidden>すべて</button>
-            </div>
+          <!-- 最近の実績。ふだんは閉じておく（開いているかはブラウザーが覚える） -->
+          <details id="logFold" class="panel fold-panel">
+            <summary><h2 id="logTitle">最近の実績</h2></summary>
+            <div class="fold-tools"><button id="logToggle" class="text-btn" hidden>すべて</button></div>
             <p id="logNote" class="muted" hidden></p>
             <ul id="logList" class="week-list log-list"></ul>
-          </section>
+          </details>
         </div>
 
         <div class="toolbar edit-only" role="group" aria-label="操作">
@@ -149,7 +148,11 @@
             </label>
           </span>
         </div>
-        <p id="hint" class="hint edit-only"></p>
+        <!-- 図の操作の説明。ふだんは閉じておく（圃場の設定の窓を開いているあいだは、説明だけを窓の中へ移して出す） -->
+        <details id="hintFold" class="strip-detail hint-fold edit-only">
+          <summary>操作の説明</summary>
+          <p id="hint" class="hint"></p>
+        </details>
         <div class="map-frame">
           <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="圃場図"></svg>
           <button id="mapPdfBtn" class="chip-btn map-pdf" title="圃場の全体を、下絵なしで PDF にします">PDF出力</button>
@@ -179,7 +182,10 @@
               <button id="pastePickedBtn" class="chip-btn">貼り付け</button>
               <button id="deletePickedBtn" class="text-btn danger">削除</button>
             </div>
-            <p class="muted edit-only">行や帯を押すと、その区画（畝）を選びます。選んだ行は、貼り付けの入れ先と、圃場図の右下の「＋ 入力する」の対象になります。帯は Ctrl を押しながらで複数選べ（同じ行の中）、ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。管理作業（防除、除草など）の帯は、押すと計画の窓も開き、Ctrl を押しながら横に動かして離すと、その日へコピーします。区画の名前を押すと、日程の画面でその区画を開きます。畝・品目の名前を押すと、作付の詳細を開きます。</p>
+            <details class="strip-detail edit-only">
+              <summary>操作の説明</summary>
+              <p class="muted">行や帯を押すと、その区画（畝）を選びます。選んだ行は、貼り付けの入れ先と、圃場図の右下の「＋ 入力する」の対象になります。帯は Ctrl を押しながらで複数選べ（同じ行の中）、ドラッグで日をずらし、別の行へドラッグすると移動します（Ctrl を押しながら離すとコピー）。管理作業（防除、除草など）の帯は、押すと計画の窓も開き、Ctrl を押しながら横に動かして離すと、その日へコピーします。区画の名前を押すと、日程の画面でその区画を開きます。畝・品目の名前を押すと、作付の詳細を開きます。</p>
+            </details>
             <div id="gantt"></div>
           </section>
         </div>

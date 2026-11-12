@@ -1817,6 +1817,19 @@ export function initLogs(context) {
     },
     notify: (text) => ctx.setStatus(text),
   });
+  // 最近の実績の折りたたみ。開いているかを覚えておく（覚えられなくても、閉じた形で出すだけ）
+  try {
+    $("logFold").open = localStorage.getItem("field_plan_log_open") === "1";
+  } catch {
+    // 覚えていなければ閉じたまま
+  }
+  $("logFold").addEventListener("toggle", () => {
+    try {
+      localStorage.setItem("field_plan_log_open", $("logFold").open ? "1" : "0");
+    } catch {
+      // 覚えられなくてもよい
+    }
+  });
   $("logToggle").addEventListener("click", () => {
     showAll = !showAll;
     renderLogs();

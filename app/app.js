@@ -3068,7 +3068,7 @@ async function requestCloseSettings() {
   settings.open = false;
   const frame = $("settingsMapSlot").querySelector(".map-frame");
   settings.home.parent.insertBefore(frame, settings.home.next);
-  settings.home.parent.insertBefore($("hint"), frame);
+  $("hintFold").append($("hint"));
   $("fieldSettings").close();
   renderWeatherSettings();
   render();

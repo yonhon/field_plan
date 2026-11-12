@@ -4291,3 +4291,48 @@ dialog.field-settings::backdrop {
 .draft.draft-area {
   fill: rgba(206, 77, 65, 0.12);
 }
+
+/* 見出しで開け閉めする欄（最近の実績）。見出しの左に ▶ / ▼ を出す */
+.fold-panel > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.fold-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.fold-panel > summary::before {
+  content: "▶";
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.fold-panel[open] > summary::before {
+  content: "▼";
+}
+
+.fold-panel > summary h2 {
+  margin: 0;
+}
+
+.fold-panel[open] > summary {
+  margin-bottom: 4px;
+}
+
+.fold-tools {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 図の上の「操作の説明」 */
+.hint-fold {
+  margin: 4px 0 6px;
+}
+
+.hint-fold .hint {
+  margin: 4px 0 0;
+}
