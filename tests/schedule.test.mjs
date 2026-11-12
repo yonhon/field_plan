@@ -120,6 +120,7 @@ test("管理作業の計画は、ほかの作業と重なっても指摘しな�
 
 test("作業の名前に、株の手入れとその他の中身を添える", () => {
   assert.equal(workName("株の手入れ", { items: ["摘葉", "誘引"] }), "株の手入れ（摘葉・誘引）");
+  assert.equal(workName("株の手入れ", { items: ["中耕", "土寄せ"] }), "株の手入れ（中耕・土寄せ）");
   assert.equal(workName("その他", { items: ["発芽確認"] }), "その他（発芽確認）");
   assert.equal(workName("その他", { items: ["その他"], other: "支柱の撤去" }), "その他（支柱の撤去）");
   assert.equal(workName("防除", {}), "防除");
