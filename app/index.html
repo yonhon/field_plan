@@ -115,10 +115,13 @@
           <div class="map-top">
           <!-- 図の編集の道具の帯。「図を編集」で出し、「閉じる」で隠す。ふだんの図は、選ぶ・見るだけ（動かさない）。
                編集は書きかけで、「保存する」でまとめて保存する。保存しないで閉じると、編集を始める前に戻す。
-               道具は全体で 1 つだけ選べ、使い終えると「選択・移動」に戻る。スマホの幅では出さない。外形は圃場の設定の窓で描く -->
+               道具は全体で 1 つだけ選べ、使い終えると「選択・移動」に戻る。スマホの幅では出さない -->
           <div id="mapBand" class="map-band edit-only" role="group" aria-label="図の編集" hidden>
             <div class="map-band-row">
-              <span class="seg"><button class="mode-btn is-active" data-mode="select" aria-pressed="true">選択・移動</button></span>
+              <span class="seg">
+                <button class="mode-btn is-active" data-mode="select" aria-pressed="true">選択・移動</button>
+                <button class="mode-btn" data-mode="outline" aria-pressed="false">外形を描く</button>
+              </span>
               <span class="seg">
                 <button class="mode-btn map-dd" data-map-menu="zone" aria-expanded="false">区域</button>
                 <button class="mode-btn map-dd" data-map-menu="block" aria-expanded="false">耕起対象区画</button>
@@ -381,7 +384,6 @@
           <!-- 日記の「編集 ｜ プレビュー」と同じ、中身の枠の真上につなげたタブ -->
           <div class="fs-tabs" role="tablist" aria-label="圃場の設定">
             <button type="button" role="tab" class="fs-tab is-on" data-fstab="image" aria-selected="true">下絵</button>
-            <button type="button" role="tab" class="fs-tab" data-fstab="outline" aria-selected="false">外形</button>
             <button type="button" role="tab" class="fs-tab" data-fstab="scale" aria-selected="false">計測</button>
             <button type="button" role="tab" class="fs-tab" data-fstab="place" aria-selected="false">位置と向き</button>
             <button type="button" role="tab" class="fs-tab" data-fstab="weather" aria-selected="false">気象</button>
@@ -392,21 +394,6 @@
             </div>
             <label class="check"><input class="backdrop-visible" type="checkbox" checked />下絵を表示</label>
             <p id="backdropRole" class="muted"></p>
-          </div>
-          <!-- 圃場の外形。描く・頂点を動かす・消す。ほかの設定と同じく、「保存する」でまとめて保存する -->
-          <div class="fs-panel" data-fspanel="outline" hidden>
-            <p class="muted">図の上の外形を押すと選べます。角の丸をドラッグすると動き、辺の中ほどの丸をドラッグすると角が増えます。</p>
-            <div class="row wrap">
-              <button type="button" class="chip-btn mode-btn" data-mode="outline">外形を描く</button>
-              <span id="fsDraftTools" hidden>
-                <button type="button" id="fsDraftDone" class="primary-btn">確定</button>
-                <button type="button" id="fsDraftCancel" class="text-btn">取り消し</button>
-              </span>
-            </div>
-            <div class="row wrap">
-              <button type="button" id="fsDeleteVertex" class="chip-btn" disabled>選んだ角を削除</button>
-              <button type="button" id="fsDeleteOutline" class="chip-btn" disabled>選んだ外形を削除</button>
-            </div>
           </div>
           <div class="fs-panel" data-fspanel="scale" hidden>
             <p class="muted">縮尺: <span id="scaleText">-</span></p>

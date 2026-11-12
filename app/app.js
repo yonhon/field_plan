@@ -973,9 +973,8 @@ function renderSelection() {
   $("blockFields").hidden = kind !== "block";
   $("bedFields").hidden = kind !== "bed";
   $("edgeTable").hidden = kind === "bed";
-  // 外形は、圃場の設定の窓の「外形」で消す
-  $("deleteVertexBtn").hidden = kind === "bed" || kind === "outline";
-  $("deleteShapeBtn").hidden = kind === "bed" || kind === "outline";
+  $("deleteVertexBtn").hidden = kind === "bed";
+  $("deleteShapeBtn").hidden = kind === "bed";
   // 区画は日程の画面で開く。畝は、図に出ている作付（表示日の作付）の詳細を開く。作付のない畝には出さない
   $("openScheduleBtn").hidden = !(kind === "block" || (kind === "bed" && plantingOn(item)));
   $("openScheduleBtn").textContent = kind === "bed" ? "作付の詳細を開く" : "日程で開く";
@@ -1056,15 +1055,7 @@ function renderSelection() {
 function render() {
   renderMap();
   renderPanel();
-  renderOutlineTools();
   renderEditFoot();
-}
-
-// 圃場の設定の窓の「外形」の、選んだ角・外形を消すボタン
-function renderOutlineTools() {
-  const outline = isOutline(state.selected) ? shapePoints(state.selected) : null;
-  $("fsDeleteOutline").disabled = !outline;
-  $("fsDeleteVertex").disabled = !outline || state.selectedVertex === null || outline.length <= 3;
 }
 
 // ---- 保存 ----
@@ -1214,8 +1205,7 @@ function enterMode(mode) {
   map.classList.toggle("is-drawing", mode !== "select");
   // 圃場の設定の窓の中では、図形を描くときの案内（選択）は出さない
   $("hint").textContent = settings.open && mode === "select" ? "" : HINTS[mode === "scale" && state.backdrop?.fitted ? "scaleFitted" : mode];
-  $("draftTools").hidden = mode !== "zone";
-  $("fsDraftTools").hidden = mode !== "outline";
+  $("draftTools").hidden = mode !== "outline" && mode !== "zone";
   $("sizeTools").hidden = mode !== "size";
   $("splitTools").hidden = mode !== "split";
   render();
@@ -2538,16 +2528,8 @@ function drawingToolsShown() {
   return getComputedStyle($("mapBand")).display !== "none";
 }
 
-// 圃場の設定の窓の「外形」のタブを開いているか。このときだけ、外形を描き、角を動かせる
-const outlineEditing = () => settings.open && document.querySelector("[data-fstab].is-on")?.dataset.fstab === "outline";
-
-// いま、角や辺を動かせる図形か。外形は圃場の設定の窓で、ほかは「図を編集」のあいだだけ
-function shapeEditable(key) {
-  if (!key) {
-    return false;
-  }
-  return outlineEditing() ? isOutline(key) : drawingToolsShown() && !isOutline(key);
-}
+// いま、角や辺を動かせる図形か。「図を編集」のあいだだけ
+const shapeEditable = (key) => Boolean(key) && drawingToolsShown();
 
 // ---- 図の編集（書きかけ） ----
 // 「図を編集」から「閉じる」までの変更は書きかけ。DB への書き込み（図形、作業、記録など）と変更の記録は送らずに溜め、
@@ -2683,6 +2665,75 @@ async function closeMapEditing() {
   return true;
 }
 
+// 図の編集中に押されたら止める、DB を変える操作の入口。図の編集の書きかけと食い違わないように、押した時点で止めて知らせる。
+// 見るだけの操作（画面の切り替え、表示期間、作付の詳細を開くなど）と、日記・ニュースの確認は止めない。
+// ここにない入口から書き込んでも、書き込みは図の編集の書きかけに入る（黙って保存されることはない）
+const EDIT_GUARDED = [
+  "#logAddBtn",
+  "#weekList [data-week]",
+  "#lateList [data-week]",
+  "#logList [data-log]",
+  "#gantt .gantt-bar",
+  "#gantt .gantt-actual-bar",
+  "#copyPickedBtn",
+  "#cutPickedBtn",
+  "#pastePickedBtn",
+  "#deletePickedBtn",
+  "#strip",
+  ".strip-tools",
+  "#typeRows :is(input, select, textarea, button)",
+  "#addCropBtn",
+  "#addFertilizerBtn",
+  "#cropTable :is(input, select, textarea, button)",
+  "#fertilizerTable :is(input, select, textarea, button)",
+  ...["#plantingBody", "#blockRecord", "#blockHead"].map(
+    (box) => `${box} :is([data-log], [data-plan-edit], [data-uncancel], [data-plan], [data-act="record"], [data-act="reschedule"])`
+  ),
+].join(", ");
+const EDIT_GUARD_FREE = "#strip [data-open], #strip [data-planting]"; // 畝の図の中でも、作付の詳細を開くのは止めない
+const EDIT_GUARD_TEXT = "図の編集中です。圃場図の上の帯の「保存する」か「閉じる」で、編集を終えてから操作してください。";
+
+const guarded = (target) => state.mapEditing && target instanceof Element && Boolean(target.closest(EDIT_GUARDED)) && !target.closest(EDIT_GUARD_FREE);
+
+// 押し始め（ドラッグの始まり、入力欄に入る、選ぶ欄が開く）は黙って止め、クリックで知らせる
+for (const type of ["pointerdown", "mousedown"]) {
+  document.addEventListener(
+    type,
+    (event) => {
+      if (guarded(event.target)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    true
+  );
+}
+document.addEventListener(
+  "click",
+  (event) => {
+    if (guarded(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      document.activeElement?.blur?.();
+      notify(EDIT_GUARD_TEXT);
+    }
+  },
+  true
+);
+// 工程表のキーの操作（削除、切り取り、貼り付け）も止める
+document.addEventListener(
+  "keydown",
+  (event) => {
+    const ctrl = event.ctrlKey || event.metaKey;
+    if (state.mapEditing && ganttHasFocus() && (event.key === "Delete" || event.key === "Backspace" || (ctrl && ["x", "v"].includes(event.key.toLowerCase())))) {
+      event.preventDefault();
+      event.stopPropagation();
+      notify(EDIT_GUARD_TEXT);
+    }
+  },
+  true
+);
+
 // 図の編集中に、圃場とプランの窓や圃場の設定の窓を開くとき。先に編集を閉じる（保存していなければ確かめる）
 const afterMapEditing = (open) => async () => {
   if (await closeMapEditing()) {
@@ -2745,8 +2796,7 @@ map.addEventListener("pointerdown", (event) => {
   // 作図の道具が出ていないときは、図形を動かさず、図を動かす（pan）。離したときは、図形を選ぶか、品目名から作付の詳細を開くだけ
   const editing = drawingToolsShown();
   // 圃場の設定の窓では、図形を描く道具は出さないが、下絵の 2 点の距離と位置合わせのクリックは受ける
-  const outlineTab = outlineEditing();
-  const settingsClick = settings.open && (state.mode === "scale" || state.mode === "align" || state.mode === "areaMeasure" || (outlineTab && state.mode === "outline"));
+  const settingsClick = settings.open && (state.mode === "scale" || state.mode === "align" || state.mode === "areaMeasure");
   if (!editing && state.mode !== "select" && !settingsClick) {
     // PC の幅で道具を選んだまま、画面を狭めたとき。道具は見えないので、選択に戻す
     setMode("select");
@@ -2944,13 +2994,6 @@ function endPointer(event) {
     return;
   }
   if (state.mode === "select" && settings.open) {
-    // 外形のタブでは、押した位置の外形を選ぶ（区域が上に重なっていても、位置で見る）
-    if (outlineEditing()) {
-      const index = state.field.outline.findIndex((points) => pointInPolygon(world, points));
-      state.selected = index < 0 ? null : outlineKey(index);
-      state.selectedVertex = null;
-      render();
-    }
     return;
   } else if (state.mode === "select") {
     state.selected = finished.shape || null;
@@ -3035,10 +3078,6 @@ document.querySelectorAll(".mode-btn").forEach((button) => {
 });
 $("draftDone").addEventListener("click", finishDraft);
 $("draftCancel").addEventListener("click", () => setMode("select"));
-$("fsDraftDone").addEventListener("click", finishDraft);
-$("fsDraftCancel").addEventListener("click", () => setMode("select"));
-$("fsDeleteVertex").addEventListener("click", deleteSelectedVertex);
-$("fsDeleteOutline").addEventListener("click", deleteSelectedShape);
 $("mapEditBtn").addEventListener("click", startMapEditing);
 $("mapEditSave").addEventListener("click", saveMapEditing);
 $("mapEditDone").addEventListener("click", closeMapEditing);
@@ -3297,11 +3336,6 @@ async function requestCloseSettings() {
   }
   cancelWeatherDraft();
   settings.open = false;
-  // 外形のタブで選んだ外形は、圃場図に戻ったら選ばない
-  if (isOutline(state.selected)) {
-    state.selected = null;
-    state.selectedVertex = null;
-  }
   const frame = $("settingsMapSlot").querySelector(".map-frame");
   settings.home.parent.insertBefore(frame, settings.home.next);
   $("hintFold").append($("hint"));
@@ -3392,10 +3426,6 @@ $("fieldSettings").addEventListener("click", (event) => {
     return;
   }
   setMode("select");
-  // 外形のタブで選んだ外形は、ほかのタブでは選ばない（角の丸を出さない）
-  state.selected = null;
-  state.selectedVertex = null;
-  render();
   document.querySelectorAll("[data-fstab]").forEach((item) => {
     item.classList.toggle("is-on", item === tab);
     item.setAttribute("aria-selected", String(item === tab));

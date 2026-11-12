@@ -21,7 +21,6 @@ const seed = (outline, more = {}) => ({
 });
 
 const CONFIRM = 'dialog.notice [data-action="delete"]';
-const DIALOG = "dialog.field-settings[open]";
 const options = { skip: findChrome() ? false : "Chrome が見つかりません" };
 let page;
 
@@ -39,18 +38,10 @@ const text = (id) => page.run(`document.getElementById(${JSON.stringify(id)}).te
 const badge = () => page.run(`document.getElementById("mapBadge").hidden ? "" : document.getElementById("mapBadge").textContent`);
 const savedOutline = async () => (await page.saved()).fields[0].outline;
 
-async function openOutlineTab() {
-  await page.click("#brandMenu");
-  await page.click('#userMenu [data-action="settings"]');
-  await page.waitFor(`Boolean(document.querySelector("${DIALOG} .map-frame"))`, "設定の窓（図が窓の中にある）");
-  await page.click(`${DIALOG} [data-fstab="outline"]`);
-}
-
-async function saveAndClose() {
-  await page.click("#settingsSave");
-  await page.waitFor(`document.getElementById("settingsStatus").textContent === "保存しました"`, "保存しました");
-  await page.click("#fieldSettingsClose");
-  await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓を閉じる");
+// 図の編集の「保存する」を押して、保存を待つ
+async function saveEdit() {
+  await page.click("#mapEditSave");
+  await page.waitFor(`document.getElementById("mapEditStatus").textContent === "保存しました"`, "図の編集の保存");
 }
 
 test("外形: 離れた部分を描き足すと、面積は合計になり、区域はどれかの部分に入っていればよい", options, async () => {
@@ -66,18 +57,18 @@ test("外形: 離れた部分を描き足すと、面積は合計になり、区
       map.dispatchEvent(new WheelEvent("wheel", { deltaY: 100, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2, bubbles: true, cancelable: true }));
     }
   })()`);
-  // 外形は、圃場の設定の窓の「外形」のタブで描く
-  await openOutlineTab();
-  await page.click(`${DIALOG} .mode-btn[data-mode="outline"]`);
+  // 外形は、「図を編集」の帯の「外形を描く」で描く
+  await page.click("#mapEditBtn");
+  await page.click('#mapBand .mode-btn[data-mode="outline"]');
   // 描き直しの確認は出さない（いまの外形は置き換えない）
   assert.equal(await page.run(`Boolean(document.querySelector("dialog.notice[open]"))`), false);
   for (const point of [[58, 0], [82, 0], [82, 20], [58, 20], [58, 0]]) {
     await page.clickMap(point);
   }
-  await page.waitFor(`document.getElementById("fsDeleteOutline").disabled === false`, "描いた外形を選ぶ");
-  assert.deepEqual(await savedOutline(), rect(0, 0, 40, 20), "保存するまでは DB は変わらない（入れたときの形のまま）");
-  await saveAndClose();
   await page.waitFor(`document.querySelector('#shapeTree li[data-shape="outline:1"]')`, "2 つ目の部分の行");
+  assert.deepEqual(await savedOutline(), rect(0, 0, 40, 20), "保存するまでは DB は変わらない（入れたときの形のまま）");
+  await saveEdit();
+  await page.click("#mapEditDone");
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).fields[0].outline.length === 2`, "外形の保存");
   await page.click('#shapeTree li[data-shape="outline:1"]');
   const outline = await savedOutline();
@@ -98,13 +89,13 @@ test("外形: 離れた部分を描き足すと、面積は合計になり、区
   await page.waitFor(`JSON.stringify(JSON.parse(localStorage.getItem("field_plan_local")).fields[0].view_dirs) === "[90,180]"`, "視点の保存");
   assert.equal(await page.run(`document.getElementById("viewEdge2").value`), "1:1");
 
-  // 1 つ目の部分を消すと、残った部分だけになり、その中にない有効圃場がはみ出しになる。消すのも、圃場の設定の窓で
-  await openOutlineTab();
-  await page.clickMap([20, 10]);
-  await page.waitFor(`document.getElementById("fsDeleteOutline").disabled === false`, "押した位置の外形を選ぶ");
-  await page.click("#fsDeleteOutline");
+  // 1 つ目の部分を消すと、残った部分だけになり、その中にない有効圃場がはみ出しになる。消すのは、図の編集のあいだだけ
+  await page.click('#shapeTree li[data-shape="outline:0"]');
+  assert.equal(await page.run(`getComputedStyle(document.getElementById("deleteShapeBtn")).display`), "none", "ふだんは消すボタンを出さない");
+  await page.click("#mapEditBtn");
+  await page.click("#deleteShapeBtn");
   await page.click(CONFIRM);
-  await saveAndClose();
+  await saveEdit();
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).fields[0].outline.length === 1`, "部分の削除の保存");
   assert.deepEqual((await savedOutline())[0], outline[1]);
   assert.match(await page.run(`document.querySelector('#shapeTree li[data-shape="outline:0"]').textContent`), /^圃場の外形\d/);
@@ -112,43 +103,50 @@ test("外形: 離れた部分を描き足すと、面積は合計になり、区
   assert.deepEqual(page.errors, []);
 });
 
-test("外形の角を動かすのは、圃場の設定の窓の「外形」だけ。動かすと書きかけになり、元に戻せる", options, async () => {
+test("外形の角は、図の編集のあいだだけ動かせる。保存しないで閉じると元に戻る", options, async () => {
   await page.loadApp(seed([rect(0, 0, 40, 20)], { zones: [zone("z1", rect(2, 2, 36, 16))] }));
-  // 圃場図では、外形を選んでも角の丸を出さない（「図を編集」のあいだも）
-  await page.click("#mapEditBtn");
+  // ふだんの図では、外形を選んでも角の丸を出さない
   await page.click('#shapeTree li[data-shape="outline:0"]');
   assert.equal(await page.run(`document.querySelectorAll("#map .handle").length`), 0);
-  assert.equal(await page.run(`getComputedStyle(document.getElementById("deleteShapeBtn")).display`), "none", "外形は圃場図では消さない");
-
-  await openOutlineTab();
-  assert.equal(await page.run(`document.getElementById("mapBand").hidden`), true, "窓を開くと、図の編集は終える");
-  await page.clickMap([20, 10]);
+  await page.click("#mapEditBtn");
   await page.waitFor(`document.querySelectorAll("#map .handle").length > 0`, "外形の角の丸");
   await page.dragMap([40, 0], 40);
-  await page.waitFor(`document.getElementById("settingsUndo").disabled === false`, "元に戻すの区切り");
-  assert.deepEqual(await savedOutline(), [rect(0, 0, 40, 20)], "保存するまでは DB は変わらない");
+  await page.waitFor(`document.getElementById("mapEditSave").disabled === false`, "書きかけ");
   assert.notEqual(await text("areaField"), "800 ㎡（8.0 a）");
-  await page.click("#settingsUndo");
-  await page.waitFor(`document.getElementById("areaField").textContent === "800 ㎡（8.0 a）"`, "元に戻す");
-  // 外形を描き足して選んだまま、保存しないで閉じる: 描いた外形はなくなり、窓が閉じる
-  await page.click(`${DIALOG} .mode-btn[data-mode="outline"]`);
+  assert.deepEqual(await savedOutline(), [rect(0, 0, 40, 20)], "保存するまでは DB は変わらない");
+
+  // 外形を描き足して選んだまま、保存しないで閉じる: 描いた外形も、動かした角も元に戻る
+  await page.click('#mapBand .mode-btn[data-mode="outline"]');
   for (const point of [[5, 5], [15, 5], [15, 10]]) {
     await page.clickMap(point);
   }
-  await page.click("#fsDraftDone");
-  await page.waitFor(`document.getElementById("fsDeleteOutline").disabled === false`, "描いた外形を選ぶ");
-  await page.click("#fieldSettingsClose");
+  await page.click("#draftDone");
+  await page.waitFor(`document.querySelector('#shapeTree li[data-shape="outline:1"]')`, "描いた外形");
+  await page.click("#mapEditDone");
   await page.click(CONFIRM);
-  await page.waitFor(`!document.querySelector("${DIALOG}")`, "捨てて閉じる");
+  await page.waitFor(`document.getElementById("mapBand").hidden`, "捨てて閉じる");
   assert.equal(await page.run(`document.querySelectorAll('#shapeTree li[data-shape^="outline:"]').length`), 1);
+  assert.equal(await text("areaField"), "800 ㎡（8.0 a）");
+  assert.deepEqual(await savedOutline(), [rect(0, 0, 40, 20)]);
+  // 圃場の設定の窓には、外形のタブはない
+  assert.equal(await page.run(`Boolean(document.querySelector('[data-fstab="outline"]'))`), false);
   assert.deepEqual(page.errors, []);
-  await openOutlineTab();
-  // ほかのタブに移ると、外形は選ばない
-  await page.clickMap([20, 10]);
-  await page.click(`${DIALOG} [data-fstab="scale"]`);
-  assert.equal(await page.run(`document.querySelectorAll("#map .handle").length`), 0);
-  await page.click("#fieldSettingsClose");
-  await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓を閉じる");
+});
+
+test("図の編集中は、実績の入力など DB を変える操作を止めて知らせる。編集を閉じれば止めない", options, async () => {
+  const data = seed([rect(0, 0, 40, 20)], { zones: [zone("z1", rect(2, 2, 36, 16))] });
+  data.fields[0].active_plan_id = "p1";
+  await page.loadApp(data);
+  await page.click("#mapEditBtn");
+  await page.run(`document.getElementById("logAddBtn").hidden = false`);
+  await page.click("#logAddBtn");
+  await page.waitFor(`document.querySelector("dialog.notice[open]")?.textContent.includes("図の編集中です")`, "知らせ");
+  assert.equal(await page.run(`Boolean(document.querySelector("dialog.log-dialog[open]"))`), false, "実績の窓は開かない");
+  await page.run(`document.querySelector("dialog.notice[open] button").click()`);
+  // 編集を閉じれば、止めない
+  await page.click("#mapEditDone");
+  await page.click("#logAddBtn");
+  await page.waitFor(`Boolean(document.querySelector("dialog.log-dialog[open]"))`, "実績の窓");
   assert.deepEqual(page.errors, []);
 });
 
