@@ -4042,8 +4042,11 @@ button.diary-work:hover {
 }
 
 /* ---- 「圃場とプラン」の窓（field-plans.js） ---- */
+/* 高さは決めておく。中身に合わせると、プランを読み込むたびに窓の高さが変わって画面の中央の位置が上下に動き、
+   iPad では押した場所の下が入れ替わって、別のボタン（「＋ 新しい圃場」など）を押したことになる */
 dialog.field-plans {
   width: min(860px, 94vw);
+  height: min(640px, 90vh);
   max-height: 90vh;
   padding: 0;
   border: 0;
