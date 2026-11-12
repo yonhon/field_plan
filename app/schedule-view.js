@@ -360,8 +360,11 @@ function renderWeek() {
   const live = state().works.filter((work) => !work.cancelled_on);
   const { due, upcoming } = dueWorks(live, today);
   const late = isActivePlan() ? lateWorks(live, actuals, today) : [];
-  $("lateBox").hidden = !late.length;
-  $("lateTitle").textContent = `遅れている作業（${weekLines(late).length}）`;
+  // 遅れている作業のタブ: あるときは、タブの名前に ⚠ と件数を付ける（見落とさないように）
+  const lateCount = weekLines(late).length;
+  $("lateBadge").hidden = !lateCount;
+  $("lateBadge").textContent = `⚠${lateCount}`;
+  $("lateEmpty").hidden = Boolean(lateCount);
   draw(
     $("lateList"),
     weekLines(late)
@@ -369,7 +372,7 @@ function renderWeek() {
       .join("")
   );
   const items = weekLines(due.length ? due : upcoming).map((line) => weekItem(line, actuals, false));
-  $("weekTitle").textContent = due.length || !upcoming.length ? "今週やること" : "次の作業（今週の予定はありません）";
+  $("weekNote").hidden = Boolean(due.length || !upcoming.length);
   draw($("weekList"), items.length ? items.join("") : '<li class="muted">予定はありません</li>');
 }
 
@@ -1381,6 +1384,18 @@ export function initSchedule(context) {
   $("schedulePicker").addEventListener("change", (event) => onPick(event.target.value));
   initGanttEditing();
   $("weekList").addEventListener("click", onWeekClick);
+  // 遅れている作業・今週やること・最近の実績のタブ
+  document.querySelector(".wt-tabs").addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-wtab]");
+    if (!tab) {
+      return;
+    }
+    document.querySelectorAll("[data-wtab]").forEach((item) => {
+      item.classList.toggle("is-on", item === tab);
+      item.setAttribute("aria-selected", String(item === tab));
+    });
+    document.querySelectorAll("[data-wpanel]").forEach((panel) => (panel.hidden = panel.dataset.wpanel !== tab.dataset.wtab));
+  });
   $("lateList").addEventListener("click", onWeekClick);
   $("ganttModes").addEventListener("click", (event) => {
     const button = event.target.closest("[data-gantt-mode]");

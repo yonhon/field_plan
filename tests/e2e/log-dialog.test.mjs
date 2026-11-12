@@ -127,10 +127,10 @@ test("農薬名の後ろのアイコン: 実績の一覧、検索の結果、選
     targets: [{ id: "t1", log_id: "log1", planting_id: "pl1", bed_id: "bed1", block_id: null, work_id: null, label: "", crop_name: "試験菜", area_m2: null, spray_l: null }],
   }];
   await page.loadApp(data);
-  // 実績の一覧は圃場図の「最近の実績」の折りたたみの中。初めは閉じているので、見出しを押して開く（開いたことは覚える）
-  assert.equal(await page.run(`document.getElementById("logFold").open`), false);
-  await page.click("#logFold > summary");
-  await page.waitFor(`document.getElementById("logFold").open && localStorage.getItem("field_plan_log_open") === "1"`, "最近の実績を開いて覚える");
+  // 実績の一覧は、圃場図の「最近の実績」のタブの中。初めは「今週やること」のタブが開いているので、タブを押して開く
+  assert.equal(await page.run(`document.querySelector('[data-wtab].is-on').dataset.wtab`), "week");
+  await page.click('[data-wtab="log"]');
+  await page.waitFor(`!document.querySelector('[data-wpanel="log"]').hidden`, "最近の実績のタブ");
   // 登録番号のある農薬は、その分類。名前だけで入れた農薬は「−」
   const LOGGED = '#logList svg[data-rac="IRAC:4A"]';
   await page.waitFor(`Boolean(document.querySelector(${JSON.stringify(LOGGED)}))`, "実績の一覧のアイコン");

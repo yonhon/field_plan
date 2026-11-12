@@ -1817,24 +1817,8 @@ export function initLogs(context) {
     },
     notify: (text) => ctx.setStatus(text),
   });
-  // 最近の実績の折りたたみ。開いているかを覚えておく（覚えられなくても、閉じた形で出すだけ）
-  try {
-    $("logFold").open = localStorage.getItem("field_plan_log_open") === "1";
-  } catch {
-    // 覚えていなければ閉じたまま
-  }
-  $("logFold").addEventListener("toggle", () => {
-    try {
-      localStorage.setItem("field_plan_log_open", $("logFold").open ? "1" : "0");
-    } catch {
-      // 覚えられなくてもよい
-    }
-  });
-  // 「すべて／最近だけ」は見出しの中にあるので、押しても見出しの開け閉めはしない（閉じていれば開く）
-  $("logToggle").addEventListener("click", (event) => {
-    event.preventDefault();
+  $("logToggle").addEventListener("click", () => {
     showAll = !showAll;
-    $("logFold").open = true;
     renderLogs();
   });
   $("logList").addEventListener("click", (event) => {

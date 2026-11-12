@@ -77,20 +77,29 @@
             <ul id="problemList" class="problem-list"></ul>
           </section>
 
-          <section class="panel">
-            <div id="lateBox" class="late-box" hidden>
-              <h2 id="lateTitle">遅れている作業</h2>
-              <ul id="lateList" class="week-list"></ul>
+          <!-- 遅れている作業・今週やること・最近の実績のタブ。PC では欄の高さを決め（図の位置が日によって動かないように）、
+               はみ出す分は欄の中で送る。スマホでは中身に合わせる。初めは「今週やること」を開く -->
+          <section class="panel work-tabs">
+            <div class="wt-tabs" role="tablist" aria-label="作業">
+              <button type="button" role="tab" class="wt-tab" data-wtab="late" aria-selected="false">遅れている作業<span id="lateBadge" class="wt-alert" hidden></span></button>
+              <button type="button" role="tab" class="wt-tab is-on" data-wtab="week" aria-selected="true">今週やること</button>
+              <button type="button" role="tab" class="wt-tab" data-wtab="log" aria-selected="false">最近の実績</button>
             </div>
-            <h2 id="weekTitle">今週やること</h2>
-            <ul id="weekList" class="week-list"></ul>
-            <!-- 最近の実績。画面の幅を取らないよう、今週やることの欄の最後に、作業の行と同じ大きさの見出しで置く。
-                 ふだんは閉じておく（開いているかはブラウザーが覚える） -->
-            <details id="logFold" class="log-fold">
-              <summary><span id="logTitle">最近の実績</span><button id="logToggle" class="text-btn" hidden>すべて</button></summary>
-              <p id="logNote" class="muted" hidden></p>
-              <ul id="logList" class="week-list log-list"></ul>
-            </details>
+            <div class="wt-body">
+              <div class="wt-panel" data-wpanel="late" hidden>
+                <p id="lateEmpty" class="muted wt-note" hidden>遅れている作業はありません。</p>
+                <ul id="lateList" class="week-list"></ul>
+              </div>
+              <div class="wt-panel" data-wpanel="week">
+                <p id="weekNote" class="muted wt-note" hidden>今週の予定はありません。次の作業です。</p>
+                <ul id="weekList" class="week-list"></ul>
+              </div>
+              <div class="wt-panel" data-wpanel="log" hidden>
+                <div class="wt-log-head"><span id="logTitle" class="muted">最近の実績</span><button id="logToggle" class="text-btn" hidden>すべて</button></div>
+                <p id="logNote" class="muted" hidden></p>
+                <ul id="logList" class="week-list log-list"></ul>
+              </div>
+            </div>
           </section>
         </div>
 

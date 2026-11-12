@@ -4304,42 +4304,6 @@ dialog.field-settings::backdrop {
   fill: rgba(206, 77, 65, 0.12);
 }
 
-/* 今週やることの欄の最後の「最近の実績」。見出しは作業の行と同じ大きさの文字で、左に ▶ / ▼ を出す */
-.log-fold {
-  border-top: 1px solid var(--line);
-}
-
-.log-fold > summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 0;
-  cursor: pointer;
-  list-style: none;
-  font-weight: 700;
-}
-
-.log-fold > summary::-webkit-details-marker {
-  display: none;
-}
-
-.log-fold > summary::before {
-  content: "▶";
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.log-fold[open] > summary::before {
-  content: "▼";
-}
-
-/* 「すべて／最近だけ」は、見出しの右端に置く */
-.log-fold > summary .text-btn {
-  margin-left: auto;
-  padding: 0 4px;
-  font-weight: 400;
-}
-
 /* 図の上の「操作の説明」 */
 .hint-fold {
   margin: 4px 0 6px;
@@ -4352,4 +4316,82 @@ dialog.field-settings::backdrop {
 /* 遅れている作業がない（欄が隠れている）ときは、今週やることの見出しの上をあけない */
 .panel .late-box[hidden] + h2 {
   margin-top: 0;
+}
+
+/* ---- 遅れている作業・今週やること・最近の実績のタブ ---- */
+/* 日記の「編集 ｜ プレビュー」と同じ、中身の枠の真上につなげたタブ。選んでいるタブは、枠と同じ地の色で、下の線を消してつなげる */
+.work-tabs {
+  padding-top: 8px;
+}
+
+.wt-tabs {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.wt-tab {
+  position: relative;
+  margin-bottom: -1px;
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.wt-tab.is-on {
+  z-index: 1;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* 遅れている作業があるときの印（タブの名前の後ろ） */
+.wt-alert {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* PC: 欄の高さを決め（作業の行で 5 行ぶんほど）、はみ出す分は欄の中で送る */
+.wt-body {
+  height: 220px;
+  overflow-y: auto;
+  padding: 2px 12px;
+  border: 1px solid var(--line);
+  border-radius: 0 8px 8px 8px;
+}
+
+.wt-note {
+  margin: 6px 0;
+}
+
+.wt-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.wt-log-head .text-btn {
+  padding: 2px 4px;
+}
+
+/* スマホ: 高さを決めず、中身に合わせる（欄の中の送りと、画面の送りが重ならないように） */
+@media (max-width: 800px) {
+  .wt-body {
+    height: auto;
+    overflow: visible;
+  }
+
+  .wt-tab {
+    padding: 7px 10px;
+  }
 }

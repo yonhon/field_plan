@@ -240,6 +240,8 @@ async function launch() {
   const clickMap = async (world) => {
     const point = await run(`(() => {
       const map = document.getElementById("map");
+      // 図が画面の外にあれば、図まで送る（人が押すときと同じ）
+      map.closest(".map-frame").scrollIntoView({ block: "nearest" });
       const p = new DOMPoint(${world[0]}, ${-world[1]}).matrixTransform(map.getScreenCTM());
       return { x: p.x, y: p.y };
     })()`);
@@ -252,6 +254,8 @@ async function launch() {
   const dragMap = async (world, dx) => {
     const point = await run(`(() => {
       const map = document.getElementById("map");
+      // 図が画面の外にあれば、図まで送る（人が押すときと同じ）
+      map.closest(".map-frame").scrollIntoView({ block: "nearest" });
       const p = new DOMPoint(${world[0]}, ${-world[1]}).matrixTransform(map.getScreenCTM());
       return { x: p.x, y: p.y };
     })()`);
