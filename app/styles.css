@@ -3781,3 +3781,513 @@ button.diary-work:hover {
 .log-tabs + .pe {
   margin-top: 6px;
 }
+
+/* ---- ヘッダーの左上: 開いている圃場とプランの名前 ---- */
+/* 圃場を開く前は「圃場計画」を題として出す。開いたら、圃場名（太字）とプラン名（小さく）の 2 行。
+   名前の欄の幅は user-menu.js の fitBrand が決める（ヘッダーが 1 段に収まる空きまで。はみ出す名前は「…」で省く） */
+.brand-name {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.brand-field,
+.brand-plan {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.brand.is-place {
+  gap: 8px;
+}
+
+.brand.is-place .brand-field {
+  font-size: 15px;
+}
+
+.brand-plan {
+  color: var(--muted);
+  font-family: "Zen Kaku Gothic New", sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* 実際に使うプランでないときは、目立たせる */
+.brand-plan.is-trial,
+.user-menu-place .is-trial {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* メニューの上の、開いている圃場とプラン */
+.user-menu-place {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+}
+
+.user-menu-place strong {
+  font-size: 14px;
+}
+
+.user-menu-place span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-menu-sep {
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.user-menu-account + .user-menu-item {
+  margin-top: 0;
+}
+
+/* ---- 「圃場とプラン」の窓（field-plans.js） ---- */
+dialog.field-plans {
+  width: min(860px, 94vw);
+  max-height: 90vh;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+dialog.field-plans[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.field-plans::backdrop {
+  background: rgba(19, 38, 42, 0.38);
+}
+
+.fp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.fp-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 17px;
+}
+
+.fp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  align-content: start;
+  align-items: start;
+}
+
+.fp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.fp-col + .fp-col {
+  border-left: 1px solid var(--line);
+}
+
+.fp-col h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.fp-field-list,
+.fp-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fp-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.fp-field.is-on {
+  border-color: var(--accent);
+  background: #eef6f5;
+}
+
+.fp-field strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fp-count {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.fp-more {
+  padding: 2px 8px;
+}
+
+.fp-plan {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.fp-plan.is-open {
+  border-color: var(--accent);
+}
+
+.fp-plan-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.fp-plan-meta {
+  grid-column: 1;
+  font-size: 12px;
+}
+
+.fp-plan-acts {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fp-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.fp-badge.is-active {
+  background: #dcefe9;
+  color: #1d6a4f;
+}
+
+.fp-badge.is-open {
+  background: #eef3f2;
+  color: var(--accent);
+}
+
+.fp-note {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #e7b7b1;
+  border-radius: 8px;
+  background: #fffafa;
+  color: #b23a2f;
+  font-size: 12px;
+}
+
+.fp-add {
+  align-self: flex-start;
+}
+
+/* 「…」のメニュー。窓のスクロールの外に出し、押したボタンの位置に置く（field-plans.js が位置を決める） */
+.fp-menu {
+  position: fixed;
+  z-index: 10;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(19, 38, 42, 0.18);
+}
+
+.fp-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 14px;
+}
+
+.fp-menu button:hover,
+.fp-menu button:focus-visible {
+  background: var(--bg);
+}
+
+.fp-menu button:disabled {
+  color: var(--line);
+}
+
+.fp-menu .danger {
+  color: var(--danger);
+}
+
+.fp-menu hr {
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.fp-icon {
+  width: 1.2em;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* スマホ: 窓を画面いっぱいにし、圃場を上に横並びで出す */
+@media (max-width: 640px) {
+  dialog.field-plans {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
+
+  .fp-body {
+    grid-template-columns: 1fr;
+  }
+
+  .fp-col + .fp-col {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .fp-field-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .fp-count {
+    display: none;
+  }
+}
+
+/* ---- 圃場の設定の窓（app.js の「圃場の設定の窓」） ---- */
+dialog.field-settings {
+  width: min(1180px, 94vw);
+  height: min(820px, 90vh);
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+dialog.field-settings[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.field-settings::backdrop {
+  background: rgba(19, 38, 42, 0.38);
+}
+
+.fs-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.fs-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 17px;
+}
+
+.fs-head h2 small {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.fs-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+  padding: 12px 16px;
+}
+
+/* 左: 圃場図から移してきた図と案内 */
+.fs-map {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-map .map-frame {
+  flex: 1;
+  height: auto;
+  min-height: 260px;
+}
+
+.fs-map .hint {
+  margin: 0;
+}
+
+/* 右: 元に戻す・やり直す、タブと中身 */
+.fs-side {
+  flex: none;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.fs-undo {
+  display: flex;
+  gap: 4px;
+}
+
+/* 日記の「編集 ｜ プレビュー」と同じタブ。選んでいるタブは、下の枠と同じ地の色で、下の線を消してつなげる */
+.fs-tabs {
+  display: flex;
+  margin: 4px 0 -8px;
+}
+
+.fs-tab {
+  position: relative;
+  margin-bottom: -1px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.fs-tab.is-on {
+  z-index: 1;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.fs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 0 8px 8px 8px;
+  background: var(--surface);
+}
+
+.fs-panel[hidden] {
+  display: none;
+}
+
+/* 「画像を読み込む」: 見た目はほかのボタンと同じ。中にファイルを選ぶ欄を隠す（日記の「写真を入れる」と同じ作り） */
+.file-btn {
+  position: relative;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: normal;
+  cursor: pointer;
+}
+
+.file-btn input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fs-warn {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #e7b7b1;
+  border-radius: 8px;
+  background: #fffafa;
+  color: #b23a2f;
+  font-size: 12px;
+}
+
+.fs-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.fs-foot span {
+  flex: 1;
+  font-size: 13px;
+}
+
+/* 道具の行の「下絵を表示」 */
+.backdrop-toggle {
+  gap: 4px;
+}
+
+/* 窓の中の図では、PDF 出力は出さない（圃場図の画面で使う） */
+.fs-map .map-pdf {
+  display: none;
+}
+
+/* 押せない丸いボタンは、押せないことが分かるように薄くする */
+.chip-btn:disabled {
+  color: var(--line);
+  cursor: default;
+}
+
+/* 2 点の距離と位置合わせで押した点。下絵の上でも見えるよう、白い縁を付ける */
+.draft-point.is-mark {
+  stroke: #fff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+/* 面積を測るときの、押した点とマウスの位置で閉じた多角形 */
+.draft.draft-area {
+  fill: rgba(206, 77, 65, 0.12);
+}

@@ -19,11 +19,11 @@
   </head>
   <body>
     <header class="page-header">
-      <!-- ロゴと「圃場計画」を押すと、利用者のメニュー（app/user-menu.js）が開く -->
+      <!-- ロゴと、開いている圃場とプランの名前。押すとメニュー（app/user-menu.js）が開く -->
       <div class="brand-area">
         <div id="brandMenu" class="brand" role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu">
           <img class="brand-logo" src="./icons/A_mark_color.svg" alt="いのーファーム" width="36" height="36" />
-          <h1>圃場計画</h1>
+          <h1 id="brandName" class="brand-name"><span id="brandField" class="brand-field">圃場計画</span><span id="brandPlan" class="brand-plan" hidden></span></h1>
         </div>
         <div id="userMenu" class="user-menu" role="menu" aria-label="利用者のメニュー" hidden></div>
       </div>
@@ -130,6 +130,8 @@
         </div>
         <div class="toolbar toolbar-second">
           <label class="inline-field">表示日<input id="viewDate" type="date" /></label>
+          <!-- 下絵の表示の切り替え。圃場の設定の窓の中の切り替えと同じもの（スマホでも出す） -->
+          <label class="inline-field check backdrop-toggle"><input class="backdrop-visible" type="checkbox" checked />下絵を表示</label>
           <span class="zone-tool edit-only">
             <span class="tool-label">耕起対象区画</span>
             <span class="seg" role="group" aria-label="耕起対象区画の作り方">
@@ -185,27 +187,6 @@
 
       <aside class="side">
         <section class="panel">
-          <h2>圃場</h2>
-          <select id="fieldSelect" class="plan-select" aria-label="圃場"></select>
-          <div class="row edit-only">
-            <button id="newFieldBtn" class="text-btn">新しい圃場</button>
-            <button id="deleteFieldBtn" class="text-btn danger">圃場を削除</button>
-          </div>
-          <h2>プラン</h2>
-          <select id="planSelect" class="plan-select" aria-label="プラン"></select>
-          <div class="row edit-only">
-            <button id="newPlanBtn" class="text-btn">新規</button>
-            <button id="copyPlanBtn" class="text-btn">コピー</button>
-            <button id="renamePlanBtn" class="text-btn">名前を変更</button>
-            <button id="deletePlanBtn" class="text-btn danger">削除</button>
-          </div>
-          <p id="activePlanInfo" class="muted"></p>
-          <div class="row edit-only">
-            <button id="activePlanBtn" class="text-btn">このプランを実際に使う</button>
-          </div>
-        </section>
-
-        <section class="panel">
           <h2>区域と区画</h2>
           <p class="muted">行を押すと、その場で内容が開きます。もう一度押すと閉じます。</p>
           <ul id="shapeTree" class="zone-list shape-tree">
@@ -256,8 +237,7 @@
         </section>
 
         <section class="panel">
-          <h2>圃場の名前と面積</h2>
-          <label class="edit-only">名前<input id="fieldName" type="text" /></label>
+          <h2>圃場の面積</h2>
           <dl class="figures">
             <div><dt>圃場の面積</dt><dd id="areaField">-</dd></div>
             <div class="total"><dt>有効圃場</dt><dd id="areaTillable">-</dd></div>
@@ -266,41 +246,6 @@
             <div class="total"><dt>耕起対象区画（表示日）</dt><dd id="areaBlocks">-</dd></div>
             <div><dt>畝（表示日）</dt><dd id="areaBeds">-</dd></div>
           </dl>
-        </section>
-
-        <section id="weatherPanel" class="panel edit-only">
-          <h2>気象</h2>
-          <p class="muted">作付の詳細の積算温度・積算降水量と予報に使います。観測所を選ぶと、毎日、気象庁から観測値を取ってたまっていきます（アプリを開いたときにも、欠けている直近の日を取ります）。</p>
-          <div class="form-grid">
-            <label>基準点の緯度<input id="baseLat" type="number" step="any" placeholder="例: 35.68" /></label>
-            <label>基準点の経度<input id="baseLng" type="number" step="any" placeholder="例: 139.77" /></label>
-          </div>
-          <label>気温の観測所（近い順）<select id="tempStation"></select></label>
-          <label>雨量の観測所（近い順）<select id="rainStation"></select></label>
-          <label>府県予報区<select id="forecastOffice"></select></label>
-          <label>予報の区域<select id="forecastArea"></select></label>
-          <label>予報の気温の地点<select id="forecastPoint"></select></label>
-          <label>2 週間気温予報の地点<select id="twoweekStation"></select></label>
-          <p id="weatherStatus" class="muted"></p>
-        </section>
-
-        <section class="panel edit-only">
-          <h2>下絵と縮尺</h2>
-          <label>画像を読み込む<input id="backdropFile" type="file" accept="image/*" /></label>
-          <label class="check"><input id="backdropVisible" type="checkbox" checked />下絵を表示</label>
-          <p class="muted">縮尺: <span id="scaleText">-</span></p>
-          <p id="backdropRole" class="muted"></p>
-          <div class="row">
-            <button class="chip-btn mode-btn" data-mode="scale">2 点の距離で合わせる</button>
-            <button id="scaleByAreaBtn" class="chip-btn">面積で合わせる</button>
-          </div>
-          <div id="alignTools" class="row wrap">
-            <button class="chip-btn mode-btn" data-mode="align">図形に位置を合わせる</button>
-            <button id="fitShapesBtn" class="chip-btn">図形を下絵の縮尺に合わせる</button>
-          </div>
-          <label>下絵の上と北のずれ（時計回り、度）
-            <input id="rotation" type="number" step="0.5" value="0" />
-          </label>
         </section>
       </aside>
     </main>
@@ -378,6 +323,72 @@
       </div>
     </main>
 
+    <!-- 圃場の設定の窓（PC だけ）。下絵・縮尺・位置と向き・気象。開いているあいだ、圃場図の図をこの窓の中へ移す。
+         調整は書きかけで持ち、「保存する」でまとめて保存する（窓は閉じない）。保存しないまま閉じると、開く前に戻す -->
+    <dialog id="fieldSettings" class="field-settings" aria-labelledby="fieldSettingsTitle">
+      <div class="fs-head">
+        <h2 id="fieldSettingsTitle" tabindex="-1">圃場の設定<small id="fieldSettingsName"></small></h2>
+        <button type="button" class="text-btn" id="fieldSettingsClose">閉じる</button>
+      </div>
+      <div class="fs-body">
+        <div class="fs-map" id="settingsMapSlot"></div>
+        <div class="fs-side">
+          <div class="fs-undo">
+            <button type="button" class="chip-btn" id="settingsUndo">↶ 元に戻す</button>
+            <button type="button" class="chip-btn" id="settingsRedo">↷ やり直す</button>
+          </div>
+          <!-- 日記の「編集 ｜ プレビュー」と同じ、中身の枠の真上につなげたタブ -->
+          <div class="fs-tabs" role="tablist" aria-label="圃場の設定">
+            <button type="button" role="tab" class="fs-tab is-on" data-fstab="image" aria-selected="true">下絵</button>
+            <button type="button" role="tab" class="fs-tab" data-fstab="scale" aria-selected="false">計測</button>
+            <button type="button" role="tab" class="fs-tab" data-fstab="place" aria-selected="false">位置と向き</button>
+            <button type="button" role="tab" class="fs-tab" data-fstab="weather" aria-selected="false">気象</button>
+          </div>
+          <div class="fs-panel" data-fspanel="image">
+            <div class="row">
+              <label class="chip-btn file-btn">画像を読み込む<input id="backdropFile" type="file" accept="image/*" /></label>
+            </div>
+            <label class="check"><input class="backdrop-visible" type="checkbox" checked />下絵を表示</label>
+            <p id="backdropRole" class="muted"></p>
+          </div>
+          <div class="fs-panel" data-fspanel="scale" hidden>
+            <p class="muted">縮尺: <span id="scaleText">-</span></p>
+            <div class="row">
+              <button type="button" class="chip-btn mode-btn" data-mode="scale">距離を測る</button>
+              <button type="button" class="chip-btn mode-btn" data-mode="areaMeasure">面積を測る</button>
+            </div>
+          </div>
+          <div class="fs-panel" data-fspanel="place" hidden>
+            <div id="alignTools" class="row wrap">
+              <button type="button" class="chip-btn mode-btn" data-mode="align">図形に位置を合わせる</button>
+              <button type="button" id="fitShapesBtn" class="chip-btn">図形を下絵の縮尺に合わせる</button>
+            </div>
+            <label>下絵の上と北のずれ（時計回り、度）
+              <input id="rotation" type="number" step="0.5" value="0" />
+            </label>
+          </div>
+          <div class="fs-panel" data-fspanel="weather" id="weatherPanel" hidden>
+            <div class="form-grid">
+              <label>基準点の緯度<input id="baseLat" type="number" step="any" placeholder="例: 35.68" /></label>
+              <label>基準点の経度<input id="baseLng" type="number" step="any" placeholder="例: 139.77" /></label>
+            </div>
+            <label>気温の観測所（近い順）<select id="tempStation"></select></label>
+            <label>雨量の観測所（近い順）<select id="rainStation"></select></label>
+            <label>府県予報区<select id="forecastOffice"></select></label>
+            <label>予報の区域<select id="forecastArea"></select></label>
+            <label>予報の気温の地点<select id="forecastPoint"></select></label>
+            <label>2 週間気温予報の地点<select id="twoweekStation"></select></label>
+            <p id="weatherStatus" class="muted"></p>
+          </div>
+          <p class="fs-warn" id="settingsWarn" hidden>図形の大きさ・向きを変える調整が入っています。保存すると、この圃場のすべてのプランの図形に当てます（保存したあとは「元に戻す」で戻せません）。</p>
+        </div>
+      </div>
+      <div class="fs-foot">
+        <span id="settingsStatus" class="muted"></span>
+        <button type="button" class="primary-btn" id="settingsSave">保存する</button>
+      </div>
+    </dialog>
+
     <!-- 圃場図の画面の右下に出す（showView が出し入れする） -->
     <button id="logAddBtn" class="fab" type="button" hidden>＋ 入力する</button>
 
@@ -441,7 +452,7 @@
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // Service Worker（sw.js）が一式をそろえて出しているときは、そのまま読む。
       // そうでないとき（初めて開いたとき、?local=1）は、読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "process-editor.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js", "toast.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "process-editor.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js", "field-plans.js", "toast.js"];
       // 新しい版のお知らせの「読み込み直す」。保存を送り終えてから読み込み直す（app.js の finishSaves）。
       // 送れなかったものが残れば、読み込み直さない
       document.getElementById("updateBtn").addEventListener("click", async (event) => {

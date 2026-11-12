@@ -37,7 +37,8 @@ import {
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
-import { setUserMenu } from "./user-menu.js";
+import { setPlace, setPlaceActions, setUserMenu } from "./user-menu.js";
+import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
@@ -46,7 +47,7 @@ import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { initProcessEditor } from "./process-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
-import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
+import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { currentBlockId, ganttHasFocus, initSchedule, openInSchedule, openProcessPlan, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash, selectedRowPreset } from "./schedule-view.js";
@@ -73,8 +74,9 @@ const HINTS = {
   zone: "区域の角を順にクリック。最初の点をクリックするか「確定」で閉じます。",
   rect: "対角の 2 点をドラッグ。四角形は、いちばん近い外形の辺に平行になります。",
   size: "寸法を入れて、置く場所をクリック。置いたあとはドラッグで動かせます。",
-  scale: "実際の距離が分かっている 2 点を順にクリック。",
-  scaleFitted: "下絵の尺度の線の両端など、実際の距離が分かっている 2 点を順にクリック。下絵の縮尺だけが変わり、図形は変わりません。",
+  scale: "距離を測る 2 点を順にクリック。2 点目で、実際の距離を尋ねます（入れると、縮尺をそれに合わせます）。",
+  scaleFitted: "下絵の尺度の線の両端など、距離を測る 2 点を順にクリック。2 点目で、実際の距離を尋ねます（入れると、下絵の縮尺だけが変わり、図形は変わりません）。",
+  areaMeasure: "面積を測る範囲の角を順にクリックし、最初の点をクリックして閉じます。閉じたところで、実際の面積を尋ねます（入れると、縮尺をそれに合わせます）。",
   align: "下絵の上の目印（角や杭など）を 1 つクリック。",
   block: "有効圃場をクリックすると、その全体が 1 つの耕起対象区画になります。",
   split: "区画（または有効圃場）の中をクリックすると、その位置で 2 つに分けます。端からの距離は、クリックのあとで数値で直せます。",
@@ -133,6 +135,16 @@ const state = {
   view: { x: -40, y: -40, w: 80, h: 80 },
 };
 
+// 圃場の設定の窓の状態（窓の処理は「---- 圃場の設定の窓 ----」）
+const settings = {
+  open: false,
+  start: null, // 開いたとき（保存したとき）の写し
+  undo: [],
+  redo: [],
+  transforms: [], // 書きかけの図形の変換（保存するときに、ほかのプランにも当てる）
+  records: [], // 書きかけの変更の記録（保存するときに記録する）
+  home: null, // 図を戻す場所
+};
 const map = $("map");
 
 // ---- 座標 ----
@@ -720,12 +732,37 @@ function renderMap(scale) {
   });
 
   if (state.draft.length) {
-    const open = state.mode === "scale" || state.mode === "split" || state.mode === "align";
+    const open = state.mode === "scale" || state.mode === "split" || state.mode === "align" || state.mode === "areaMeasure";
     const closing = !open && state.draft.length >= 3 ? ` ${svgPoints([state.draft[0]])}` : "";
     parts.push(`<polyline class="draft" points="${svgPoints(state.draft)}${closing}" />`);
+    // 2 点の距離と位置合わせ: 最後に押した点から、マウスの位置まで線を伸ばす（2 点の距離では、その長さも出す）
+    if ((state.mode === "scale" || state.mode === "align") && state.hover && state.draft.length % 2 === 1) {
+      const from = state.draft.at(-1);
+      const to = state.hover;
+      parts.push(`<line class="draft" x1="${from[0]}" y1="${-from[1]}" x2="${to[0]}" y2="${-to[1]}" />`);
+      if (state.mode === "scale") {
+        parts.push(
+          `<text class="map-label draft-label" x="${(from[0] + to[0]) / 2}" y="${-(from[1] + to[1]) / 2}" font-size="${fontSize * 1.1}" ` +
+            `stroke-width="${fontSize / 3}">${distance(from, to).toFixed(2)} m</text>`
+        );
+      }
+    }
+    // 面積を測る: 押した点とマウスの位置で閉じた多角形と、今の縮尺での面積（3 点からは面積も出す）
+    if (state.mode === "areaMeasure" && state.hover) {
+      const polygon = [...state.draft, state.hover];
+      parts.push(`<polygon class="draft draft-area" points="${svgPoints(polygon)}" />`);
+      if (polygon.length >= 3) {
+        const [cx, cy] = centroid(polygon);
+        parts.push(
+          `<text class="map-label draft-label" x="${cx}" y="${-cy}" font-size="${fontSize * 1.1}" stroke-width="${fontSize / 3}">${polygonArea(polygon).toFixed(2)} ㎡</text>`
+        );
+      }
+    }
     if (state.mode !== "split") {
+      // 計測と位置合わせで押した点は、下絵の上でも見えるよう、白い縁を付けて大きめに描く
+      const big = state.mode === "scale" || state.mode === "align" || state.mode === "areaMeasure";
       state.draft.forEach((point) => {
-        parts.push(`<circle class="draft-point" cx="${point[0]}" cy="${-point[1]}" r="${4 / z}" />`);
+        parts.push(`<circle class="draft-point${big ? " is-mark" : ""}" cx="${point[0]}" cy="${-point[1]}" r="${(big ? 6 : 4) / z}" />`);
       });
     }
   }
@@ -913,6 +950,8 @@ function renderPanel() {
       : "この下絵の上で図形を描きます。縮尺や向きを変えると、図形も一緒に伸び縮み・回転します。";
   $("alignTools").hidden = !fitted;
   $("fitShapesBtn").disabled = !state.alignment;
+  $("fitShapesBtn").title = state.alignment ? "" : "先に「図形に位置を合わせる」で、2 組の点を合わせてください";
+  renderSettingsFoot();
 }
 
 function renderSelection() {
@@ -1024,6 +1063,9 @@ function scheduleSaves() {
 }
 
 function queueSave(key) {
+  if (settings.open && (key === "field" || key === "backdrop" || /^(zone|block|bed):/.test(key))) {
+    return; // 圃場の設定の窓の書きかけ。窓の「保存する」でまとめて保存する
+  }
   pendingSaves.set(key, currentOperation());
   scheduleSaves();
 }
@@ -1134,6 +1176,7 @@ function setMode(mode) {
 function enterMode(mode) {
   state.mode = mode;
   state.draft = [];
+  state.hover = null;
   if (mode !== "select") {
     state.selected = null;
     state.selectedVertex = null;
@@ -1143,7 +1186,8 @@ function enterMode(mode) {
     button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
   });
   map.classList.toggle("is-drawing", mode !== "select");
-  $("hint").textContent = HINTS[mode === "scale" && state.backdrop?.fitted ? "scaleFitted" : mode];
+  // 圃場の設定の窓の中では、図形を描くときの案内（選択）は出さない
+  $("hint").textContent = settings.open && mode === "select" ? "" : HINTS[mode === "scale" && state.backdrop?.fitted ? "scaleFitted" : mode];
   $("draftTools").hidden = mode !== "outline" && mode !== "zone";
   $("sizeTools").hidden = mode !== "size";
   $("splitTools").hidden = mode !== "split";
@@ -1216,12 +1260,27 @@ async function transformShapes(change) {
       queueSave(`${kind}:${item.id}`);
     }
   }
+  if (settings.open) {
+    // 圃場の設定の窓の書きかけ: ほかのプランには、保存するときに当てる
+    settings.transforms.push(change);
+    return;
+  }
   for (const plan of state.plans.filter((other) => other.id !== state.plan.id)) {
     for (const table of ["zones", "blocks", "beds"]) {
       const rows = await state.store.list(table, plan.id);
       await state.store.upsert(table, rows.map((row) => ({ ...row, shape: change(row.shape) })));
     }
   }
+}
+
+// 図形を伸び縮み・回転させる。ふだんはすぐ保存して、元に戻すの履歴を空にする（すべてのプランにまたがるので）。
+// 圃場の設定の窓では書きかけにする（保存は窓の「保存する」）
+function applyTransform(change) {
+  if (settings.open) {
+    transformShapes(change);
+    return;
+  }
+  persist(() => transformShapes(change)).then(resetHistory);
 }
 
 // 図形と下絵を同じ倍率で伸縮する。原点（基準点）は動かさない
@@ -1232,8 +1291,8 @@ function applyScale(factor) {
   }
   const { x, y, w, h } = state.view;
   setView({ x: x * factor, y: y * factor, w: w * factor, h: h * factor });
-  persist(() => transformShapes((points) => scalePoints(points, factor))).then(resetHistory);
-  record({ kind: "field.scale", plan: false, text: "縮尺を合わせ直した（すべての図形の大きさが変わる）" });
+  applyTransform((points) => scalePoints(points, factor));
+  adjustRecord({ kind: "field.scale", plan: false, text: "縮尺を合わせ直した（すべての図形の大きさが変わる）" });
   render();
 }
 
@@ -1253,12 +1312,15 @@ function askNumber(message, initial, allowZero = false) {
 
 function finishScale() {
   const measured = distance(state.draft[0], state.draft[1]);
-  const actual = measured > 0 ? askNumber("この 2 点の実際の距離（m）") : null;
+  const actual = measured > 0 ? askNumber(`今の縮尺では ${measured.toFixed(2)} m です。実際の距離（m）は？`) : null;
+  if (actual) {
+    markStep();
+  }
   if (actual && state.backdrop?.fitted) {
     // 図形に合わせて置いた下絵: 下絵の縮尺だけを変える。クリックした 2 点の中ほどは動かさない
     const middle = [(state.draft[0][0] + state.draft[1][0]) / 2, (state.draft[0][1] + state.draft[1][1]) / 2];
     setBackdrop(scaleBackdropAt(state.backdrop, actual / measured, middle));
-    record({ kind: "backdrop.scale", plan: false, text: "下絵の縮尺を、下絵の尺度で合わせた（図形は変わらない）", after: `1 画素 = ${(state.backdrop.m_per_px * 100).toFixed(3)} cm` });
+    adjustRecord({ kind: "backdrop.scale", plan: false, text: "下絵の縮尺を、下絵の尺度で合わせた（図形は変わらない）", after: `1 画素 = ${(state.backdrop.m_per_px * 100).toFixed(3)} cm` });
   } else if (actual) {
     applyScale(actual / measured);
   }
@@ -1293,12 +1355,15 @@ function alignStep() {
   if (clicks.length === 1) {
     $("hint").textContent = "その目印が来るべき、図形の上の点をクリック。";
   } else if (clicks.length === 2) {
+    markStep();
     setBackdrop(alignBackdrop(state.backdrop, [[clicks[0], clicks[1]]]).backdrop);
-    record({ kind: "backdrop.move", plan: false, text: "下絵の位置を、図形に合わせた（図形は変わらない）" });
+    adjustRecord({ kind: "backdrop.move", plan: false, text: "下絵の位置を、図形に合わせた（図形は変わらない）" });
     // 1 つ目の目印は、いまは図形の上の点にある。次のクリックは、2 組目の下絵の上の目印
     state.draft = [clicks[1], clicks[1]];
     state.alignAt = clicks[1];
-    $("hint").textContent = "向きも合わせるときは、下絵の上の 2 つ目の目印をクリック（1 つ目から離れた点ほど正確です）。位置だけでよければ Esc。";
+    $("hint").textContent =
+      "位置を合わせました。向きも合わせるときは、下絵の上の 2 つ目の目印をクリック（1 つ目から離れた点ほど正確です）。" +
+      "2 組目まで合わせると、図形と下絵の大きさの差も測れ、「図形を下絵の縮尺に合わせる」が使えるようになります。位置だけでよければ Esc。";
     renderMap();
   } else if (clicks.length === 3) {
     $("hint").textContent = "その 2 つ目の目印が来るべき、図形の上の点をクリック。";
@@ -1306,11 +1371,20 @@ function alignStep() {
     const [, , from, to] = clicks;
     const at = state.alignAt;
     const { backdrop, ratio } = alignBackdrop(state.backdrop, [[at, at], [from, to]]);
+    markStep();
     setBackdrop(backdrop);
     state.alignment = { pixel: worldToImage(backdrop, at), at, ratio };
-    record({ kind: "backdrop.turn", plan: false, text: "下絵の向きを、図形に合わせた（図形は変わらない）", after: `${round2(backdrop.rotation_deg)} 度` });
+    adjustRecord({ kind: "backdrop.turn", plan: false, text: "下絵の向きを、図形に合わせた（図形は変わらない）", after: `${round2(backdrop.rotation_deg)} 度` });
     setMode("select");
     const percent = (ratio - 1) * 100;
+    // 窓の中では、測った差と、次にできることを案内に残す
+    if (settings.open) {
+      $("hint").textContent =
+        Math.abs(percent) < 0.5
+          ? `位置と向きを合わせました。図形と下絵の大きさは、ほぼ合っています（差 ${Math.abs(percent).toFixed(1)}%）。`
+          : `位置と向きを合わせました。図形は、下絵の尺度より ${Math.abs(percent).toFixed(1)}% ${percent > 0 ? "大きく" : "小さく"}なっています。` +
+            "図形のほうを直すときは「図形を下絵の縮尺に合わせる」を押します。";
+    }
     notify(
       Math.abs(percent) < 0.5
         ? `図形と下絵の大きさは、ほぼ合っています（差 ${Math.abs(percent).toFixed(1)}%）。`
@@ -1331,7 +1405,7 @@ async function fitShapesToBackdrop() {
     return;
   }
   const factor = 1 / alignment.ratio;
-  const ok = await confirmAction({
+  const ok = settings.open || await confirmAction({
     message: "この圃場のすべてのプランの外形・区域・区画・畝の大きさを、下絵の縮尺に合わせて変えます。「元に戻す」では戻せません。",
     name: `図形を ${factor.toFixed(4)} 倍`,
     action: "図形の大きさを変える",
@@ -1339,55 +1413,51 @@ async function fitShapesToBackdrop() {
   if (!ok || state.alignment !== alignment) {
     return;
   }
+  markStep();
   const at = [alignment.at[0] * factor, alignment.at[1] * factor];
   state.backdrop = anchorBackdrop(state.backdrop, alignment.pixel, at);
   state.alignment = null;
   queueSave("backdrop");
   const { x, y, w, h } = state.view;
   setView({ x: x * factor, y: y * factor, w: w * factor, h: h * factor });
-  persist(() => transformShapes((points) => scalePoints(points, factor))).then(resetHistory);
-  record({ kind: "field.scale", plan: false, text: "図形を下絵の縮尺に合わせた（すべての図形の大きさが変わる）", after: `${factor.toFixed(4)} 倍` });
+  applyTransform((points) => scalePoints(points, factor));
+  adjustRecord({ kind: "field.scale", plan: false, text: "図形を下絵の縮尺に合わせた（すべての図形の大きさが変わる）", after: `${factor.toFixed(4)} 倍` });
+  $("hint").textContent = `図形の大きさを ${factor.toFixed(4)} 倍にして、下絵の縮尺に合わせました。`;
   render();
 }
 
 
-async function scaleByArea() {
-  if (!state.field.outline.length) {
-    notify("先に圃場の外形を描いてください。");
-    return;
+// 面積を測る: 囲んだ範囲の、今の縮尺での面積を出し、実際の面積を入れると、その比で縮尺を合わせる。
+// 直し方は 2 点の距離と同じ（図形を描く下絵なら図形と下絵を一緒に、図形に合わせて置いた下絵なら下絵だけを伸び縮みさせる）
+function finishAreaMeasure() {
+  const points = state.draft;
+  const measured = polygonArea(points);
+  const actual = measured > 0 ? askNumber(`今の縮尺では ${measured.toFixed(2)} ㎡ です。実際の面積（㎡）は？`) : null;
+  if (actual) {
+    markStep();
+    const factor = Math.sqrt(actual / measured);
+    if (state.backdrop?.fitted) {
+      // 図形に合わせて置いた下絵: 下絵の縮尺だけを変える。囲んだ範囲の真ん中は動かさない
+      setBackdrop(scaleBackdropAt(state.backdrop, factor, centroid(points)));
+      adjustRecord({ kind: "backdrop.scale", plan: false, text: "下絵の縮尺を、測った面積で合わせた（図形は変わらない）", after: `1 画素 = ${(state.backdrop.m_per_px * 100).toFixed(3)} cm` });
+    } else {
+      applyScale(factor);
+    }
   }
-  const several = state.field.outline.length > 1;
-  const actual = askNumber(several ? "圃場の実際の面積（㎡）。外形の部分の合計" : "圃場の実際の面積（㎡）");
-  if (!actual) {
-    return;
-  }
-  const factor = Math.sqrt(actual / outlineArea(state.field.outline));
-  if (!state.backdrop?.fitted) {
-    applyScale(factor);
-    return;
-  }
-  // 図形に合わせて置いた下絵: 図形の大きさだけを直す。下絵は動かさない
-  const ok = await confirmAction({
-    message: "外形の面積に合わせて、この圃場のすべてのプランの図形の大きさを変えます。下絵は変わらないので、下絵と図形がずれます。「元に戻す」では戻せません。",
-    name: `図形を ${factor.toFixed(4)} 倍`,
-    action: "図形の大きさを変える",
-  });
-  if (!ok) {
-    return;
-  }
-  state.alignment = null;
-  persist(() => transformShapes((points) => scalePoints(points, factor))).then(resetHistory);
-  record({ kind: "field.scale", plan: false, text: "外形の面積で、図形の大きさを直した（下絵は変わらない）", after: `${factor.toFixed(4)} 倍` });
-  render();
+  setMode("select");
 }
 
 function setRotation(degrees) {
   const delta = degrees - state.backdrop.rotation_deg;
+  if (!delta) {
+    return;
+  }
+  markStep();
   if (state.backdrop.fitted) {
     // 図形に合わせて置いた下絵: 下絵だけを、画面の真ん中のまわりに回す
     const { x, y, w, h } = state.view;
     setBackdrop(rotateBackdropAt(state.backdrop, delta, [x + w / 2, -(y + h / 2)]));
-    record({ kind: "backdrop.turn", plan: false, text: "下絵の向きを変えた（図形は変わらない）", after: `${degrees} 度` });
+    adjustRecord({ kind: "backdrop.turn", plan: false, text: "下絵の向きを変えた（図形は変わらない）", after: `${degrees} 度` });
     return;
   }
   state.backdrop.rotation_deg = degrees;
@@ -1396,8 +1466,8 @@ function setRotation(degrees) {
     state.field.view_dirs = state.field.view_dirs.map((direction) => direction - delta);
     queueSave("field");
   }
-  persist(() => transformShapes((points) => rotatePoints(points, delta))).then(resetHistory);
-  record({ kind: "field.rotation", plan: false, text: "下絵の向きを合わせ直した", after: `${degrees} 度` });
+  applyTransform((points) => rotatePoints(points, delta));
+  adjustRecord({ kind: "field.rotation", plan: false, text: "下絵の向きを合わせ直した", after: `${degrees} 度` });
   render();
 }
 
@@ -1952,14 +2022,15 @@ async function removeBlockBeds(blockId) {
 // 圃場はいくつも持てる。外形、下絵、プランは圃場ごと。品目、肥料、作業の種類、開発日誌のメモは共通。
 // 圃場の中では、外形と下絵はすべてのプランで共通で、区域・区画・畝と日程をプランごとに持つ
 
-function renderFields() {
-  draw(
-    $("fieldSelect"),
-    state.fields
-      .map((field) => `<option value="${field.id}">${escapeHtml(field.name || "（名前なし）")}</option>`)
-      .join("")
-  );
-  $("fieldSelect").value = state.field.id;
+// ヘッダーの左上に、開いている圃場とプランを出す（実際に使うプランでなければ、目立たせる）
+function renderPlace() {
+  setPlace({
+    field: state.field.name || "（名前なし）",
+    plan: state.plan.name,
+    trial: state.field.active_plan_id !== state.plan.id,
+    fieldId: state.field.id,
+    planId: state.plan.id,
+  });
 }
 
 // 圃場の中身（下絵・プラン・作業の記録）と、開くプランの中身を読む。state はまだ変えない。
@@ -2025,7 +2096,6 @@ async function openField(field) {
   } catch {
     // 保存できなくても、次に開くときに先頭の圃場になるだけ
   }
-  $("fieldName").value = field.name;
   $("viewDate").value = state.viewDate;
   setMode("select");
   showPlan(plan);
@@ -2035,40 +2105,63 @@ async function openField(field) {
   syncWeather();
 }
 
-function newField() {
+// 圃場を作って開く。作った圃場を返す（やめたときは null）
+async function newField() {
   const name = askPlanName("新しい圃場の名前", `圃場 ${state.fields.length + 1}`);
   if (!name) {
-    return;
+    return null;
   }
-  planTask(async () => {
-    const field = await state.store.createField({ name });
+  let field = null;
+  await planTask(async () => {
+    field = await state.store.createField({ name });
     state.fields.push(field);
     await openField(field);
     record({ kind: "field.add", plan: false, target: ["field", field.id], text: `圃場「${field.name}」を作成` });
   });
+  return field;
 }
 
-// 圃場を消す。確認の窓に名前を出した圃場だけを消し、残った圃場の先頭を開く
-async function deleteField() {
-  const field = state.field;
-  if (state.planBusy || state.fields.length <= 1 || $("fieldSelect").value !== field.id) {
+// 圃場の名前を変える（開いていない圃場も）
+async function renameField(field) {
+  const name = askPlanName("圃場の名前", field.name || "");
+  if (!name || name === field.name) {
     return;
   }
+  const was = field.name;
+  await planTask(async () => {
+    field.name = name;
+    await state.store.saveField(field);
+    record({ kind: "field.name", plan: false, field, target: ["field", field.id], text: "圃場の名前を変更", before: was, after: name });
+  });
+}
+
+// 圃場を消す。確認の窓に名前を出した圃場だけを消す。開いている圃場を消したら、残った圃場の先頭を開く
+async function deleteField(field) {
+  if (state.planBusy || state.fields.length <= 1 || !state.fields.includes(field)) {
+    return;
+  }
+  const isOpen = field.id === state.field.id;
+  const count = isOpen ? state.plans.length : (await state.store.loadPlans(field.id)).length;
   const ok = await confirmDelete(
-    `この圃場を削除します。外形、下絵、プラン ${state.plans.length} つ（区域、区画、畝、日程）がすべて消えます。変更の履歴とメモは残ります。`,
+    `この圃場を削除します。外形、下絵、プラン ${count} つ（区域、区画、畝、日程）がすべて消えます。変更の履歴とメモは残ります。`,
     `圃場「${field.name}」`
   );
-  if (!ok || state.field.id !== field.id) {
+  if (!ok || !state.fields.includes(field)) {
     return;
   }
-  planTask(async () => {
-    // 消す圃場の図形の保存は、もう要らない。記録は、圃場があるうちに保存しておく
-    clearTimeout(saveTimer);
-    pendingSaves.clear();
+  await planTask(async () => {
+    if (isOpen) {
+      // 消す圃場の図形の保存は、もう要らない
+      clearTimeout(saveTimer);
+      pendingSaves.clear();
+    }
+    // 記録は、圃場があるうちに保存しておく
     await saveJournalNow();
     const imagesLeft = await state.store.deleteField(field.id);
     state.fields = state.fields.filter((item) => item.id !== field.id);
-    await openField(state.fields[0]);
+    if (isOpen) {
+      await openField(state.fields[0]);
+    }
     record({ kind: "field.delete", plan: false, target: ["field", field.id], text: `圃場「${field.name}」を削除` });
     if (imagesLeft) {
       notify(`圃場は消しましたが、下絵の画像 ${imagesLeft} 枚を、画像の置き場から消せませんでした。`);
@@ -2077,45 +2170,39 @@ async function deleteField() {
 }
 
 function renderPlans() {
-  const activeId = state.field.active_plan_id;
   $("schedulePlanName").textContent = state.plan.name;
-  draw(
-    $("planSelect"),
-    state.plans
-      .map((plan) => `<option value="${plan.id}">${escapeHtml(plan.name)}${plan.id === activeId ? "（実際に使う）" : ""}</option>`)
-      .join("")
-  );
-  $("planSelect").value = state.plan.id;
-  const active = state.plans.find((plan) => plan.id === activeId);
-  $("activePlanInfo").textContent = active
-    ? `実際に使うプラン: ${active.name}。作業の計画（管理作業）と実績は、このプランの畝に入力します。`
-    : "実際に使うプランが決まっていません。決めると、作業の実績と管理作業の計画を入力できます。";
-  renderFields();
+  renderPlace();
   renderPlanButtons();
   renderLogs();
 }
 
-const PLAN_CONTROLS = ["fieldSelect", "newFieldBtn", "deleteFieldBtn", "planSelect", "newPlanBtn", "copyPlanBtn", "renamePlanBtn", "deletePlanBtn"];
-
+// 圃場とプランの操作の途中は、図と日程を薄くして押せなくする。「圃場とプラン」の窓のボタンも押せなくする
 function renderPlanButtons() {
-  PLAN_CONTROLS.forEach((id) => ($(id).disabled = state.planBusy));
-  $("deleteFieldBtn").disabled = state.planBusy || state.fields.length <= 1;
-  $("deletePlanBtn").disabled = state.planBusy || state.plans.length <= 1;
-  $("activePlanBtn").disabled = state.planBusy || state.field.active_plan_id === state.plan.id;
-  document.body.classList.toggle("plan-busy", state.planBusy);
+  document.body.classList.toggle("plan-busy", Boolean(state.planBusy));
+  refreshFieldPlans();
 }
 
-// 開いているプランを、実際に使うプランにする。作業の記録は、このプランの畝・作付・作業につなぐ
-function useThisPlan() {
-  const plan = state.plan;
-  if (state.planBusy || state.field.active_plan_id === plan.id) {
+// プランを、実際に使うプランにする。作業の記録は、このプランの畝・作付・作業につなぐ
+async function activatePlan(field = state.field, plan = state.plan) {
+  if (state.planBusy || field.active_plan_id === plan.id) {
     return;
   }
-  planTask(async () => {
-    await state.store.setActivePlan(state.field.id, plan.id);
-    state.field.active_plan_id = plan.id;
-    record({ kind: "plan.active", target: ["plan", plan.id], text: `プラン「${plan.name}」を、実際に使うプランに設定` });
+  const ok = await confirmAction({
+    message: `「${plan.name}」を、実際に使うプランにします。これからの実績と管理作業の計画は、このプランの畝につなぎます。`,
+    action: "実際に使うプランにする",
   });
+  if (!ok) {
+    return;
+  }
+  await planTask(async () => {
+    await state.store.setActivePlan(field.id, plan.id);
+    field.active_plan_id = plan.id;
+    record({ kind: "plan.active", plan, field, target: ["plan", plan.id], text: `プラン「${plan.name}」を、実際に使うプランに設定` });
+  });
+  if (field.id === state.field.id) {
+    renderSchedule();
+    renderPlantingDetail();
+  }
 }
 
 // 実際に使うプランの区画・畝・作付・作業。開いているプランならそれを、違えば読み込む。決まっていなければ null
@@ -2190,42 +2277,53 @@ function askPlanName(message, initial) {
   return (prompt(message, initial) || "").trim() || null;
 }
 
-function newPlan() {
-  const name = askPlanName("新しいプランの名前", `プラン${state.plans.length + 1}`);
+// プランを作る。開いている圃場なら、作ったプランを開く。plans は、その圃場のプランの一覧（足す）
+async function newPlan(field = state.field, plans = state.plans) {
+  const name = askPlanName("新しいプランの名前", `プラン${plans.length + 1}`);
   if (!name) {
+    return null;
+  }
+  let plan = null;
+  await planTask(async () => {
+    plan = await state.store.createPlan({ field_id: field.id, name });
+    plans.push(plan);
+    record({ kind: "plan.add", plan, field, target: ["plan", plan.id], text: `プラン「${plan.name}」を作成` });
+    if (field.id === state.field.id) {
+      await openPlan(plan);
+    }
+  });
+  return plan;
+}
+
+async function renamePlan(field = state.field, plan = state.plan) {
+  const name = askPlanName("プランの名前", plan.name);
+  if (!name || name === plan.name) {
     return;
   }
-  planTask(async () => {
-    const plan = await state.store.createPlan({ field_id: state.field.id, name });
-    state.plans.push(plan);
-    record({ kind: "plan.add", plan, target: ["plan", plan.id], text: `プラン「${plan.name}」を作成` });
-    await openPlan(plan);
+  await planTask(async () => {
+    await state.store.renamePlan(plan.id, name);
+    const was = plan.name;
+    plan.name = name;
+    record({ kind: "plan.name", plan, field, target: ["plan", plan.id], text: "プランの名前を変更", before: was, after: name });
   });
 }
 
-function renamePlan() {
-  const name = askPlanName("プランの名前", state.plan.name);
-  if (!name || name === state.plan.name) {
-    return;
-  }
-  planTask(async () => {
-    await state.store.renamePlan(state.plan.id, name);
-    const was = state.plan.name;
-    state.plan.name = name;
-    record({ kind: "plan.name", target: ["plan", state.plan.id], text: "プランの名前を変更", before: was, after: name });
-    renderPlans();
-  });
-}
-
-function copyPlan() {
-  const name = askPlanName("コピーしたプランの名前", `${state.plan.name}のコピー`);
+// プランをコピーして、新しいプランを作る（開かない）。開いていないプランは、中身を読んでから写す
+async function copyPlan(field = state.field, plan = state.plan, plans = state.plans) {
+  const name = askPlanName("コピーしたプランの名前", `${plan.name}のコピー`);
   if (!name) {
-    return;
+    return null;
   }
-  planTask(async () => {
-    clearTimeout(saveTimer);
-    await flushSaves();
-    const plan = await state.store.createPlan({ field_id: state.field.id, name });
+  let copy = null;
+  await planTask(async () => {
+    let source = state;
+    if (plan.id === state.plan.id) {
+      clearTimeout(saveTimer);
+      await flushSaves();
+    } else {
+      source = await loadTables(PLAN_TABLES, plan.id);
+    }
+    copy = await state.store.createPlan({ field_id: field.id, name });
     // 行ごとに新しい ID を振り、親を指す列は新しい ID に付け替える
     const ids = new Map();
     const fresh = (id) => {
@@ -2236,44 +2334,78 @@ function copyPlan() {
     };
     const parents = { zones: [], blocks: ["zone_id"], beds: ["block_id"], plantings: ["bed_id"], works: ["block_id", "planting_id"] };
     for (const [table, keys] of Object.entries(parents)) {
-      const rows = state[table].map((row) => {
-        const copy = { ...row, id: fresh(row.id), plan_id: plan.id };
+      const rows = source[table].map((row) => {
+        const item = { ...row, id: fresh(row.id), plan_id: copy.id };
         keys.forEach((key) => {
-          copy[key] = row[key] ? fresh(row[key]) : null;
+          item[key] = row[key] ? fresh(row[key]) : null;
         });
-        return copy;
+        return item;
       });
       await state.store.upsert(table, rows);
     }
-    record({ kind: "plan.copy", plan, target: ["plan", plan.id], text: `プラン「${state.plan.name}」をコピーして、プラン「${plan.name}」を作成` });
-    state.plans.push(plan);
-    await openPlan(plan);
+    record({ kind: "plan.copy", plan: copy, field, target: ["plan", copy.id], text: `プラン「${plan.name}」をコピーして、プラン「${copy.name}」を作成` });
+    plans.push(copy);
   });
+  return copy;
 }
 
-async function deletePlan() {
-  // 確認の窓に出すプランと、消すプランを同じものにする
-  const plan = state.plan;
-  if (state.planBusy || state.plans.length <= 1 || $("planSelect").value !== plan.id) {
+// プランを消す。実際に使うプランと、圃場の最後のプランは消せない。開いているプランを消したら、残ったプランの先頭を開く
+async function deletePlan(field = state.field, plan = state.plan, plans = state.plans) {
+  if (state.planBusy || plans.length <= 1 || !plans.includes(plan)) {
     return;
   }
-  if (plan.id === state.field.active_plan_id) {
+  if (plan.id === field.active_plan_id) {
     notify("このプランは、実際に使うプランなので削除できません。先に、ほかのプランを実際に使うプランにしてください。");
     return;
   }
   const ok = await confirmDelete("このプランを削除します。区域、区画、畝、日程がすべて消えます。", `プラン「${plan.name}」`);
-  if (!ok || state.plan.id !== plan.id) {
+  if (!ok || !plans.includes(plan)) {
     return;
   }
-  planTask(async () => {
-    clearTimeout(saveTimer);
-    [...pendingSaves.keys()].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
-    record({ kind: "plan.delete", plan: false, target: ["plan", plan.id], text: `プラン「${plan.name}」を削除` });
+  const isOpen = plan.id === state.plan.id;
+  await planTask(async () => {
+    if (isOpen) {
+      clearTimeout(saveTimer);
+      [...pendingSaves.keys()].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
+    }
+    record({ kind: "plan.delete", plan: false, field, target: ["plan", plan.id], text: `プラン「${plan.name}」を削除` });
     await state.store.deletePlan(plan.id);
-    state.plans = state.plans.filter((item) => item.id !== plan.id);
-    await openPlan(state.plans[0]);
+    plans.splice(plans.indexOf(plan), 1);
+    if (isOpen) {
+      await openPlan(plans[0]);
+    }
   });
 }
+
+// 「圃場とプラン」の窓の「開く」。ほかの圃場のプランなら、その圃場を開いてから、そのプランを開く
+async function openPlanOf(field, plan) {
+  await planTask(async () => {
+    if (field.id !== state.field.id) {
+      savePref(field.id, "plan", plan.id);
+      await openField(field);
+    } else if (plan.id !== state.plan.id) {
+      await openPlan(plan);
+    }
+  });
+}
+
+// 「圃場とプラン」の窓に渡す、データを変える処理
+const fieldPlanOps = {
+  loadPlans: (fieldId) => state.store.loadPlans(fieldId),
+  planStats: async (planId) => {
+    const tables = await loadTables(["blocks", "beds"], planId);
+    return { blocks: tables.blocks.length, beds: tables.beds.length };
+  },
+  openPlan: openPlanOf,
+  newField,
+  renameField,
+  deleteField,
+  newPlan,
+  renamePlan,
+  copyPlan,
+  activatePlan,
+  deletePlan,
+};
 
 function imageSize(url) {
   return new Promise((resolve, reject) => {
@@ -2330,11 +2462,12 @@ async function loadBackdropFile(file) {
       $("saveStatus").textContent = `画像を保存中… ${Math.floor((loaded / (total || 1)) * 100)}%（${mb(loaded)} / ${mb(total)} MB）`;
     });
     const url = await state.store.imageUrl(path);
+    markStep();
     state.backdrop = { id: crypto.randomUUID(), field_id: state.field.id, storage_path: path, ...placement, size };
     state.backdropUrl = url;
     state.alignment = null;
     queueSave("backdrop");
-    record({
+    adjustRecord({
       kind: "backdrop.load",
       plan: false,
       text: carried
@@ -2369,6 +2502,9 @@ function pressedSelected(event) {
 // 作図の道具（選択・移動、外形を描く、など）が出ているか。スマホやタブレットの幅では出さない（.edit-only）。
 // 出ていないときは、図形を動かしたり描いたりせず、なぞったら図が動くだけにする（見るための画面なので）
 function drawingToolsShown() {
+  if (settings.open) {
+    return false; // 圃場の設定の窓の中の図は、見るだけ（2 点の距離と、位置合わせのクリックだけ受ける）
+  }
   const tools = document.querySelector("#appView .toolbar.edit-only");
   return Boolean(tools) && getComputedStyle(tools).display !== "none";
 }
@@ -2422,7 +2558,9 @@ map.addEventListener("pointerdown", (event) => {
   const detail = labelHit?.detail;
   // 作図の道具が出ていないときは、図形を動かさず、図を動かす（pan）。離したときは、図形を選ぶか、品目名から作付の詳細を開くだけ
   const editing = drawingToolsShown();
-  if (!editing && state.mode !== "select") {
+  // 圃場の設定の窓では、図形を描く道具は出さないが、下絵の 2 点の距離と位置合わせのクリックは受ける
+  const settingsClick = settings.open && (state.mode === "scale" || state.mode === "align" || state.mode === "areaMeasure");
+  if (!editing && state.mode !== "select" && !settingsClick) {
     // PC の幅で道具を選んだまま、画面を狭めたとき。道具は見えないので、選択に戻す
     setMode("select");
   }
@@ -2472,6 +2610,12 @@ function previewAt(point) {
   } else if (state.mode === "split") {
     const target = splitTarget(point);
     state.draft = (target && cutSegment(target.shape, point, target.angle)) || [];
+  } else if ((state.mode === "scale" || state.mode === "align") && state.draft.length % 2 === 1) {
+    // 2 点の距離と位置合わせ: 押した点から、マウスの位置まで線を伸ばす
+    state.hover = point;
+  } else if (state.mode === "areaMeasure" && state.draft.length) {
+    // 面積を測る: 押した点とマウスの位置で、多角形を閉じる
+    state.hover = point;
   } else {
     return;
   }
@@ -2604,7 +2748,9 @@ function endPointer(event) {
     showView("planting");
     return;
   }
-  if (state.mode === "select") {
+  if (state.mode === "select" && settings.open) {
+    return;
+  } else if (state.mode === "select") {
     state.selected = finished.shape || null;
     state.selectedVertex = null;
   } else if (state.mode === "align") {
@@ -2615,10 +2761,22 @@ function endPointer(event) {
   } else if (state.mode === "scale") {
     state.draft.push(world);
     if (state.draft.length === 2) {
+      // 2 点を結んだ線を描いてから、実際の距離を尋ねる（尋ねる窓が出ているあいだは、画面が描き直されないため）
+      state.hover = null;
       renderMap();
-      finishScale();
+      setTimeout(finishScale, 60);
       return;
     }
+  } else if (state.mode === "areaMeasure") {
+    // 最初の点を押したら閉じて、実際の面積を尋ねる（閉じた多角形を描いてから尋ねる）
+    if (state.draft.length >= 3 && distance(state.draft[0], world) * zoom() < CLOSE_TOLERANCE_PX) {
+      state.hover = null;
+      renderMap();
+      setTimeout(finishAreaMeasure, 60);
+      return;
+    }
+    state.draft.push(world);
+    state.hover = null;
   } else if (state.mode === "outline" || state.mode === "zone") {
     const first = state.draft[0];
     if (state.draft.length >= 3 && distance(first, world) * zoom() < CLOSE_TOLERANCE_PX) {
@@ -2678,21 +2836,7 @@ $("fitBtn").addEventListener("click", () => {
   fitView();
   renderMap();
 });
-$("scaleByAreaBtn").addEventListener("click", scaleByArea);
 $("fitShapesBtn").addEventListener("click", fitShapesToBackdrop);
-$("fieldSelect").addEventListener("change", (event) => {
-  planTask(() => openField(state.fields.find((field) => field.id === event.target.value)));
-});
-$("newFieldBtn").addEventListener("click", newField);
-$("deleteFieldBtn").addEventListener("click", deleteField);
-$("planSelect").addEventListener("change", (event) => {
-  planTask(() => openPlan(state.plans.find((plan) => plan.id === event.target.value)));
-});
-$("newPlanBtn").addEventListener("click", newPlan);
-$("renamePlanBtn").addEventListener("click", renamePlan);
-$("copyPlanBtn").addEventListener("click", copyPlan);
-$("activePlanBtn").addEventListener("click", useThisPlan);
-$("deletePlanBtn").addEventListener("click", deletePlan);
 $("deleteVertexBtn").addEventListener("click", deleteSelectedVertex);
 $("deleteShapeBtn").addEventListener("click", deleteSelectedShape);
 $("openScheduleBtn").addEventListener("click", () => {
@@ -2717,11 +2861,6 @@ $("viewDate").addEventListener("change", (event) => {
     state.selected = null;
   }
   render();
-});
-$("fieldName").addEventListener("input", (event) => {
-  state.field.name = event.target.value;
-  renderFields();
-  queueSave("field");
 });
 for (const [input, kind] of [["zoneName", "zone"], ["blockName", "block"]]) {
   $(input).addEventListener("input", (event) => {
@@ -2796,15 +2935,232 @@ $("backdropFile").addEventListener("change", (event) => {
     loadBackdropFile(file);
   }
 });
-$("backdropVisible").addEventListener("change", (event) => {
-  state.backdropVisible = event.target.checked;
-  renderMap();
-});
+document.querySelectorAll(".backdrop-visible").forEach((box) =>
+  box.addEventListener("change", (event) => {
+    state.backdropVisible = event.target.checked;
+    document.querySelectorAll(".backdrop-visible").forEach((other) => (other.checked = state.backdropVisible));
+    renderMap();
+  })
+);
 $("rotation").addEventListener("change", (event) => {
   const degrees = Number(event.target.value);
   if (state.backdrop && Number.isFinite(degrees)) {
     setRotation(degrees);
   }
+});
+
+// ---- 圃場の設定の窓 ----
+// 下絵・縮尺・位置と向き・気象。開いているあいだは、圃場図の図（と案内）を窓の中へ移す。
+// 調整は書きかけ: 下絵・外形・図形の保存と、変更の履歴の記録を止めて溜め、図形の伸び縮み・回転は開いているプランにだけ当てて覚える。
+// 調整のたびに状態の写しを取り、窓の中の「元に戻す・やり直す」で行き来する。「保存する」でまとめて保存し（窓は閉じない）、
+// ほかのプランの図形にも同じ変換を当てる。保存しないまま閉じたら、開く前の状態に戻す
+
+// （settings は、ファイルの先頭のほうで宣言している）
+
+// 下絵の調整の変更の記録。窓を開いているあいだは溜めておく
+function adjustRecord(entry) {
+  if (settings.open) {
+    settings.records.push(entry);
+  } else {
+    record(entry);
+  }
+}
+
+function settingsSnapshot() {
+  return {
+    backdrop: state.backdrop ? structuredClone(state.backdrop) : null,
+    backdropUrl: state.backdropUrl,
+    alignment: state.alignment ? structuredClone(state.alignment) : null,
+    outline: structuredClone(state.field.outline),
+    viewDirs: state.field.view_dirs ? [...state.field.view_dirs] : (state.field.view_dirs ?? null),
+    shapes: Object.fromEntries(["zones", "blocks", "beds"].map((table) => [table, Object.fromEntries(state[table].map((item) => [item.id, structuredClone(item.shape)]))])),
+    transforms: [...settings.transforms],
+    records: [...settings.records],
+    view: { ...state.view },
+    weather: { base_lat: state.field.base_lat ?? null, base_lng: state.field.base_lng ?? null, weather: structuredClone(state.field.weather || {}) },
+  };
+}
+
+function restoreSnapshot(snap) {
+  state.backdrop = snap.backdrop ? structuredClone(snap.backdrop) : null;
+  state.backdropUrl = snap.backdropUrl;
+  state.alignment = snap.alignment ? structuredClone(snap.alignment) : null;
+  state.field.outline = structuredClone(snap.outline);
+  state.field.view_dirs = snap.viewDirs;
+  for (const table of ["zones", "blocks", "beds"]) {
+    for (const item of state[table]) {
+      if (snap.shapes[table][item.id]) {
+        item.shape = structuredClone(snap.shapes[table][item.id]);
+      }
+    }
+  }
+  settings.transforms = [...snap.transforms];
+  settings.records = [...snap.records];
+  Object.assign(state.field, structuredClone(snap.weather));
+  setView(snap.view);
+  render();
+  renderWeatherSettings();
+}
+
+// 保存するものが変わったかを見分ける写しの要約（表示の位置や画像の大きさは含めない）
+const settingsKey = (snap) =>
+  JSON.stringify({ backdrop: snap.backdrop && { ...snap.backdrop, size: null }, outline: snap.outline, viewDirs: snap.viewDirs, shapes: snap.shapes, transforms: snap.transforms.length, weather: snap.weather });
+const settingsDirty = () => settings.open && settingsKey(settingsSnapshot()) !== settingsKey(settings.start);
+
+// 調整を 1 回する前に呼ぶ。いまの状態を「元に戻す」の履歴に積む
+function markStep() {
+  if (!settings.open) {
+    return;
+  }
+  settings.undo.push(settingsSnapshot());
+  settings.redo.length = 0;
+  $("settingsStatus").textContent = "";
+}
+
+function renderSettingsFoot() {
+  if (!settings.open) {
+    return;
+  }
+  const dirty = settingsDirty();
+  $("settingsSave").disabled = !dirty;
+  $("settingsUndo").disabled = !settings.undo.length;
+  $("settingsRedo").disabled = !settings.redo.length;
+  $("settingsWarn").hidden = !settings.transforms.length;
+  if (dirty) {
+    $("settingsStatus").textContent = settings.undo.length ? `保存していない調整があります（${settings.undo.length} 回）` : "保存していない変更があります";
+  } else if ($("settingsStatus").textContent !== "保存しました") {
+    $("settingsStatus").textContent = "変更はありません";
+  }
+}
+
+async function openFieldSettings() {
+  if (settings.open || state.planBusy) {
+    return;
+  }
+  // それまでの図形の保存を先に済ませる（窓を開いているあいだの保存の予約は止めるので）
+  await sendPendingSaves();
+  setMode("select");
+  Object.assign(settings, { open: true, undo: [], redo: [], transforms: [], records: [] });
+  settings.start = settingsSnapshot();
+  // 気象の欄を変える前に、元に戻すの区切りを入れる。変えたあとに、下の欄を描き直す
+  beginWeatherDraft({ before: markStep, after: renderSettingsFoot });
+  const frame = document.querySelector("#appView .map-frame");
+  settings.home = { parent: frame.parentElement, next: frame.nextSibling };
+  $("settingsMapSlot").append($("hint"), frame);
+  $("fieldSettingsName").textContent = state.field.name || "";
+  $("settingsStatus").textContent = "";
+  $("fieldSettings").showModal();
+  $("fieldSettingsTitle").focus({ preventScroll: true });
+  renderWeatherSettings();
+  render();
+}
+
+// 閉じる。保存していない変更があれば、捨ててよいかを確かめる
+async function requestCloseSettings() {
+  if (settingsDirty() && !(await confirmAction({ message: "まだ保存していない設定があります。この設定は消えます。", action: "捨てて閉じる", cancel: "入力を続ける" }))) {
+    return;
+  }
+  setMode("select");
+  if (settingsDirty()) {
+    restoreSnapshot(settings.start);
+  }
+  cancelWeatherDraft();
+  settings.open = false;
+  const frame = $("settingsMapSlot").querySelector(".map-frame");
+  settings.home.parent.insertBefore(frame, settings.home.next);
+  settings.home.parent.insertBefore($("hint"), frame);
+  $("fieldSettings").close();
+  renderWeatherSettings();
+  render();
+}
+
+// 書きかけをまとめて保存する。窓は閉じない。保存したところを新しい出発点にし、「元に戻す」の履歴は空にする
+async function saveFieldSettings() {
+  if (!settingsDirty()) {
+    return;
+  }
+  if (settings.transforms.length) {
+    const ok = await confirmAction({
+      message: "図形の大きさ・向きを変える調整が入っています。この圃場のすべてのプランの外形・区域・区画・畝に当てて保存します。保存したあとは「元に戻す」で戻せません。",
+      action: "保存する",
+    });
+    if (!ok) {
+      return;
+    }
+  }
+  setMode("select");
+  const start = settings.start;
+  const now = settingsSnapshot();
+  $("settingsStatus").textContent = "保存中…";
+  $("settingsSave").disabled = true;
+  try {
+    if (JSON.stringify(now.backdrop && { ...now.backdrop, size: null }) !== JSON.stringify(start.backdrop && { ...start.backdrop, size: null }) && state.backdrop) {
+      const { size, ...row } = state.backdrop;
+      await state.store.saveBackdrop(row);
+    }
+    if (JSON.stringify([now.outline, now.viewDirs]) !== JSON.stringify([start.outline, start.viewDirs])) {
+      await state.store.saveField(state.field);
+    }
+    for (const table of ["zones", "blocks", "beds"]) {
+      const changed = state[table].filter((item) => JSON.stringify(item.shape) !== JSON.stringify(start.shapes[table][item.id]));
+      if (changed.length) {
+        await state.store.upsert(table, changed);
+      }
+    }
+    // ほかのプランの図形にも、同じ変換を順に当てる
+    if (settings.transforms.length) {
+      for (const plan of state.plans.filter((other) => other.id !== state.plan.id)) {
+        for (const table of ["zones", "blocks", "beds"]) {
+          const rows = await state.store.list(table, plan.id);
+          await state.store.upsert(table, rows.map((row) => ({ ...row, shape: settings.transforms.reduce((shape, change) => change(shape), row.shape) })));
+        }
+      }
+    }
+    await commitWeatherDraft();
+    settings.records.forEach((entry) => record(entry));
+    Object.assign(settings, { undo: [], redo: [], transforms: [], records: [] });
+    settings.start = settingsSnapshot();
+    resetHistory();
+    $("settingsStatus").textContent = "保存しました";
+  } catch (error) {
+    $("settingsStatus").textContent = `保存できませんでした: ${error.message}`;
+    notifySaveFailed(error);
+  }
+  renderSettingsFoot();
+}
+
+function settingsUndo(from, to) {
+  if (!from.length) {
+    return;
+  }
+  setMode("select");
+  to.push(settingsSnapshot());
+  restoreSnapshot(from.pop());
+  $("settingsStatus").textContent = "";
+  renderSettingsFoot();
+}
+
+$("settingsUndo").addEventListener("click", () => settingsUndo(settings.undo, settings.redo));
+$("settingsRedo").addEventListener("click", () => settingsUndo(settings.redo, settings.undo));
+$("settingsSave").addEventListener("click", saveFieldSettings);
+$("fieldSettingsClose").addEventListener("click", requestCloseSettings);
+// Esc: 書きかけがあれば、捨ててよいかを確かめる
+$("fieldSettings").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  requestCloseSettings();
+});
+// 下絵・縮尺・位置と向き・気象のタブ
+$("fieldSettings").addEventListener("click", (event) => {
+  const tab = event.target.closest("[data-fstab]");
+  if (!tab) {
+    return;
+  }
+  setMode("select");
+  document.querySelectorAll("[data-fstab]").forEach((item) => {
+    item.classList.toggle("is-on", item === tab);
+    item.setAttribute("aria-selected", String(item === tab));
+  });
+  document.querySelectorAll("[data-fspanel]").forEach((panel) => (panel.hidden = panel.dataset.fspanel !== tab.dataset.fstab));
 });
 
 // ---- 圃場図と日程の切り替え ----
@@ -3023,10 +3379,11 @@ async function startApp() {
     );
     return;
   }
-  $("fieldName").value = state.field.name;
   $("viewDate").value = state.viewDate;
   $("appView").hidden = false;
   $("viewTabs").hidden = false;
+  initFieldPlans({ state, notify, ops: fieldPlanOps });
+  setPlaceActions({ choose: openFieldPlans, settings: openFieldSettings });
   renderPlans();
   fitView();
   setMode("select");
@@ -3094,7 +3451,7 @@ async function startApp() {
   initHistory({
     state,
     // プランを読み込んでいるあいだは、元に戻さない
-    busy: () => state.planBusy,
+    busy: () => state.planBusy || settings.open,
     setStatus,
     // まだ送っていない図形の保存を、先に済ませる
     flush: async () => {
