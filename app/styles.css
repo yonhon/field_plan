@@ -2004,9 +2004,21 @@ body.plan-busy #scheduleView {
   margin-left: auto;
 }
 
+/* 今週やること・遅れている作業の「修正」「完了」は、行が高くならないよう小さめにする */
 .week-actions .primary-btn,
 .week-actions .chip-btn {
-  min-height: 36px;
+  min-height: 0;
+  padding: 3px 12px;
+  font-size: 13px;
+}
+
+.week-actions .text-btn {
+  padding: 3px 8px;
+  font-size: 13px;
+}
+
+.week-actions {
+  align-self: center;
 }
 
 .week-list li.is-done {
@@ -4335,4 +4347,9 @@ dialog.field-settings::backdrop {
 
 .hint-fold .hint {
   margin: 4px 0 0;
+}
+
+/* 遅れている作業がない（欄が隠れている）ときは、今週やることの見出しの上をあけない */
+.panel .late-box[hidden] + h2 {
+  margin-top: 0;
 }
