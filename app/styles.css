@@ -4286,3 +4286,8 @@ dialog.field-settings::backdrop {
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
+
+/* 面積を測るときの、押した点とマウスの位置で閉じた多角形 */
+.draft.draft-area {
+  fill: rgba(206, 77, 65, 0.12);
+}

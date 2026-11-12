@@ -340,7 +340,7 @@
           <!-- 日記の「編集 ｜ プレビュー」と同じ、中身の枠の真上につなげたタブ -->
           <div class="fs-tabs" role="tablist" aria-label="圃場の設定">
             <button type="button" role="tab" class="fs-tab is-on" data-fstab="image" aria-selected="true">下絵</button>
-            <button type="button" role="tab" class="fs-tab" data-fstab="scale" aria-selected="false">縮尺</button>
+            <button type="button" role="tab" class="fs-tab" data-fstab="scale" aria-selected="false">計測</button>
             <button type="button" role="tab" class="fs-tab" data-fstab="place" aria-selected="false">位置と向き</button>
             <button type="button" role="tab" class="fs-tab" data-fstab="weather" aria-selected="false">気象</button>
           </div>
@@ -354,8 +354,8 @@
           <div class="fs-panel" data-fspanel="scale" hidden>
             <p class="muted">縮尺: <span id="scaleText">-</span></p>
             <div class="row">
-              <button type="button" class="chip-btn mode-btn" data-mode="scale">2 点の距離で合わせる</button>
-              <button type="button" id="scaleByAreaBtn" class="chip-btn">面積で合わせる</button>
+              <button type="button" class="chip-btn mode-btn" data-mode="scale">距離を測る</button>
+              <button type="button" class="chip-btn mode-btn" data-mode="areaMeasure">面積を測る</button>
             </div>
           </div>
           <div class="fs-panel" data-fspanel="place" hidden>

@@ -77,6 +77,7 @@ test("圃場の設定: 回転は書きかけで、元に戻す・やり直すで
   // もう一度変えて、保存しないで閉じる: 捨ててよいかを確かめ、開いたときの状態（保存した 10 度）に戻る
   await setRotation(25);
   await page.click("#fieldSettingsClose");
+  assert.equal(await page.run(`document.querySelector('dialog.notice [data-action="delete"]').textContent`), "破棄");
   await page.click('dialog.notice [data-action="delete"]');
   await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる");
   assert.equal(await savedRotation(), 10);
@@ -122,6 +123,21 @@ test("圃場の設定: 縮尺のタブで、図の上の 2 点を押して縮尺
   await page.clickMap([25, 10]);
   await page.waitFor(`document.getElementById("scaleText").textContent !== ${JSON.stringify(before)}`, "縮尺が変わる");
   assert.match(await status(), /保存していない調整/);
+  await page.click("#settingsUndo");
+  await page.waitFor(`document.getElementById("scaleText").textContent === ${JSON.stringify(before)}`, "元に戻す");
+
+  // 面積を測る: 4 点を押して最初の点で閉じ、今の縮尺での面積を出してから、実際の面積を尋ねる
+  let asked = "";
+  await page.run(`window.prompt = (message) => { window.askedText = message; return "800"; }`);
+  await page.click(`${DIALOG} .mode-btn[data-mode="areaMeasure"]`);
+  for (const point of [[5, 5], [25, 5], [25, 15], [5, 15]]) {
+    await page.clickMap(point);
+  }
+  await page.waitFor(`document.querySelectorAll("#map .draft-point.is-mark").length === 4`, "押した 4 点");
+  await page.clickMap([5, 5]);
+  await page.waitFor(`document.getElementById("scaleText").textContent !== ${JSON.stringify(before)}`, "面積で縮尺が変わる");
+  asked = await page.run("window.askedText");
+  assert.match(asked, /^今の縮尺では 200\.00 ㎡ です。実際の面積（㎡）は？$/);
   await page.click("#settingsUndo");
   await page.waitFor(`document.getElementById("scaleText").textContent === ${JSON.stringify(before)}`, "元に戻す");
 

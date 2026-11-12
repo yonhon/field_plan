@@ -74,8 +74,9 @@ const HINTS = {
   zone: "区域の角を順にクリック。最初の点をクリックするか「確定」で閉じます。",
   rect: "対角の 2 点をドラッグ。四角形は、いちばん近い外形の辺に平行になります。",
   size: "寸法を入れて、置く場所をクリック。置いたあとはドラッグで動かせます。",
-  scale: "実際の距離が分かっている 2 点を順にクリック。",
-  scaleFitted: "下絵の尺度の線の両端など、実際の距離が分かっている 2 点を順にクリック。下絵の縮尺だけが変わり、図形は変わりません。",
+  scale: "距離を測る 2 点を順にクリック。2 点目で、実際の距離を尋ねます（入れると、縮尺をそれに合わせます）。",
+  scaleFitted: "下絵の尺度の線の両端など、距離を測る 2 点を順にクリック。2 点目で、実際の距離を尋ねます（入れると、下絵の縮尺だけが変わり、図形は変わりません）。",
+  areaMeasure: "面積を測る範囲の角を順にクリックし、最初の点をクリックして閉じます。閉じたところで、実際の面積を尋ねます（入れると、縮尺をそれに合わせます）。",
   align: "下絵の上の目印（角や杭など）を 1 つクリック。",
   block: "有効圃場をクリックすると、その全体が 1 つの耕起対象区画になります。",
   split: "区画（または有効圃場）の中をクリックすると、その位置で 2 つに分けます。端からの距離は、クリックのあとで数値で直せます。",
@@ -731,7 +732,7 @@ function renderMap(scale) {
   });
 
   if (state.draft.length) {
-    const open = state.mode === "scale" || state.mode === "split" || state.mode === "align";
+    const open = state.mode === "scale" || state.mode === "split" || state.mode === "align" || state.mode === "areaMeasure";
     const closing = !open && state.draft.length >= 3 ? ` ${svgPoints([state.draft[0]])}` : "";
     parts.push(`<polyline class="draft" points="${svgPoints(state.draft)}${closing}" />`);
     // 2 点の距離と位置合わせ: 最後に押した点から、マウスの位置まで線を伸ばす（2 点の距離では、その長さも出す）
@@ -746,9 +747,20 @@ function renderMap(scale) {
         );
       }
     }
+    // 面積を測る: 押した点とマウスの位置で閉じた多角形と、今の縮尺での面積（3 点からは面積も出す）
+    if (state.mode === "areaMeasure" && state.hover) {
+      const polygon = [...state.draft, state.hover];
+      parts.push(`<polygon class="draft draft-area" points="${svgPoints(polygon)}" />`);
+      if (polygon.length >= 3) {
+        const [cx, cy] = centroid(polygon);
+        parts.push(
+          `<text class="map-label draft-label" x="${cx}" y="${-cy}" font-size="${fontSize * 1.1}" stroke-width="${fontSize / 3}">${polygonArea(polygon).toFixed(2)} ㎡</text>`
+        );
+      }
+    }
     if (state.mode !== "split") {
-      // 2 点の距離と位置合わせで押した点は、下絵の上でも見えるよう、白い縁を付けて大きめに描く
-      const big = state.mode === "scale" || state.mode === "align";
+      // 計測と位置合わせで押した点は、下絵の上でも見えるよう、白い縁を付けて大きめに描く
+      const big = state.mode === "scale" || state.mode === "align" || state.mode === "areaMeasure";
       state.draft.forEach((point) => {
         parts.push(`<circle class="draft-point${big ? " is-mark" : ""}" cx="${point[0]}" cy="${-point[1]}" r="${(big ? 6 : 4) / z}" />`);
       });
@@ -1299,7 +1311,7 @@ function askNumber(message, initial, allowZero = false) {
 
 function finishScale() {
   const measured = distance(state.draft[0], state.draft[1]);
-  const actual = measured > 0 ? askNumber("この 2 点の実際の距離（m）") : null;
+  const actual = measured > 0 ? askNumber(`今の縮尺では ${measured.toFixed(2)} m です。実際の距離（m）は？`) : null;
   if (actual) {
     markStep();
   }
@@ -1404,36 +1416,24 @@ async function fitShapesToBackdrop() {
 }
 
 
-async function scaleByArea() {
-  if (!state.field.outline.length) {
-    notify("先に圃場の外形を描いてください。");
-    return;
-  }
-  const several = state.field.outline.length > 1;
-  const actual = askNumber(several ? "圃場の実際の面積（㎡）。外形の部分の合計" : "圃場の実際の面積（㎡）");
-  if (!actual) {
-    return;
-  }
-  const factor = Math.sqrt(actual / outlineArea(state.field.outline));
-  if (!state.backdrop?.fitted) {
+// 面積を測る: 囲んだ範囲の、今の縮尺での面積を出し、実際の面積を入れると、その比で縮尺を合わせる。
+// 直し方は 2 点の距離と同じ（図形を描く下絵なら図形と下絵を一緒に、図形に合わせて置いた下絵なら下絵だけを伸び縮みさせる）
+function finishAreaMeasure() {
+  const points = state.draft;
+  const measured = polygonArea(points);
+  const actual = measured > 0 ? askNumber(`今の縮尺では ${measured.toFixed(2)} ㎡ です。実際の面積（㎡）は？`) : null;
+  if (actual) {
     markStep();
-    applyScale(factor);
-    return;
+    const factor = Math.sqrt(actual / measured);
+    if (state.backdrop?.fitted) {
+      // 図形に合わせて置いた下絵: 下絵の縮尺だけを変える。囲んだ範囲の真ん中は動かさない
+      setBackdrop(scaleBackdropAt(state.backdrop, factor, centroid(points)));
+      adjustRecord({ kind: "backdrop.scale", plan: false, text: "下絵の縮尺を、測った面積で合わせた（図形は変わらない）", after: `1 画素 = ${(state.backdrop.m_per_px * 100).toFixed(3)} cm` });
+    } else {
+      applyScale(factor);
+    }
   }
-  // 図形に合わせて置いた下絵: 図形の大きさだけを直す。下絵は動かさない（窓の中では確かめない。保存するときに確かめる）
-  const ok = settings.open || await confirmAction({
-    message: "外形の面積に合わせて、この圃場のすべてのプランの図形の大きさを変えます。下絵は変わらないので、下絵と図形がずれます。「元に戻す」では戻せません。",
-    name: `図形を ${factor.toFixed(4)} 倍`,
-    action: "図形の大きさを変える",
-  });
-  if (!ok) {
-    return;
-  }
-  markStep();
-  state.alignment = null;
-  applyTransform((points) => scalePoints(points, factor));
-  adjustRecord({ kind: "field.scale", plan: false, text: "外形の面積で、図形の大きさを直した（下絵は変わらない）", after: `${factor.toFixed(4)} 倍` });
-  render();
+  setMode("select");
 }
 
 function setRotation(degrees) {
@@ -2548,7 +2548,7 @@ map.addEventListener("pointerdown", (event) => {
   // 作図の道具が出ていないときは、図形を動かさず、図を動かす（pan）。離したときは、図形を選ぶか、品目名から作付の詳細を開くだけ
   const editing = drawingToolsShown();
   // 圃場の設定の窓では、図形を描く道具は出さないが、下絵の 2 点の距離と位置合わせのクリックは受ける
-  const settingsClick = settings.open && (state.mode === "scale" || state.mode === "align");
+  const settingsClick = settings.open && (state.mode === "scale" || state.mode === "align" || state.mode === "areaMeasure");
   if (!editing && state.mode !== "select" && !settingsClick) {
     // PC の幅で道具を選んだまま、画面を狭めたとき。道具は見えないので、選択に戻す
     setMode("select");
@@ -2601,6 +2601,9 @@ function previewAt(point) {
     state.draft = (target && cutSegment(target.shape, point, target.angle)) || [];
   } else if ((state.mode === "scale" || state.mode === "align") && state.draft.length % 2 === 1) {
     // 2 点の距離と位置合わせ: 押した点から、マウスの位置まで線を伸ばす
+    state.hover = point;
+  } else if (state.mode === "areaMeasure" && state.draft.length) {
+    // 面積を測る: 押した点とマウスの位置で、多角形を閉じる
     state.hover = point;
   } else {
     return;
@@ -2753,6 +2756,16 @@ function endPointer(event) {
       setTimeout(finishScale, 60);
       return;
     }
+  } else if (state.mode === "areaMeasure") {
+    // 最初の点を押したら閉じて、実際の面積を尋ねる（閉じた多角形を描いてから尋ねる）
+    if (state.draft.length >= 3 && distance(state.draft[0], world) * zoom() < CLOSE_TOLERANCE_PX) {
+      state.hover = null;
+      renderMap();
+      setTimeout(finishAreaMeasure, 60);
+      return;
+    }
+    state.draft.push(world);
+    state.hover = null;
   } else if (state.mode === "outline" || state.mode === "zone") {
     const first = state.draft[0];
     if (state.draft.length >= 3 && distance(first, world) * zoom() < CLOSE_TOLERANCE_PX) {
@@ -2812,7 +2825,6 @@ $("fitBtn").addEventListener("click", () => {
   fitView();
   renderMap();
 });
-$("scaleByAreaBtn").addEventListener("click", scaleByArea);
 $("fitShapesBtn").addEventListener("click", fitShapesToBackdrop);
 $("deleteVertexBtn").addEventListener("click", deleteSelectedVertex);
 $("deleteShapeBtn").addEventListener("click", deleteSelectedShape);
@@ -3034,7 +3046,7 @@ async function openFieldSettings() {
 
 // 閉じる。保存していない変更があれば、捨ててよいかを確かめる
 async function requestCloseSettings() {
-  if (settingsDirty() && !(await confirmAction({ message: "まだ保存していない設定があります。この設定は消えます。", action: "捨てて閉じる", cancel: "入力を続ける" }))) {
+  if (settingsDirty() && !(await confirmAction({ message: "まだ保存していない設定があります。この設定は消えます。", action: "破棄", cancel: "入力を続ける" }))) {
     return;
   }
   setMode("select");
