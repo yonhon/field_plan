@@ -4292,40 +4292,40 @@ dialog.field-settings::backdrop {
   fill: rgba(206, 77, 65, 0.12);
 }
 
-/* 見出しで開け閉めする欄（最近の実績）。見出しの左に ▶ / ▼ を出す */
-.fold-panel > summary {
+/* 今週やることの欄の最後の「最近の実績」。見出しは作業の行と同じ大きさの文字で、左に ▶ / ▼ を出す */
+.log-fold {
+  border-top: 1px solid var(--line);
+}
+
+.log-fold > summary {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 6px 0;
   cursor: pointer;
   list-style: none;
+  font-weight: 700;
 }
 
-.fold-panel > summary::-webkit-details-marker {
+.log-fold > summary::-webkit-details-marker {
   display: none;
 }
 
-.fold-panel > summary::before {
+.log-fold > summary::before {
   content: "▶";
   color: var(--muted);
   font-size: 11px;
 }
 
-.fold-panel[open] > summary::before {
+.log-fold[open] > summary::before {
   content: "▼";
 }
 
-.fold-panel > summary h2 {
-  margin: 0;
-}
-
-.fold-panel[open] > summary {
-  margin-bottom: 4px;
-}
-
-.fold-tools {
-  display: flex;
-  justify-content: flex-end;
+/* 「すべて／最近だけ」は、見出しの右端に置く */
+.log-fold > summary .text-btn {
+  margin-left: auto;
+  padding: 0 4px;
+  font-weight: 400;
 }
 
 /* 図の上の「操作の説明」 */

@@ -84,15 +84,14 @@
             </div>
             <h2 id="weekTitle">今週やること</h2>
             <ul id="weekList" class="week-list"></ul>
+            <!-- 最近の実績。画面の幅を取らないよう、今週やることの欄の最後に、作業の行と同じ大きさの見出しで置く。
+                 ふだんは閉じておく（開いているかはブラウザーが覚える） -->
+            <details id="logFold" class="log-fold">
+              <summary><span id="logTitle">最近の実績</span><button id="logToggle" class="text-btn" hidden>すべて</button></summary>
+              <p id="logNote" class="muted" hidden></p>
+              <ul id="logList" class="week-list log-list"></ul>
+            </details>
           </section>
-
-          <!-- 最近の実績。ふだんは閉じておく（開いているかはブラウザーが覚える） -->
-          <details id="logFold" class="panel fold-panel">
-            <summary><h2 id="logTitle">最近の実績</h2></summary>
-            <div class="fold-tools"><button id="logToggle" class="text-btn" hidden>すべて</button></div>
-            <p id="logNote" class="muted" hidden></p>
-            <ul id="logList" class="week-list log-list"></ul>
-          </details>
         </div>
 
         <div class="toolbar edit-only" role="group" aria-label="操作">

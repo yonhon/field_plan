@@ -1830,8 +1830,11 @@ export function initLogs(context) {
       // 覚えられなくてもよい
     }
   });
-  $("logToggle").addEventListener("click", () => {
+  // 「すべて／最近だけ」は見出しの中にあるので、押しても見出しの開け閉めはしない（閉じていれば開く）
+  $("logToggle").addEventListener("click", (event) => {
+    event.preventDefault();
     showAll = !showAll;
+    $("logFold").open = true;
     renderLogs();
   });
   $("logList").addEventListener("click", (event) => {
