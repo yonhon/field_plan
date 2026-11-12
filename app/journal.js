@@ -25,18 +25,20 @@ let saving = false;
 //   text    何をしたか。その時点の名前で書く（あとで名前を変えても、記録の文は変わらない）
 //   before, after  変える前と後の値（あれば）。まとめたときは、最初の before と最後の after が残る
 //   plan    どのプランでの変更か。省くといまのプラン。false なら、プランによらない変更（品目、縮尺など）
-export function record({ kind, target = [], text, before = null, after = null, plan }) {
+//   field   どの圃場での変更か。省くといまの圃場（「圃場とプラン」の窓で、開いていない圃場を直すときに渡す）
+export function record({ kind, target = [], text, before = null, after = null, plan, field }) {
   if (!ctx) {
     return;
   }
   const { state } = ctx;
   const owner = plan === false ? null : plan || state.plan;
+  const fieldId = (field || state.field).id;
   const now = new Date();
   const [targetKind = null, targetId = null] = target;
   const recent = state.changes.find(
     (entry) =>
       entry.kind === kind &&
-      entry.field_id === state.field.id &&
+      entry.field_id === fieldId &&
       entry.target_kind === targetKind &&
       entry.target_id === targetId &&
       entry.plan_id === (owner?.id || null) &&
@@ -50,7 +52,7 @@ export function record({ kind, target = [], text, before = null, after = null, p
   }
   const entry = {
     id: crypto.randomUUID(),
-    field_id: state.field.id,
+    field_id: fieldId,
     no: null, // 保存するときに振られる
     at: now.toISOString(),
     last_at: now.toISOString(),
@@ -66,6 +68,14 @@ export function record({ kind, target = [], text, before = null, after = null, p
   };
   state.changes.unshift(entry);
   queue(entry);
+}
+
+// そのプランの、最後の変更の時刻（ISO の文字）。記録がなければ空
+export function lastChangeAt(planId) {
+  if (!ctx?.state.changes) {
+    return "";
+  }
+  return ctx.state.changes.filter((entry) => entry.plan_id === planId).reduce((last, entry) => (entry.last_at > last ? entry.last_at : last), "");
 }
 
 function queue(entry) {

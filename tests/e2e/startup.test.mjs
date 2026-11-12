@@ -40,12 +40,22 @@ after(async () => {
   await page?.close();
 });
 
+// 開いている圃場とプラン。ヘッダーの左上（ロゴと名前の欄）に、ID を書いている
 const opened = () =>
   page.run(`({
-    field: document.getElementById("fieldSelect").value,
-    plan: document.getElementById("planSelect").value,
+    field: document.getElementById("brandMenu").dataset.field,
+    plan: document.getElementById("brandMenu").dataset.plan,
     planName: document.getElementById("schedulePlanName").textContent,
   })`);
+
+// ヘッダーのメニューの「圃場とプランを選ぶ…」で窓を開き、その圃場のプランを「開く」
+async function openFromDialog(fieldId, planId) {
+  await page.click("#brandMenu");
+  await page.click('#userMenu [data-action="choose"]');
+  await page.click(`dialog.field-plans [data-field="${fieldId}"] strong`);
+  await page.click(`dialog.field-plans [data-act="open"][data-id="${planId}"]`);
+  await page.waitFor(`document.getElementById("brandMenu").dataset.plan === "${planId}" && !document.querySelector("dialog.field-plans[open]")`, `プラン ${planId} を開く`);
+}
 
 test("起動: 前に開いていた圃場とプランを開き、中身もそのプランのもの", options, async () => {
   await page.loadApp(seed(), {
@@ -73,16 +83,17 @@ test("起動: 覚えていた圃場が消えていれば、先頭の圃場を開
   assert.deepEqual(page.errors, []);
 });
 
-test("圃場の切り替え: 切り替えた圃場のプランを開き、戻ると前に開いていたプランを開く", options, async () => {
+test("圃場の切り替え: 「圃場とプラン」の窓で、ほかの圃場のプランを開き、元の圃場のプランに戻る", options, async () => {
   await page.loadApp(seed(), {
     field_plan_current_field: "f1",
     field_plan_prefs: JSON.stringify({ f1: { plan: "p2" } }),
   });
-  await page.setValue("#fieldSelect", "f2");
-  await page.waitFor(`document.getElementById("planSelect").value === "p3"`, "圃場 2 のプランを開く");
+  // ヘッダーには、開いている圃場とプランの名前が出る
+  assert.equal(await page.run(`document.getElementById("brandPlan").textContent.replace(" ⚠", "")`), "一のプランB");
+  await openFromDialog("f2", "p3");
   assert.deepEqual(await opened(), { field: "f2", plan: "p3", planName: "二のプラン" });
-  await page.setValue("#fieldSelect", "f1");
-  await page.waitFor(`document.getElementById("planSelect").value === "p2"`, "圃場 1 の前のプランを開く");
+  await openFromDialog("f1", "p1");
+  assert.deepEqual(await opened(), { field: "f1", plan: "p1", planName: "一のプランA" });
   assert.deepEqual(page.errors, []);
 });
 

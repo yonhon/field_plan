@@ -19,11 +19,11 @@
   </head>
   <body>
     <header class="page-header">
-      <!-- ロゴと「圃場計画」を押すと、利用者のメニュー（app/user-menu.js）が開く -->
+      <!-- ロゴと、開いている圃場とプランの名前。押すとメニュー（app/user-menu.js）が開く -->
       <div class="brand-area">
         <div id="brandMenu" class="brand" role="button" tabindex="0" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu">
           <img class="brand-logo" src="./icons/A_mark_color.svg" alt="いのーファーム" width="36" height="36" />
-          <h1>圃場計画</h1>
+          <h1 id="brandName" class="brand-name"><span id="brandField" class="brand-field">圃場計画</span><span id="brandPlan" class="brand-plan" hidden></span></h1>
         </div>
         <div id="userMenu" class="user-menu" role="menu" aria-label="利用者のメニュー" hidden></div>
       </div>
@@ -185,27 +185,6 @@
 
       <aside class="side">
         <section class="panel">
-          <h2>圃場</h2>
-          <select id="fieldSelect" class="plan-select" aria-label="圃場"></select>
-          <div class="row edit-only">
-            <button id="newFieldBtn" class="text-btn">新しい圃場</button>
-            <button id="deleteFieldBtn" class="text-btn danger">圃場を削除</button>
-          </div>
-          <h2>プラン</h2>
-          <select id="planSelect" class="plan-select" aria-label="プラン"></select>
-          <div class="row edit-only">
-            <button id="newPlanBtn" class="text-btn">新規</button>
-            <button id="copyPlanBtn" class="text-btn">コピー</button>
-            <button id="renamePlanBtn" class="text-btn">名前を変更</button>
-            <button id="deletePlanBtn" class="text-btn danger">削除</button>
-          </div>
-          <p id="activePlanInfo" class="muted"></p>
-          <div class="row edit-only">
-            <button id="activePlanBtn" class="text-btn">このプランを実際に使う</button>
-          </div>
-        </section>
-
-        <section class="panel">
           <h2>区域と区画</h2>
           <p class="muted">行を押すと、その場で内容が開きます。もう一度押すと閉じます。</p>
           <ul id="shapeTree" class="zone-list shape-tree">
@@ -256,8 +235,7 @@
         </section>
 
         <section class="panel">
-          <h2>圃場の名前と面積</h2>
-          <label class="edit-only">名前<input id="fieldName" type="text" /></label>
+          <h2>圃場の面積</h2>
           <dl class="figures">
             <div><dt>圃場の面積</dt><dd id="areaField">-</dd></div>
             <div class="total"><dt>有効圃場</dt><dd id="areaTillable">-</dd></div>
@@ -441,7 +419,7 @@
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
       // Service Worker（sw.js）が一式をそろえて出しているときは、そのまま読む。
       // そうでないとき（初めて開いたとき、?local=1）は、読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく
-      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "process-editor.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js", "toast.js"];
+      const parts = ["app.js", "geometry.js", "schedule.js", "schedule-view.js", "strip-view.js", "store.js", "crops.js", "crops-view.js", "dialog.js", "draw.js", "journal.js", "history.js", "print.js", "logs.js", "log-view.js", "process-editor.js", "planting-view.js", "pesticide.js", "rac.js", "weather.js", "weather-view.js", "prefs.js", "upload.js", "diary.js", "diary-view.js", "user-menu.js", "field-plans.js", "toast.js"];
       // 新しい版のお知らせの「読み込み直す」。保存を送り終えてから読み込み直す（app.js の finishSaves）。
       // 送れなかったものが残れば、読み込み直さない
       document.getElementById("updateBtn").addEventListener("click", async (event) => {

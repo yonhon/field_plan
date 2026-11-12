@@ -37,7 +37,8 @@ import {
 } from "./geometry.js";
 import { initCrops, renderCrops } from "./crops-view.js";
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
-import { setUserMenu } from "./user-menu.js";
+import { setPlace, setPlaceActions, setUserMenu } from "./user-menu.js";
+import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { initHistory, resetHistory } from "./history.js";
@@ -1952,14 +1953,15 @@ async function removeBlockBeds(blockId) {
 // 圃場はいくつも持てる。外形、下絵、プランは圃場ごと。品目、肥料、作業の種類、開発日誌のメモは共通。
 // 圃場の中では、外形と下絵はすべてのプランで共通で、区域・区画・畝と日程をプランごとに持つ
 
-function renderFields() {
-  draw(
-    $("fieldSelect"),
-    state.fields
-      .map((field) => `<option value="${field.id}">${escapeHtml(field.name || "（名前なし）")}</option>`)
-      .join("")
-  );
-  $("fieldSelect").value = state.field.id;
+// ヘッダーの左上に、開いている圃場とプランを出す（実際に使うプランでなければ、目立たせる）
+function renderPlace() {
+  setPlace({
+    field: state.field.name || "（名前なし）",
+    plan: state.plan.name,
+    trial: state.field.active_plan_id !== state.plan.id,
+    fieldId: state.field.id,
+    planId: state.plan.id,
+  });
 }
 
 // 圃場の中身（下絵・プラン・作業の記録）と、開くプランの中身を読む。state はまだ変えない。
@@ -2025,7 +2027,6 @@ async function openField(field) {
   } catch {
     // 保存できなくても、次に開くときに先頭の圃場になるだけ
   }
-  $("fieldName").value = field.name;
   $("viewDate").value = state.viewDate;
   setMode("select");
   showPlan(plan);
@@ -2035,40 +2036,63 @@ async function openField(field) {
   syncWeather();
 }
 
-function newField() {
+// 圃場を作って開く。作った圃場を返す（やめたときは null）
+async function newField() {
   const name = askPlanName("新しい圃場の名前", `圃場 ${state.fields.length + 1}`);
   if (!name) {
-    return;
+    return null;
   }
-  planTask(async () => {
-    const field = await state.store.createField({ name });
+  let field = null;
+  await planTask(async () => {
+    field = await state.store.createField({ name });
     state.fields.push(field);
     await openField(field);
     record({ kind: "field.add", plan: false, target: ["field", field.id], text: `圃場「${field.name}」を作成` });
   });
+  return field;
 }
 
-// 圃場を消す。確認の窓に名前を出した圃場だけを消し、残った圃場の先頭を開く
-async function deleteField() {
-  const field = state.field;
-  if (state.planBusy || state.fields.length <= 1 || $("fieldSelect").value !== field.id) {
+// 圃場の名前を変える（開いていない圃場も）
+async function renameField(field) {
+  const name = askPlanName("圃場の名前", field.name || "");
+  if (!name || name === field.name) {
     return;
   }
+  const was = field.name;
+  await planTask(async () => {
+    field.name = name;
+    await state.store.saveField(field);
+    record({ kind: "field.name", plan: false, field, target: ["field", field.id], text: "圃場の名前を変更", before: was, after: name });
+  });
+}
+
+// 圃場を消す。確認の窓に名前を出した圃場だけを消す。開いている圃場を消したら、残った圃場の先頭を開く
+async function deleteField(field) {
+  if (state.planBusy || state.fields.length <= 1 || !state.fields.includes(field)) {
+    return;
+  }
+  const isOpen = field.id === state.field.id;
+  const count = isOpen ? state.plans.length : (await state.store.loadPlans(field.id)).length;
   const ok = await confirmDelete(
-    `この圃場を削除します。外形、下絵、プラン ${state.plans.length} つ（区域、区画、畝、日程）がすべて消えます。変更の履歴とメモは残ります。`,
+    `この圃場を削除します。外形、下絵、プラン ${count} つ（区域、区画、畝、日程）がすべて消えます。変更の履歴とメモは残ります。`,
     `圃場「${field.name}」`
   );
-  if (!ok || state.field.id !== field.id) {
+  if (!ok || !state.fields.includes(field)) {
     return;
   }
-  planTask(async () => {
-    // 消す圃場の図形の保存は、もう要らない。記録は、圃場があるうちに保存しておく
-    clearTimeout(saveTimer);
-    pendingSaves.clear();
+  await planTask(async () => {
+    if (isOpen) {
+      // 消す圃場の図形の保存は、もう要らない
+      clearTimeout(saveTimer);
+      pendingSaves.clear();
+    }
+    // 記録は、圃場があるうちに保存しておく
     await saveJournalNow();
     const imagesLeft = await state.store.deleteField(field.id);
     state.fields = state.fields.filter((item) => item.id !== field.id);
-    await openField(state.fields[0]);
+    if (isOpen) {
+      await openField(state.fields[0]);
+    }
     record({ kind: "field.delete", plan: false, target: ["field", field.id], text: `圃場「${field.name}」を削除` });
     if (imagesLeft) {
       notify(`圃場は消しましたが、下絵の画像 ${imagesLeft} 枚を、画像の置き場から消せませんでした。`);
@@ -2077,45 +2101,39 @@ async function deleteField() {
 }
 
 function renderPlans() {
-  const activeId = state.field.active_plan_id;
   $("schedulePlanName").textContent = state.plan.name;
-  draw(
-    $("planSelect"),
-    state.plans
-      .map((plan) => `<option value="${plan.id}">${escapeHtml(plan.name)}${plan.id === activeId ? "（実際に使う）" : ""}</option>`)
-      .join("")
-  );
-  $("planSelect").value = state.plan.id;
-  const active = state.plans.find((plan) => plan.id === activeId);
-  $("activePlanInfo").textContent = active
-    ? `実際に使うプラン: ${active.name}。作業の計画（管理作業）と実績は、このプランの畝に入力します。`
-    : "実際に使うプランが決まっていません。決めると、作業の実績と管理作業の計画を入力できます。";
-  renderFields();
+  renderPlace();
   renderPlanButtons();
   renderLogs();
 }
 
-const PLAN_CONTROLS = ["fieldSelect", "newFieldBtn", "deleteFieldBtn", "planSelect", "newPlanBtn", "copyPlanBtn", "renamePlanBtn", "deletePlanBtn"];
-
+// 圃場とプランの操作の途中は、図と日程を薄くして押せなくする。「圃場とプラン」の窓のボタンも押せなくする
 function renderPlanButtons() {
-  PLAN_CONTROLS.forEach((id) => ($(id).disabled = state.planBusy));
-  $("deleteFieldBtn").disabled = state.planBusy || state.fields.length <= 1;
-  $("deletePlanBtn").disabled = state.planBusy || state.plans.length <= 1;
-  $("activePlanBtn").disabled = state.planBusy || state.field.active_plan_id === state.plan.id;
-  document.body.classList.toggle("plan-busy", state.planBusy);
+  document.body.classList.toggle("plan-busy", Boolean(state.planBusy));
+  refreshFieldPlans();
 }
 
-// 開いているプランを、実際に使うプランにする。作業の記録は、このプランの畝・作付・作業につなぐ
-function useThisPlan() {
-  const plan = state.plan;
-  if (state.planBusy || state.field.active_plan_id === plan.id) {
+// プランを、実際に使うプランにする。作業の記録は、このプランの畝・作付・作業につなぐ
+async function activatePlan(field = state.field, plan = state.plan) {
+  if (state.planBusy || field.active_plan_id === plan.id) {
     return;
   }
-  planTask(async () => {
-    await state.store.setActivePlan(state.field.id, plan.id);
-    state.field.active_plan_id = plan.id;
-    record({ kind: "plan.active", target: ["plan", plan.id], text: `プラン「${plan.name}」を、実際に使うプランに設定` });
+  const ok = await confirmAction({
+    message: `「${plan.name}」を、実際に使うプランにします。これからの実績と管理作業の計画は、このプランの畝につなぎます。`,
+    action: "実際に使うプランにする",
   });
+  if (!ok) {
+    return;
+  }
+  await planTask(async () => {
+    await state.store.setActivePlan(field.id, plan.id);
+    field.active_plan_id = plan.id;
+    record({ kind: "plan.active", plan, field, target: ["plan", plan.id], text: `プラン「${plan.name}」を、実際に使うプランに設定` });
+  });
+  if (field.id === state.field.id) {
+    renderSchedule();
+    renderPlantingDetail();
+  }
 }
 
 // 実際に使うプランの区画・畝・作付・作業。開いているプランならそれを、違えば読み込む。決まっていなければ null
@@ -2190,42 +2208,53 @@ function askPlanName(message, initial) {
   return (prompt(message, initial) || "").trim() || null;
 }
 
-function newPlan() {
-  const name = askPlanName("新しいプランの名前", `プラン${state.plans.length + 1}`);
+// プランを作る。開いている圃場なら、作ったプランを開く。plans は、その圃場のプランの一覧（足す）
+async function newPlan(field = state.field, plans = state.plans) {
+  const name = askPlanName("新しいプランの名前", `プラン${plans.length + 1}`);
   if (!name) {
+    return null;
+  }
+  let plan = null;
+  await planTask(async () => {
+    plan = await state.store.createPlan({ field_id: field.id, name });
+    plans.push(plan);
+    record({ kind: "plan.add", plan, field, target: ["plan", plan.id], text: `プラン「${plan.name}」を作成` });
+    if (field.id === state.field.id) {
+      await openPlan(plan);
+    }
+  });
+  return plan;
+}
+
+async function renamePlan(field = state.field, plan = state.plan) {
+  const name = askPlanName("プランの名前", plan.name);
+  if (!name || name === plan.name) {
     return;
   }
-  planTask(async () => {
-    const plan = await state.store.createPlan({ field_id: state.field.id, name });
-    state.plans.push(plan);
-    record({ kind: "plan.add", plan, target: ["plan", plan.id], text: `プラン「${plan.name}」を作成` });
-    await openPlan(plan);
+  await planTask(async () => {
+    await state.store.renamePlan(plan.id, name);
+    const was = plan.name;
+    plan.name = name;
+    record({ kind: "plan.name", plan, field, target: ["plan", plan.id], text: "プランの名前を変更", before: was, after: name });
   });
 }
 
-function renamePlan() {
-  const name = askPlanName("プランの名前", state.plan.name);
-  if (!name || name === state.plan.name) {
-    return;
-  }
-  planTask(async () => {
-    await state.store.renamePlan(state.plan.id, name);
-    const was = state.plan.name;
-    state.plan.name = name;
-    record({ kind: "plan.name", target: ["plan", state.plan.id], text: "プランの名前を変更", before: was, after: name });
-    renderPlans();
-  });
-}
-
-function copyPlan() {
-  const name = askPlanName("コピーしたプランの名前", `${state.plan.name}のコピー`);
+// プランをコピーして、新しいプランを作る（開かない）。開いていないプランは、中身を読んでから写す
+async function copyPlan(field = state.field, plan = state.plan, plans = state.plans) {
+  const name = askPlanName("コピーしたプランの名前", `${plan.name}のコピー`);
   if (!name) {
-    return;
+    return null;
   }
-  planTask(async () => {
-    clearTimeout(saveTimer);
-    await flushSaves();
-    const plan = await state.store.createPlan({ field_id: state.field.id, name });
+  let copy = null;
+  await planTask(async () => {
+    let source = state;
+    if (plan.id === state.plan.id) {
+      clearTimeout(saveTimer);
+      await flushSaves();
+    } else {
+      source = await loadTables(PLAN_TABLES, plan.id);
+    }
+    copy = await state.store.createPlan({ field_id: field.id, name });
     // 行ごとに新しい ID を振り、親を指す列は新しい ID に付け替える
     const ids = new Map();
     const fresh = (id) => {
@@ -2236,44 +2265,78 @@ function copyPlan() {
     };
     const parents = { zones: [], blocks: ["zone_id"], beds: ["block_id"], plantings: ["bed_id"], works: ["block_id", "planting_id"] };
     for (const [table, keys] of Object.entries(parents)) {
-      const rows = state[table].map((row) => {
-        const copy = { ...row, id: fresh(row.id), plan_id: plan.id };
+      const rows = source[table].map((row) => {
+        const item = { ...row, id: fresh(row.id), plan_id: copy.id };
         keys.forEach((key) => {
-          copy[key] = row[key] ? fresh(row[key]) : null;
+          item[key] = row[key] ? fresh(row[key]) : null;
         });
-        return copy;
+        return item;
       });
       await state.store.upsert(table, rows);
     }
-    record({ kind: "plan.copy", plan, target: ["plan", plan.id], text: `プラン「${state.plan.name}」をコピーして、プラン「${plan.name}」を作成` });
-    state.plans.push(plan);
-    await openPlan(plan);
+    record({ kind: "plan.copy", plan: copy, field, target: ["plan", copy.id], text: `プラン「${plan.name}」をコピーして、プラン「${copy.name}」を作成` });
+    plans.push(copy);
   });
+  return copy;
 }
 
-async function deletePlan() {
-  // 確認の窓に出すプランと、消すプランを同じものにする
-  const plan = state.plan;
-  if (state.planBusy || state.plans.length <= 1 || $("planSelect").value !== plan.id) {
+// プランを消す。実際に使うプランと、圃場の最後のプランは消せない。開いているプランを消したら、残ったプランの先頭を開く
+async function deletePlan(field = state.field, plan = state.plan, plans = state.plans) {
+  if (state.planBusy || plans.length <= 1 || !plans.includes(plan)) {
     return;
   }
-  if (plan.id === state.field.active_plan_id) {
+  if (plan.id === field.active_plan_id) {
     notify("このプランは、実際に使うプランなので削除できません。先に、ほかのプランを実際に使うプランにしてください。");
     return;
   }
   const ok = await confirmDelete("このプランを削除します。区域、区画、畝、日程がすべて消えます。", `プラン「${plan.name}」`);
-  if (!ok || state.plan.id !== plan.id) {
+  if (!ok || !plans.includes(plan)) {
     return;
   }
-  planTask(async () => {
-    clearTimeout(saveTimer);
-    [...pendingSaves.keys()].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
-    record({ kind: "plan.delete", plan: false, target: ["plan", plan.id], text: `プラン「${plan.name}」を削除` });
+  const isOpen = plan.id === state.plan.id;
+  await planTask(async () => {
+    if (isOpen) {
+      clearTimeout(saveTimer);
+      [...pendingSaves.keys()].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
+    }
+    record({ kind: "plan.delete", plan: false, field, target: ["plan", plan.id], text: `プラン「${plan.name}」を削除` });
     await state.store.deletePlan(plan.id);
-    state.plans = state.plans.filter((item) => item.id !== plan.id);
-    await openPlan(state.plans[0]);
+    plans.splice(plans.indexOf(plan), 1);
+    if (isOpen) {
+      await openPlan(plans[0]);
+    }
   });
 }
+
+// 「圃場とプラン」の窓の「開く」。ほかの圃場のプランなら、その圃場を開いてから、そのプランを開く
+async function openPlanOf(field, plan) {
+  await planTask(async () => {
+    if (field.id !== state.field.id) {
+      savePref(field.id, "plan", plan.id);
+      await openField(field);
+    } else if (plan.id !== state.plan.id) {
+      await openPlan(plan);
+    }
+  });
+}
+
+// 「圃場とプラン」の窓に渡す、データを変える処理
+const fieldPlanOps = {
+  loadPlans: (fieldId) => state.store.loadPlans(fieldId),
+  planStats: async (planId) => {
+    const tables = await loadTables(["blocks", "beds"], planId);
+    return { blocks: tables.blocks.length, beds: tables.beds.length };
+  },
+  openPlan: openPlanOf,
+  newField,
+  renameField,
+  deleteField,
+  newPlan,
+  renamePlan,
+  copyPlan,
+  activatePlan,
+  deletePlan,
+};
 
 function imageSize(url) {
   return new Promise((resolve, reject) => {
@@ -2680,19 +2743,6 @@ $("fitBtn").addEventListener("click", () => {
 });
 $("scaleByAreaBtn").addEventListener("click", scaleByArea);
 $("fitShapesBtn").addEventListener("click", fitShapesToBackdrop);
-$("fieldSelect").addEventListener("change", (event) => {
-  planTask(() => openField(state.fields.find((field) => field.id === event.target.value)));
-});
-$("newFieldBtn").addEventListener("click", newField);
-$("deleteFieldBtn").addEventListener("click", deleteField);
-$("planSelect").addEventListener("change", (event) => {
-  planTask(() => openPlan(state.plans.find((plan) => plan.id === event.target.value)));
-});
-$("newPlanBtn").addEventListener("click", newPlan);
-$("renamePlanBtn").addEventListener("click", renamePlan);
-$("copyPlanBtn").addEventListener("click", copyPlan);
-$("activePlanBtn").addEventListener("click", useThisPlan);
-$("deletePlanBtn").addEventListener("click", deletePlan);
 $("deleteVertexBtn").addEventListener("click", deleteSelectedVertex);
 $("deleteShapeBtn").addEventListener("click", deleteSelectedShape);
 $("openScheduleBtn").addEventListener("click", () => {
@@ -2717,11 +2767,6 @@ $("viewDate").addEventListener("change", (event) => {
     state.selected = null;
   }
   render();
-});
-$("fieldName").addEventListener("input", (event) => {
-  state.field.name = event.target.value;
-  renderFields();
-  queueSave("field");
 });
 for (const [input, kind] of [["zoneName", "zone"], ["blockName", "block"]]) {
   $(input).addEventListener("input", (event) => {
@@ -3023,10 +3068,11 @@ async function startApp() {
     );
     return;
   }
-  $("fieldName").value = state.field.name;
   $("viewDate").value = state.viewDate;
   $("appView").hidden = false;
   $("viewTabs").hidden = false;
+  initFieldPlans({ state, notify, ops: fieldPlanOps });
+  setPlaceActions({ choose: openFieldPlans });
   renderPlans();
   fitView();
   setMode("select");
