@@ -4094,3 +4094,182 @@ dialog.field-plans::backdrop {
     display: none;
   }
 }
+
+/* ---- 圃場の設定の窓（app.js の「圃場の設定の窓」） ---- */
+dialog.field-settings {
+  width: min(1180px, 94vw);
+  height: min(820px, 90vh);
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+dialog.field-settings[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.field-settings::backdrop {
+  background: rgba(19, 38, 42, 0.38);
+}
+
+.fs-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.fs-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 17px;
+}
+
+.fs-head h2 small {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.fs-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+  padding: 12px 16px;
+}
+
+/* 左: 圃場図から移してきた図と案内 */
+.fs-map {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-map .map-frame {
+  flex: 1;
+  height: auto;
+  min-height: 260px;
+}
+
+.fs-map .hint {
+  margin: 0;
+}
+
+/* 右: 元に戻す・やり直す、タブと中身 */
+.fs-side {
+  flex: none;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.fs-undo {
+  display: flex;
+  gap: 4px;
+}
+
+/* 日記の「編集 ｜ プレビュー」と同じタブ。選んでいるタブは、下の枠と同じ地の色で、下の線を消してつなげる */
+.fs-tabs {
+  display: flex;
+  margin: 4px 0 -8px;
+}
+
+.fs-tab {
+  position: relative;
+  margin-bottom: -1px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.fs-tab.is-on {
+  z-index: 1;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.fs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 0 8px 8px 8px;
+  background: var(--surface);
+}
+
+.fs-panel[hidden] {
+  display: none;
+}
+
+/* 「画像を読み込む」: 見た目はほかのボタンと同じ。中にファイルを選ぶ欄を隠す（日記の「写真を入れる」と同じ作り） */
+.file-btn {
+  position: relative;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: normal;
+  cursor: pointer;
+}
+
+.file-btn input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fs-warn {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #e7b7b1;
+  border-radius: 8px;
+  background: #fffafa;
+  color: #b23a2f;
+  font-size: 12px;
+}
+
+.fs-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.fs-foot span {
+  flex: 1;
+  font-size: 13px;
+}
+
+/* 道具の行の「下絵を表示」 */
+.backdrop-toggle {
+  gap: 4px;
+}
+
+/* 窓の中の図では、PDF 出力は出さない（圃場図の画面で使う） */
+.fs-map .map-pdf {
+  display: none;
+}

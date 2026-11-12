@@ -126,10 +126,51 @@ function renderStatus(extra = "") {
   $("weatherStatus").textContent = [extra, ...parts].filter(Boolean).join(" ");
 }
 
+// 圃場の設定の窓を開いているあいだは、書きかけ。変えた値は圃場に入れておき（選ぶ欄のつながりに使う）、
+// 窓の「保存する」で、まとめて保存する（commitWeatherDraft）。保存しないで閉じたら、元の値に戻す（cancelWeatherDraft）
+let draft = null; // { before: { base_lat, base_lng, weather }, texts: [変えた項目の文], onChange }
+
+export function beginWeatherDraft(onChange) {
+  const field = state().field;
+  draft = { before: { base_lat: field.base_lat, base_lng: field.base_lng, weather: { ...(field.weather || {}) } }, texts: [], onChange };
+}
+
+export const weatherDraftDirty = () => Boolean(draft?.texts.length);
+
+// 書きかけを保存する。保存したら、そこを新しい出発点にする
+export async function commitWeatherDraft() {
+  if (!draft?.texts.length) {
+    return;
+  }
+  const field = state().field;
+  await state().store.saveFieldWeather(field.id, { base_lat: field.base_lat ?? null, base_lng: field.base_lng ?? null, weather: field.weather || {} });
+  for (const text of [...new Set(draft.texts)]) {
+    record({ kind: "field.weather", plan: false, target: ["field", field.id], text });
+  }
+  draft.before = { base_lat: field.base_lat, base_lng: field.base_lng, weather: { ...(field.weather || {}) } };
+  draft.texts = [];
+  syncWeather();
+  ctx.onWeatherChanged?.();
+}
+
+// 書きかけを捨てて、元の値に戻す。窓を閉じたときに呼ぶ
+export function cancelWeatherDraft() {
+  if (draft) {
+    Object.assign(state().field, draft.before);
+  }
+  draft = null;
+}
+
 async function saveSettings(change, text) {
   const field = state().field;
   const before = { base_lat: field.base_lat, base_lng: field.base_lng, weather: { ...weatherSettings() } };
   change(field);
+  if (draft) {
+    draft.texts.push(text);
+    draft.onChange?.();
+    await renderWeatherSettings();
+    return;
+  }
   try {
     await state().store.saveFieldWeather(field.id, { base_lat: field.base_lat ?? null, base_lng: field.base_lng ?? null, weather: field.weather || {} });
     record({ kind: "field.weather", plan: false, target: ["field", field.id], text });

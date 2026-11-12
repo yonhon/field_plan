@@ -47,7 +47,7 @@ import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { initProcessEditor } from "./process-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
-import { initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
+import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather, renderWeatherSettings, syncWeather, weatherDraftDirty } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { currentBlockId, ganttHasFocus, initSchedule, openInSchedule, openProcessPlan, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash, selectedRowPreset } from "./schedule-view.js";
@@ -134,6 +134,16 @@ const state = {
   view: { x: -40, y: -40, w: 80, h: 80 },
 };
 
+// 圃場の設定の窓の状態（窓の処理は「---- 圃場の設定の窓 ----」）
+const settings = {
+  open: false,
+  start: null, // 開いたとき（保存したとき）の写し
+  undo: [],
+  redo: [],
+  transforms: [], // 書きかけの図形の変換（保存するときに、ほかのプランにも当てる）
+  records: [], // 書きかけの変更の記録（保存するときに記録する）
+  home: null, // 図を戻す場所
+};
 const map = $("map");
 
 // ---- 座標 ----
@@ -914,6 +924,7 @@ function renderPanel() {
       : "この下絵の上で図形を描きます。縮尺や向きを変えると、図形も一緒に伸び縮み・回転します。";
   $("alignTools").hidden = !fitted;
   $("fitShapesBtn").disabled = !state.alignment;
+  renderSettingsFoot();
 }
 
 function renderSelection() {
@@ -1025,6 +1036,9 @@ function scheduleSaves() {
 }
 
 function queueSave(key) {
+  if (settings.open && (key === "field" || key === "backdrop" || /^(zone|block|bed):/.test(key))) {
+    return; // 圃場の設定の窓の書きかけ。窓の「保存する」でまとめて保存する
+  }
   pendingSaves.set(key, currentOperation());
   scheduleSaves();
 }
@@ -1217,12 +1231,27 @@ async function transformShapes(change) {
       queueSave(`${kind}:${item.id}`);
     }
   }
+  if (settings.open) {
+    // 圃場の設定の窓の書きかけ: ほかのプランには、保存するときに当てる
+    settings.transforms.push(change);
+    return;
+  }
   for (const plan of state.plans.filter((other) => other.id !== state.plan.id)) {
     for (const table of ["zones", "blocks", "beds"]) {
       const rows = await state.store.list(table, plan.id);
       await state.store.upsert(table, rows.map((row) => ({ ...row, shape: change(row.shape) })));
     }
   }
+}
+
+// 図形を伸び縮み・回転させる。ふだんはすぐ保存して、元に戻すの履歴を空にする（すべてのプランにまたがるので）。
+// 圃場の設定の窓では書きかけにする（保存は窓の「保存する」）
+function applyTransform(change) {
+  if (settings.open) {
+    transformShapes(change);
+    return;
+  }
+  persist(() => transformShapes(change)).then(resetHistory);
 }
 
 // 図形と下絵を同じ倍率で伸縮する。原点（基準点）は動かさない
@@ -1233,8 +1262,8 @@ function applyScale(factor) {
   }
   const { x, y, w, h } = state.view;
   setView({ x: x * factor, y: y * factor, w: w * factor, h: h * factor });
-  persist(() => transformShapes((points) => scalePoints(points, factor))).then(resetHistory);
-  record({ kind: "field.scale", plan: false, text: "縮尺を合わせ直した（すべての図形の大きさが変わる）" });
+  applyTransform((points) => scalePoints(points, factor));
+  adjustRecord({ kind: "field.scale", plan: false, text: "縮尺を合わせ直した（すべての図形の大きさが変わる）" });
   render();
 }
 
@@ -1255,11 +1284,14 @@ function askNumber(message, initial, allowZero = false) {
 function finishScale() {
   const measured = distance(state.draft[0], state.draft[1]);
   const actual = measured > 0 ? askNumber("この 2 点の実際の距離（m）") : null;
+  if (actual) {
+    markStep();
+  }
   if (actual && state.backdrop?.fitted) {
     // 図形に合わせて置いた下絵: 下絵の縮尺だけを変える。クリックした 2 点の中ほどは動かさない
     const middle = [(state.draft[0][0] + state.draft[1][0]) / 2, (state.draft[0][1] + state.draft[1][1]) / 2];
     setBackdrop(scaleBackdropAt(state.backdrop, actual / measured, middle));
-    record({ kind: "backdrop.scale", plan: false, text: "下絵の縮尺を、下絵の尺度で合わせた（図形は変わらない）", after: `1 画素 = ${(state.backdrop.m_per_px * 100).toFixed(3)} cm` });
+    adjustRecord({ kind: "backdrop.scale", plan: false, text: "下絵の縮尺を、下絵の尺度で合わせた（図形は変わらない）", after: `1 画素 = ${(state.backdrop.m_per_px * 100).toFixed(3)} cm` });
   } else if (actual) {
     applyScale(actual / measured);
   }
@@ -1294,8 +1326,9 @@ function alignStep() {
   if (clicks.length === 1) {
     $("hint").textContent = "その目印が来るべき、図形の上の点をクリック。";
   } else if (clicks.length === 2) {
+    markStep();
     setBackdrop(alignBackdrop(state.backdrop, [[clicks[0], clicks[1]]]).backdrop);
-    record({ kind: "backdrop.move", plan: false, text: "下絵の位置を、図形に合わせた（図形は変わらない）" });
+    adjustRecord({ kind: "backdrop.move", plan: false, text: "下絵の位置を、図形に合わせた（図形は変わらない）" });
     // 1 つ目の目印は、いまは図形の上の点にある。次のクリックは、2 組目の下絵の上の目印
     state.draft = [clicks[1], clicks[1]];
     state.alignAt = clicks[1];
@@ -1307,9 +1340,10 @@ function alignStep() {
     const [, , from, to] = clicks;
     const at = state.alignAt;
     const { backdrop, ratio } = alignBackdrop(state.backdrop, [[at, at], [from, to]]);
+    markStep();
     setBackdrop(backdrop);
     state.alignment = { pixel: worldToImage(backdrop, at), at, ratio };
-    record({ kind: "backdrop.turn", plan: false, text: "下絵の向きを、図形に合わせた（図形は変わらない）", after: `${round2(backdrop.rotation_deg)} 度` });
+    adjustRecord({ kind: "backdrop.turn", plan: false, text: "下絵の向きを、図形に合わせた（図形は変わらない）", after: `${round2(backdrop.rotation_deg)} 度` });
     setMode("select");
     const percent = (ratio - 1) * 100;
     notify(
@@ -1332,7 +1366,7 @@ async function fitShapesToBackdrop() {
     return;
   }
   const factor = 1 / alignment.ratio;
-  const ok = await confirmAction({
+  const ok = settings.open || await confirmAction({
     message: "この圃場のすべてのプランの外形・区域・区画・畝の大きさを、下絵の縮尺に合わせて変えます。「元に戻す」では戻せません。",
     name: `図形を ${factor.toFixed(4)} 倍`,
     action: "図形の大きさを変える",
@@ -1340,14 +1374,15 @@ async function fitShapesToBackdrop() {
   if (!ok || state.alignment !== alignment) {
     return;
   }
+  markStep();
   const at = [alignment.at[0] * factor, alignment.at[1] * factor];
   state.backdrop = anchorBackdrop(state.backdrop, alignment.pixel, at);
   state.alignment = null;
   queueSave("backdrop");
   const { x, y, w, h } = state.view;
   setView({ x: x * factor, y: y * factor, w: w * factor, h: h * factor });
-  persist(() => transformShapes((points) => scalePoints(points, factor))).then(resetHistory);
-  record({ kind: "field.scale", plan: false, text: "図形を下絵の縮尺に合わせた（すべての図形の大きさが変わる）", after: `${factor.toFixed(4)} 倍` });
+  applyTransform((points) => scalePoints(points, factor));
+  adjustRecord({ kind: "field.scale", plan: false, text: "図形を下絵の縮尺に合わせた（すべての図形の大きさが変わる）", after: `${factor.toFixed(4)} 倍` });
   render();
 }
 
@@ -1364,11 +1399,12 @@ async function scaleByArea() {
   }
   const factor = Math.sqrt(actual / outlineArea(state.field.outline));
   if (!state.backdrop?.fitted) {
+    markStep();
     applyScale(factor);
     return;
   }
-  // 図形に合わせて置いた下絵: 図形の大きさだけを直す。下絵は動かさない
-  const ok = await confirmAction({
+  // 図形に合わせて置いた下絵: 図形の大きさだけを直す。下絵は動かさない（窓の中では確かめない。保存するときに確かめる）
+  const ok = settings.open || await confirmAction({
     message: "外形の面積に合わせて、この圃場のすべてのプランの図形の大きさを変えます。下絵は変わらないので、下絵と図形がずれます。「元に戻す」では戻せません。",
     name: `図形を ${factor.toFixed(4)} 倍`,
     action: "図形の大きさを変える",
@@ -1376,19 +1412,24 @@ async function scaleByArea() {
   if (!ok) {
     return;
   }
+  markStep();
   state.alignment = null;
-  persist(() => transformShapes((points) => scalePoints(points, factor))).then(resetHistory);
-  record({ kind: "field.scale", plan: false, text: "外形の面積で、図形の大きさを直した（下絵は変わらない）", after: `${factor.toFixed(4)} 倍` });
+  applyTransform((points) => scalePoints(points, factor));
+  adjustRecord({ kind: "field.scale", plan: false, text: "外形の面積で、図形の大きさを直した（下絵は変わらない）", after: `${factor.toFixed(4)} 倍` });
   render();
 }
 
 function setRotation(degrees) {
   const delta = degrees - state.backdrop.rotation_deg;
+  if (!delta) {
+    return;
+  }
+  markStep();
   if (state.backdrop.fitted) {
     // 図形に合わせて置いた下絵: 下絵だけを、画面の真ん中のまわりに回す
     const { x, y, w, h } = state.view;
     setBackdrop(rotateBackdropAt(state.backdrop, delta, [x + w / 2, -(y + h / 2)]));
-    record({ kind: "backdrop.turn", plan: false, text: "下絵の向きを変えた（図形は変わらない）", after: `${degrees} 度` });
+    adjustRecord({ kind: "backdrop.turn", plan: false, text: "下絵の向きを変えた（図形は変わらない）", after: `${degrees} 度` });
     return;
   }
   state.backdrop.rotation_deg = degrees;
@@ -1397,8 +1438,8 @@ function setRotation(degrees) {
     state.field.view_dirs = state.field.view_dirs.map((direction) => direction - delta);
     queueSave("field");
   }
-  persist(() => transformShapes((points) => rotatePoints(points, delta))).then(resetHistory);
-  record({ kind: "field.rotation", plan: false, text: "下絵の向きを合わせ直した", after: `${degrees} 度` });
+  applyTransform((points) => rotatePoints(points, delta));
+  adjustRecord({ kind: "field.rotation", plan: false, text: "下絵の向きを合わせ直した", after: `${degrees} 度` });
   render();
 }
 
@@ -2393,11 +2434,12 @@ async function loadBackdropFile(file) {
       $("saveStatus").textContent = `画像を保存中… ${Math.floor((loaded / (total || 1)) * 100)}%（${mb(loaded)} / ${mb(total)} MB）`;
     });
     const url = await state.store.imageUrl(path);
+    markStep();
     state.backdrop = { id: crypto.randomUUID(), field_id: state.field.id, storage_path: path, ...placement, size };
     state.backdropUrl = url;
     state.alignment = null;
     queueSave("backdrop");
-    record({
+    adjustRecord({
       kind: "backdrop.load",
       plan: false,
       text: carried
@@ -2432,6 +2474,9 @@ function pressedSelected(event) {
 // 作図の道具（選択・移動、外形を描く、など）が出ているか。スマホやタブレットの幅では出さない（.edit-only）。
 // 出ていないときは、図形を動かしたり描いたりせず、なぞったら図が動くだけにする（見るための画面なので）
 function drawingToolsShown() {
+  if (settings.open) {
+    return false; // 圃場の設定の窓の中の図は、見るだけ（2 点の距離と、位置合わせのクリックだけ受ける）
+  }
   const tools = document.querySelector("#appView .toolbar.edit-only");
   return Boolean(tools) && getComputedStyle(tools).display !== "none";
 }
@@ -2667,7 +2712,9 @@ function endPointer(event) {
     showView("planting");
     return;
   }
-  if (state.mode === "select") {
+  if (state.mode === "select" && settings.open) {
+    return;
+  } else if (state.mode === "select") {
     state.selected = finished.shape || null;
     state.selectedVertex = null;
   } else if (state.mode === "align") {
@@ -2841,15 +2888,228 @@ $("backdropFile").addEventListener("change", (event) => {
     loadBackdropFile(file);
   }
 });
-$("backdropVisible").addEventListener("change", (event) => {
-  state.backdropVisible = event.target.checked;
-  renderMap();
-});
+document.querySelectorAll(".backdrop-visible").forEach((box) =>
+  box.addEventListener("change", (event) => {
+    state.backdropVisible = event.target.checked;
+    document.querySelectorAll(".backdrop-visible").forEach((other) => (other.checked = state.backdropVisible));
+    renderMap();
+  })
+);
 $("rotation").addEventListener("change", (event) => {
   const degrees = Number(event.target.value);
   if (state.backdrop && Number.isFinite(degrees)) {
     setRotation(degrees);
   }
+});
+
+// ---- 圃場の設定の窓 ----
+// 下絵・縮尺・位置と向き・気象。開いているあいだは、圃場図の図（と案内）を窓の中へ移す。
+// 調整は書きかけ: 下絵・外形・図形の保存と、変更の履歴の記録を止めて溜め、図形の伸び縮み・回転は開いているプランにだけ当てて覚える。
+// 調整のたびに状態の写しを取り、窓の中の「元に戻す・やり直す」で行き来する。「保存する」でまとめて保存し（窓は閉じない）、
+// ほかのプランの図形にも同じ変換を当てる。保存しないまま閉じたら、開く前の状態に戻す
+
+// （settings は、ファイルの先頭のほうで宣言している）
+
+// 下絵の調整の変更の記録。窓を開いているあいだは溜めておく
+function adjustRecord(entry) {
+  if (settings.open) {
+    settings.records.push(entry);
+  } else {
+    record(entry);
+  }
+}
+
+function settingsSnapshot() {
+  return {
+    backdrop: state.backdrop ? structuredClone(state.backdrop) : null,
+    backdropUrl: state.backdropUrl,
+    alignment: state.alignment ? structuredClone(state.alignment) : null,
+    outline: structuredClone(state.field.outline),
+    viewDirs: state.field.view_dirs ? [...state.field.view_dirs] : (state.field.view_dirs ?? null),
+    shapes: Object.fromEntries(["zones", "blocks", "beds"].map((table) => [table, Object.fromEntries(state[table].map((item) => [item.id, structuredClone(item.shape)]))])),
+    transforms: [...settings.transforms],
+    records: [...settings.records],
+    view: { ...state.view },
+  };
+}
+
+function restoreSnapshot(snap) {
+  state.backdrop = snap.backdrop ? structuredClone(snap.backdrop) : null;
+  state.backdropUrl = snap.backdropUrl;
+  state.alignment = snap.alignment ? structuredClone(snap.alignment) : null;
+  state.field.outline = structuredClone(snap.outline);
+  state.field.view_dirs = snap.viewDirs;
+  for (const table of ["zones", "blocks", "beds"]) {
+    for (const item of state[table]) {
+      if (snap.shapes[table][item.id]) {
+        item.shape = structuredClone(snap.shapes[table][item.id]);
+      }
+    }
+  }
+  settings.transforms = [...snap.transforms];
+  settings.records = [...snap.records];
+  setView(snap.view);
+  render();
+}
+
+// 保存するものが変わったかを見分ける写しの要約（表示の位置や画像の大きさは含めない）
+const settingsKey = (snap) =>
+  JSON.stringify({ backdrop: snap.backdrop && { ...snap.backdrop, size: null }, outline: snap.outline, viewDirs: snap.viewDirs, shapes: snap.shapes, transforms: snap.transforms.length });
+const settingsDirty = () => settings.open && (settingsKey(settingsSnapshot()) !== settingsKey(settings.start) || weatherDraftDirty());
+
+// 調整を 1 回する前に呼ぶ。いまの状態を「元に戻す」の履歴に積む
+function markStep() {
+  if (!settings.open) {
+    return;
+  }
+  settings.undo.push(settingsSnapshot());
+  settings.redo.length = 0;
+  $("settingsStatus").textContent = "";
+}
+
+function renderSettingsFoot() {
+  if (!settings.open) {
+    return;
+  }
+  const dirty = settingsDirty();
+  $("settingsSave").disabled = !dirty;
+  $("settingsUndo").disabled = !settings.undo.length;
+  $("settingsRedo").disabled = !settings.redo.length;
+  $("settingsWarn").hidden = !settings.transforms.length;
+  if (dirty) {
+    $("settingsStatus").textContent = settings.undo.length ? `保存していない調整があります（${settings.undo.length} 回）` : "保存していない変更があります";
+  } else if ($("settingsStatus").textContent !== "保存しました") {
+    $("settingsStatus").textContent = "変更はありません";
+  }
+}
+
+async function openFieldSettings() {
+  if (settings.open || state.planBusy) {
+    return;
+  }
+  // それまでの図形の保存を先に済ませる（窓を開いているあいだの保存の予約は止めるので）
+  await sendPendingSaves();
+  setMode("select");
+  Object.assign(settings, { open: true, undo: [], redo: [], transforms: [], records: [] });
+  settings.start = settingsSnapshot();
+  beginWeatherDraft(renderSettingsFoot);
+  const frame = document.querySelector("#appView .map-frame");
+  settings.home = { parent: frame.parentElement, next: frame.nextSibling };
+  $("settingsMapSlot").append($("hint"), frame);
+  $("fieldSettingsName").textContent = state.field.name || "";
+  $("settingsStatus").textContent = "";
+  $("fieldSettings").showModal();
+  $("fieldSettingsTitle").focus({ preventScroll: true });
+  renderWeatherSettings();
+  render();
+}
+
+// 閉じる。保存していない変更があれば、捨ててよいかを確かめる
+async function requestCloseSettings() {
+  if (settingsDirty() && !(await confirmAction({ message: "まだ保存していない設定があります。この設定は消えます。", action: "捨てて閉じる", cancel: "入力を続ける" }))) {
+    return;
+  }
+  setMode("select");
+  if (settingsDirty()) {
+    restoreSnapshot(settings.start);
+  }
+  cancelWeatherDraft();
+  settings.open = false;
+  const frame = $("settingsMapSlot").querySelector(".map-frame");
+  settings.home.parent.insertBefore(frame, settings.home.next);
+  settings.home.parent.insertBefore($("hint"), frame);
+  $("fieldSettings").close();
+  renderWeatherSettings();
+  render();
+}
+
+// 書きかけをまとめて保存する。窓は閉じない。保存したところを新しい出発点にし、「元に戻す」の履歴は空にする
+async function saveFieldSettings() {
+  if (!settingsDirty()) {
+    return;
+  }
+  if (settings.transforms.length) {
+    const ok = await confirmAction({
+      message: "図形の大きさ・向きを変える調整が入っています。この圃場のすべてのプランの外形・区域・区画・畝に当てて保存します。保存したあとは「元に戻す」で戻せません。",
+      action: "保存する",
+    });
+    if (!ok) {
+      return;
+    }
+  }
+  setMode("select");
+  const start = settings.start;
+  const now = settingsSnapshot();
+  $("settingsStatus").textContent = "保存中…";
+  $("settingsSave").disabled = true;
+  try {
+    if (JSON.stringify(now.backdrop && { ...now.backdrop, size: null }) !== JSON.stringify(start.backdrop && { ...start.backdrop, size: null }) && state.backdrop) {
+      const { size, ...row } = state.backdrop;
+      await state.store.saveBackdrop(row);
+    }
+    if (JSON.stringify([now.outline, now.viewDirs]) !== JSON.stringify([start.outline, start.viewDirs])) {
+      await state.store.saveField(state.field);
+    }
+    for (const table of ["zones", "blocks", "beds"]) {
+      const changed = state[table].filter((item) => JSON.stringify(item.shape) !== JSON.stringify(start.shapes[table][item.id]));
+      if (changed.length) {
+        await state.store.upsert(table, changed);
+      }
+    }
+    // ほかのプランの図形にも、同じ変換を順に当てる
+    if (settings.transforms.length) {
+      for (const plan of state.plans.filter((other) => other.id !== state.plan.id)) {
+        for (const table of ["zones", "blocks", "beds"]) {
+          const rows = await state.store.list(table, plan.id);
+          await state.store.upsert(table, rows.map((row) => ({ ...row, shape: settings.transforms.reduce((shape, change) => change(shape), row.shape) })));
+        }
+      }
+    }
+    await commitWeatherDraft();
+    settings.records.forEach((entry) => record(entry));
+    Object.assign(settings, { undo: [], redo: [], transforms: [], records: [] });
+    settings.start = settingsSnapshot();
+    resetHistory();
+    $("settingsStatus").textContent = "保存しました";
+  } catch (error) {
+    $("settingsStatus").textContent = `保存できませんでした: ${error.message}`;
+    notifySaveFailed(error);
+  }
+  renderSettingsFoot();
+}
+
+function settingsUndo(from, to) {
+  if (!from.length) {
+    return;
+  }
+  setMode("select");
+  to.push(settingsSnapshot());
+  restoreSnapshot(from.pop());
+  $("settingsStatus").textContent = "";
+  renderSettingsFoot();
+}
+
+$("settingsUndo").addEventListener("click", () => settingsUndo(settings.undo, settings.redo));
+$("settingsRedo").addEventListener("click", () => settingsUndo(settings.redo, settings.undo));
+$("settingsSave").addEventListener("click", saveFieldSettings);
+$("fieldSettingsClose").addEventListener("click", requestCloseSettings);
+// Esc: 書きかけがあれば、捨ててよいかを確かめる
+$("fieldSettings").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  requestCloseSettings();
+});
+// 下絵・縮尺・位置と向き・気象のタブ
+$("fieldSettings").addEventListener("click", (event) => {
+  const tab = event.target.closest("[data-fstab]");
+  if (!tab) {
+    return;
+  }
+  setMode("select");
+  document.querySelectorAll("[data-fstab]").forEach((item) => {
+    item.classList.toggle("is-on", item === tab);
+    item.setAttribute("aria-selected", String(item === tab));
+  });
+  document.querySelectorAll("[data-fspanel]").forEach((panel) => (panel.hidden = panel.dataset.fspanel !== tab.dataset.fstab));
 });
 
 // ---- 圃場図と日程の切り替え ----
@@ -3072,7 +3332,7 @@ async function startApp() {
   $("appView").hidden = false;
   $("viewTabs").hidden = false;
   initFieldPlans({ state, notify, ops: fieldPlanOps });
-  setPlaceActions({ choose: openFieldPlans });
+  setPlaceActions({ choose: openFieldPlans, settings: openFieldSettings });
   renderPlans();
   fitView();
   setMode("select");
@@ -3140,7 +3400,7 @@ async function startApp() {
   initHistory({
     state,
     // プランを読み込んでいるあいだは、元に戻さない
-    busy: () => state.planBusy,
+    busy: () => state.planBusy || settings.open,
     setStatus,
     // まだ送っていない図形の保存を、先に済ませる
     flush: async () => {
