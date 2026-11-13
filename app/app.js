@@ -3756,6 +3756,7 @@ function showView(view, { history: mode = "push" } = {}) {
   if (mode !== "none" && location.hash !== hash) {
     window.history[mode === "replace" ? "replaceState" : "pushState"]({ fieldPlanView: view }, "", hash);
   }
+  rememberScheduleTab(view);
   const tab = view === "planting" ? "schedule" : view;
   document.querySelectorAll(".tab-btn").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.view === tab);
@@ -3796,8 +3797,35 @@ function showView(view, { history: mode = "push" } = {}) {
   }
 }
 
+// 日程のタブで最後に見ていた画面（日程の画面か、作付の詳細と、その作付）を、圃場ごとに覚える。
+// 日程のタブを押したときは、その画面に戻る（ほかのタブに移ってから戻ったとき、次にアプリを開いたとき）
+function rememberScheduleTab(view) {
+  const target = plantingTarget();
+  if (!state.field || (view !== "schedule" && view !== "planting") || (view === "planting" && target.kind !== "planting")) {
+    return;
+  }
+  savePref(state.field.id, "scheduleTab", view === "planting" ? { view, plantingId: target.id } : { view });
+}
+
+// 作付の詳細を開いているときに日程のタブを押したら、これまでどおり日程の画面へ移り、その作付の畝を選ぶ
+function scheduleTabView() {
+  if (!$("plantingView").hidden) {
+    const target = plantingTarget();
+    if (target.kind === "planting" && state.plantings.some((planting) => planting.id === target.id)) {
+      openInSchedule("planting", target.id);
+    }
+    return "schedule";
+  }
+  const last = state.field ? loadPref(state.field.id, "scheduleTab") : null;
+  if (last?.view === "planting" && state.plantings.some((planting) => planting.id === last.plantingId)) {
+    openPlantingDetail("planting", last.plantingId);
+    return "planting";
+  }
+  return "schedule";
+}
+
 document.querySelectorAll(".tab-btn").forEach((button) => {
-  button.addEventListener("click", () => showView(button.dataset.view));
+  button.addEventListener("click", () => showView(button.dataset.view === "schedule" ? scheduleTabView() : button.dataset.view));
 });
 
 // ブラウザーの戻る・進み。URL の画面を出す（アプリを開く前の画面では何もしない）

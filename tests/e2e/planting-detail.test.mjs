@@ -167,3 +167,28 @@ test("定植の仕様が品目の設定値と違えば、計画と実績の欄�
   await openFromMap("pl2");
   assert.deepEqual(await notes(), []);
 });
+
+test("作付の詳細から別のタブに移って日程のタブに戻ると、その作付の詳細を開く。次に開いたときも同じ", options, async () => {
+  await page.loadApp(seed());
+  await openFromMap("pl2");
+  const detailOf = (planting) => `location.hash === "#detail/planting/${planting}" && !document.getElementById("plantingView").hidden`;
+
+  for (const view of ["map", "crops"]) {
+    await page.click(`.tab-btn[data-view="${view}"]`);
+    await page.waitFor(`document.getElementById("plantingView").hidden`, `${view} に移る`);
+    await page.click('.tab-btn[data-view="schedule"]');
+    await page.waitFor(detailOf("pl2"), `${view} から戻ると、作付の詳細`);
+  }
+
+  await page.loadApp(seed(), { field_plan_prefs: await page.run(`localStorage.getItem("field_plan_prefs")`) });
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(detailOf("pl2"), "次に開いたときも、作付の詳細");
+
+  // 作付の詳細で日程のタブを押すと、これまでどおり日程の画面。そのあとは、日程の画面に戻る
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(`!document.getElementById("scheduleView").hidden && location.hash === "#schedule/block/b1"`, "日程の画面");
+  await page.click('.tab-btn[data-view="map"]');
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(`!document.getElementById("scheduleView").hidden && document.querySelector('.strip-bed[data-bed="bed2"]')?.classList.contains("is-selected")`, "日程の画面で、畝2 を選んだまま");
+  assert.deepEqual(page.errors, []);
+});
