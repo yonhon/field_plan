@@ -12,3 +12,6 @@ desktop.ini
 
 # Supabase CLI の作業用ファイル
 supabase/.temp/
+
+# 監査ファイル
+docs/review-*.md
