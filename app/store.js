@@ -153,13 +153,13 @@ export function createSupabaseStore(client, options) {
       }
       return url;
     },
-    // コピーの途中のプラン（copying）は、出さない。写し終える前に失敗して残ったもので、中身が欠けている
+    // コピーの途中のプラン（copying）は、出さない。前の版の画面が、写し終える前に失敗して残したもので、中身が欠けている
     async loadPlans(fieldId) {
       return check(await client.from("plans").select("*").eq("field_id", fieldId).eq("copying", false).order("created_at"));
     },
-    // 写し終えたプランの、コピーの途中の印を外す
-    async finishPlanCopy(id) {
-      check(await client.from("plans").update({ copying: false }).eq("id", id));
+    // プランを、中身ごとコピーする。DB の関数が、プランを作り、区域・区画・畝・作付・作業を新しい ID で写す。作ったプランを返す
+    async copyPlan(id, name) {
+      return check(await client.rpc("copy_plan", { p_source: id, p_name: name }));
     },
     // コピーの途中のまま残ったプランを消す。before（日時）より前に作ったものだけ（ほかの端末でコピーしている最中のものは消さない）
     async removeStaleCopies(before) {
@@ -444,7 +444,7 @@ export function fetchWithOperation(url, options = {}) {
 
 const QUEUED_WRITES = [
   "upsert", "remove", "saveField", "saveBackdrop", "saveLog", "deleteLog", "saveWorkType", "saveFieldWeather", "markNews",
-  "createField", "deleteField", "createPlan", "renamePlan", "deletePlan", "setActivePlan",
+  "createField", "deleteField", "createPlan", "copyPlan", "renamePlan", "deletePlan", "setActivePlan",
   "diarySaveDay", "diaryAddPhoto",
 ];
 
@@ -576,10 +576,31 @@ export function createLocalStore({ strict = false } = {}) {
     async loadPlans(fieldId) {
       return (read().plans || []).filter((plan) => plan.field_id === fieldId && !plan.copying);
     },
-    async finishPlanCopy(id) {
-      update((data) => {
-        delete data.plans.find((plan) => plan.id === id).copying;
-      });
+    // DB の関数（field.copy_plan）と同じに、1 回の書き込みで写す（途中で失敗したら、何も残らない）
+    async copyPlan(id, name) {
+      const data = read();
+      const source = data.plans.find((plan) => plan.id === id);
+      if (!source) {
+        throw new Error("コピーするプランが見つかりません");
+      }
+      const copy = { id: crypto.randomUUID(), field_id: source.field_id, name };
+      // 行ごとに新しい ID を振り、親を指す列は新しい ID に付け替える
+      const ids = new Map();
+      const fresh = (old) => ids.get(old) ?? ids.set(old, crypto.randomUUID()).get(old);
+      const parents = { zones: [], blocks: ["zone_id"], beds: ["block_id"], plantings: ["bed_id"], works: ["block_id", "planting_id"] };
+      data.plans = [...data.plans, copy];
+      for (const [table, keys] of Object.entries(parents)) {
+        const rows = (data[table] || []).filter((row) => row.plan_id === id).map((row) => {
+          const item = { ...row, id: fresh(row.id), plan_id: copy.id };
+          keys.forEach((key) => {
+            item[key] = row[key] ? fresh(row[key]) : null;
+          });
+          return item;
+        });
+        data[table] = [...(data[table] || []), ...rows];
+      }
+      write(data);
+      return copy;
     },
     async removeStaleCopies(before) {
       const stale = (read().plans || []).filter((plan) => plan.copying && plan.created_at < before).map((plan) => plan.id);
@@ -588,7 +609,7 @@ export function createLocalStore({ strict = false } = {}) {
       }
     },
     async createPlan(plan) {
-      const created = { id: crypto.randomUUID(), ...(plan.copying ? { created_at: new Date().toISOString() } : {}), ...plan };
+      const created = { id: crypto.randomUUID(), ...plan };
       update((data) => {
         data.plans = [...(data.plans || []), created];
       });

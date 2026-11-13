@@ -63,9 +63,11 @@ create table if not exists field.plans (
   created_at timestamptz not null default now()
 );
 
--- コピーの途中の印。プランのコピーは、印を付けてプランを作り、中身を写し終えたら印を外す。
--- 途中で失敗して残ったプランは中身が欠けているので、画面も MCP も、印の付いたプランを出さない。
--- 印が付いたまま 1 時間たったプランは、画面が起動のときに消す
+-- コピーの途中の印。前の版の画面は、印を付けてプランを作り、中身を 1 表ずつ写し終えたら印を外していた。
+-- 途中で失敗して残ったプランは中身が欠けているので、画面も MCP も、印の付いたプランを出さず、
+-- 印が付いたまま 1 時間たったプランは、画面が起動のときに消す。
+-- いまの画面は、コピーを field.copy_plan() で行うので、印を付けない。前の版の画面が残っていないことを見てから、
+-- 画面と MCP の印の扱いと一緒に、この列を消す
 alter table field.plans add column if not exists copying boolean not null default false;
 
 -- 区域。有効圃場（耕起する場所）と、耕起しない場所（物置、井戸、通路、残渣処理場など）
@@ -286,6 +288,68 @@ create index if not exists work_log_inputs_log_idx on field.work_log_inputs (log
 
 -- 記録を 1 件、対象と資材ごと保存する。対象と資材は、渡したもので置き換える。
 -- 画面から呼ぶ。呼んだ利用者の権限で動くので、RLS がそのまま効く
+-- プランをコピーする。プランを作り、区域・区画・畝・作付・作業を、新しい ID を振って写す。作ったプランを返す。
+-- 関数 1 回の呼び出しは 1 つのトランザクションなので、途中で失敗したら、何も残らない
+-- （画面から 1 表ずつ送っていたころは、途中で回線が切れると、区域だけ、区画までだけ、といったプランが残った）。
+-- 呼んだ利用者の権限で動くので、RLS はそのまま効く。行は、列を 1 つずつ書かずに丸ごと写すので、表に列を足しても直さなくてよい。
+-- 親を指す列（zone_id、block_id、bed_id、planting_id）だけ、新しい ID に付け替える
+create or replace function field.copy_plan(p_source uuid, p_name text) returns field.plans
+language plpgsql set search_path = ''
+as $$
+declare
+  source field.plans;
+  copy field.plans;
+  zone_ids jsonb;
+  block_ids jsonb;
+  bed_ids jsonb;
+  planting_ids jsonb;
+begin
+  select * into source from field.plans where id = p_source;
+  if not found then
+    raise exception 'コピーするプランが見つかりません';
+  end if;
+  if coalesce(btrim(p_name), '') = '' then
+    raise exception 'プランの名前がありません';
+  end if;
+  insert into field.plans (field_id, name) values (source.field_id, p_name) returning * into copy;
+
+  -- 行ごとの新しい ID。{ 元の ID: 新しい ID }
+  select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into zone_ids from field.zones where plan_id = p_source;
+  select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into block_ids from field.blocks where plan_id = p_source;
+  select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into bed_ids from field.beds where plan_id = p_source;
+  select coalesce(jsonb_object_agg(id, gen_random_uuid()), '{}') into planting_ids from field.plantings where plan_id = p_source;
+
+  -- 親から子の順に入れる
+  insert into field.zones
+  select (jsonb_populate_record(null::field.zones, to_jsonb(r) || jsonb_build_object(
+    'id', zone_ids ->> r.id::text, 'plan_id', copy.id))).*
+  from field.zones r where r.plan_id = p_source;
+
+  insert into field.blocks
+  select (jsonb_populate_record(null::field.blocks, to_jsonb(r) || jsonb_build_object(
+    'id', block_ids ->> r.id::text, 'plan_id', copy.id, 'zone_id', zone_ids ->> r.zone_id::text))).*
+  from field.blocks r where r.plan_id = p_source;
+
+  insert into field.beds
+  select (jsonb_populate_record(null::field.beds, to_jsonb(r) || jsonb_build_object(
+    'id', bed_ids ->> r.id::text, 'plan_id', copy.id, 'block_id', block_ids ->> r.block_id::text))).*
+  from field.beds r where r.plan_id = p_source;
+
+  insert into field.plantings
+  select (jsonb_populate_record(null::field.plantings, to_jsonb(r) || jsonb_build_object(
+    'id', planting_ids ->> r.id::text, 'plan_id', copy.id, 'bed_id', bed_ids ->> r.bed_id::text))).*
+  from field.plantings r where r.plan_id = p_source;
+
+  insert into field.works
+  select (jsonb_populate_record(null::field.works, to_jsonb(r) || jsonb_build_object(
+    'id', gen_random_uuid(), 'plan_id', copy.id,
+    'block_id', block_ids ->> r.block_id::text, 'planting_id', planting_ids ->> r.planting_id::text))).*
+  from field.works r where r.plan_id = p_source;
+
+  return copy;
+end;
+$$;
+
 create or replace function field.save_work_log(log jsonb, targets jsonb, inputs jsonb) returns uuid
 language plpgsql set search_path = ''
 as $$
@@ -729,6 +793,8 @@ revoke all on field.audit_log from authenticated;
 revoke all on function field.write_audit_log() from public, anon, authenticated;
 revoke all on function field.is_owner() from public, anon;
 grant execute on function field.is_owner() to authenticated;
+revoke all on function field.copy_plan(uuid, text) from public, anon;
+grant execute on function field.copy_plan(uuid, text) to authenticated;
 revoke all on function field.save_work_log(jsonb, jsonb, jsonb) from public, anon;
 grant execute on function field.save_work_log(jsonb, jsonb, jsonb) to authenticated;
 revoke all on field.importers from authenticated;

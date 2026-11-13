@@ -2552,46 +2552,16 @@ async function copyPlan(field = state.field, plan = state.plan, plans = state.pl
   }
   let copy = null;
   await planTask(async () => {
-    let source = state;
+    // 写すのは DB の中身なので、開いているプランは、まだ送っていない変更を先に送る
     if (plan.id === state.plan.id) {
       clearTimeout(saveTimer);
       await flushSaves();
-    } else {
-      source = await loadTables(PLAN_TABLES, plan.id);
-    }
-    // コピーの途中の印を付けて作る。写し終えるまでは、どの画面の一覧にも出ない
-    copy = await state.store.createPlan({ field_id: field.id, name, copying: true });
-    // 行ごとに新しい ID を振り、親を指す列は新しい ID に付け替える
-    const ids = new Map();
-    const fresh = (id) => {
-      if (!ids.has(id)) {
-        ids.set(id, crypto.randomUUID());
+      if (pendingSaves.size) {
+        throw new Error("まだ保存できていない変更があるので、コピーをやめました");
       }
-      return ids.get(id);
-    };
-    const parents = { zones: [], blocks: ["zone_id"], beds: ["block_id"], plantings: ["bed_id"], works: ["block_id", "planting_id"] };
-    try {
-      for (const [table, keys] of Object.entries(parents)) {
-        const rows = source[table].map((row) => {
-          const item = { ...row, id: fresh(row.id), plan_id: copy.id };
-          keys.forEach((key) => {
-            item[key] = row[key] ? fresh(row[key]) : null;
-          });
-          return item;
-        });
-        await state.store.upsert(table, rows);
-      }
-      await state.store.finishPlanCopy(copy.id);
-      copy.copying = false;
-    } catch (error) {
-      // 途中で失敗した。区域だけ、区画までだけ、といった半端なプランを DB に残さない（下の行は、プランと一緒に消える）。
-      // 消すのも失敗したとき（回線が切れたまま）は、コピーの途中の印が付いたまま残る。印の付いたプランは一覧に出ず、
-      // 1 時間たったあとの起動で消える（startApp）。消せなくても、元の失敗を知らせる
-      const created = copy;
-      copy = null;
-      await state.store.deletePlan(created.id).catch(() => {});
-      throw error;
     }
+    // DB の関数 1 つで写す（field.copy_plan）。1 つのトランザクションなので、途中で失敗しても、作りかけのプランは残らない
+    copy = await state.store.copyPlan(plan.id, name);
     record({ kind: "plan.copy", plan: copy, field, target: ["plan", copy.id], text: `プラン「${plan.name}」をコピーして、プラン「${copy.name}」を作成` });
     plans.push(copy);
   });
@@ -3878,7 +3848,9 @@ async function startApp() {
     );
     return;
   }
-  // コピーの途中で失敗して残ったプランを消す。1 時間より前のものだけ（ほかの端末でコピーしている最中のものは消さない）。
+  // 前の版の画面がコピーの途中で失敗して残したプラン（コピーの途中の印が付いている）を消す。
+  // 1 時間より前のものだけ（ほかの端末の前の版がコピーしている最中のものは消さない）。
+  // いまの版は、コピーを DB の関数で行うので、印を付けない。前の版の画面が残っていないことを見てから、印の列と一緒にこの片づけも消す。
   // 消せなくても、起動は止めない（一覧には出ないので、次の起動で消せばよい）
   state.store.removeStaleCopies(new Date(Date.now() - STALE_COPY_MS).toISOString()).catch(() => {});
   $("viewDate").value = state.viewDate;
