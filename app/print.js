@@ -1,8 +1,7 @@
 // PDF 出力。ブラウザーの印刷を開き、出力先で「PDF に保存」を選んでもらう。
 // 画面とは別の、印刷だけに出る枠（printArea）に中身を入れて、ほかを隠す
 import { draw } from "./draw.js";
-
-const escapeHtml = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+import { escapeHtml } from "./html.js";
 
 // A4 の、余白 10 mm を除いた印刷できる範囲（CSS の px。1 mm は 96 / 25.4 px）。見出しのぶん、高さを 12 mm 引く
 export const PAGE_PX = { landscape: [1047, 672], portrait: [718, 1031] };

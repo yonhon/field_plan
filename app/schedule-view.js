@@ -27,11 +27,9 @@ import { loadPref, savePref } from "./prefs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
 import { draw } from "./draw.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 // 工程表の寸法。1 日の幅は、表示期間が画面の幅に収まるように描くたびに決める（dayPx）
 let dayPx = 7;
 const NAME_W = 180; // 名前の列の幅

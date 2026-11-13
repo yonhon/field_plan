@@ -22,9 +22,8 @@ import { confirmAction, notify } from "./dialog.js";
 import { noteChange } from "./history.js";
 import { record } from "./journal.js";
 import { ARRANGE_MODES, SCOPE_LABELS, currentActuals, isActivePlan } from "./schedule-view.js";
+import { escapeHtml } from "./html.js";
 
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
 let ctx = null; // { state, refresh, setStatus }

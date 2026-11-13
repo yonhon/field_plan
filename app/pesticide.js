@@ -5,9 +5,8 @@
 import { defaultDilution, formatAmount, inputText, parseUsage, pesticideCounts, previousChoice, sprayWarnings, standardChoice, usageRange, usageWarnings } from "./logs.js";
 import { draw } from "./draw.js";
 import { UNKNOWN_PRODUCT, codesText, describeHtml, iconsHtml, productCodes } from "./rac.js";
+import { escapeHtml } from "./html.js";
 
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const SEARCH_DELAY_MS = 300;
 export const NOTICE_URL = "https://www.acis.famic.go.jp/ddata/soukaisuu.pdf";
 

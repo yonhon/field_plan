@@ -35,11 +35,9 @@ import { WORK_COLORS, localToday, workName } from "./schedule.js";
 import { specText } from "./logs.js";
 import { inputHtml } from "./pesticide.js";
 import { openLogEditor } from "./log-view.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 const DRAFTS_KEY = "field_plan_diary_drafts";
 const MODES = [
   ["day", "日"],

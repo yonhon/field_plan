@@ -1,6 +1,9 @@
 // 2 週間気温予報を、画面に渡す Supabase Edge Function。
 // 気象庁の 2 週間気温予報のデータは、ブラウザーから直接は読めない（CORS を許していない）ので、ここで読んで返す。
-// 配備: supabase functions deploy field-weather（JWT を確かめる。画面からログインした利用者だけが呼べる）
+// 配備: supabase functions deploy field-weather
+// 呼べるのは、field.owners にいる利用者だけ。Supabase の JWT の確かめ（verify_jwt）は、プロジェクトの署名があるかを見るだけで、
+// 公開キーそのものも通す。そのため、関数の中で、送られてきたログインの印の利用者を DB に尋ねる（isOwner）。
+// 地点の一覧は気象庁へ 155 回ほど問い合わせるので、だれでも呼べると、この関数が気象庁に負荷をかける側になる
 // 呼び方（POST の JSON）:
 //   { station: 47662 } → { report, name, days: [{ date, max, min, max_lower, max_upper, min_lower, min_upper }] }
 //   { list: true }     → { stations: [{ no, name, fuk }] }（地点の一覧）
@@ -13,6 +16,39 @@ const CORS = {
 
 const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+
+// 呼んだ利用者が field.owners にいるか。送られてきたログインの印を付けて、DB の field.is_owner() を呼ぶ。
+// 公開キーだけの呼び出しは、field スキーマを使えないので断られる。確かめた結果は、関数が動いているあいだ 5 分覚えておく
+const OWNER_TTL_MS = 5 * 60 * 1000;
+const owners = new Map<string, number>();
+
+async function isOwner(request: Request) {
+  const authorization = request.headers.get("authorization") ?? "";
+  if (!authorization) {
+    return false;
+  }
+  if ((owners.get(authorization) ?? 0) > Date.now()) {
+    return true;
+  }
+  const response = await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/rpc/is_owner`, {
+    method: "POST",
+    headers: {
+      apikey: Deno.env.get("SUPABASE_ANON_KEY") || request.headers.get("apikey") || "",
+      Authorization: authorization,
+      "Content-Type": "application/json",
+      "Content-Profile": "field",
+    },
+    body: "{}",
+  });
+  if (!response.ok || (await response.json()) !== true) {
+    return false;
+  }
+  if (owners.size >= 100) {
+    owners.clear();
+  }
+  owners.set(authorization, Date.now() + OWNER_TTL_MS);
+  return true;
+}
 
 // 地点の一覧。ページの部品（bundle.js）に埋め込まれている。日本語の一覧が先にある。
 // 一覧には、予報のデータを出していない地点も多く入っている（2026-10 に 155 地点のうち 92 地点）ので、
@@ -95,6 +131,9 @@ Deno.serve(async (request) => {
     return new Response("ok", { headers: CORS });
   }
   try {
+    if (!(await isOwner(request))) {
+      return reply({ error: "この関数は、ログインした本人だけが使えます" }, 403);
+    }
     const body = await request.json().catch(() => ({}));
     if (body.list) {
       return reply({ stations: await stations() });

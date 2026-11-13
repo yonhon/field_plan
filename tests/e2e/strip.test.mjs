@@ -246,6 +246,25 @@ test("自動保存に失敗したとき: 窓で知らせ、次の保存で送り
   assert.equal(await savedWidth(), 150, "「保存しました」と出たら、送り残しは保存されている");
 });
 
+test("自動保存に失敗したあと: 回線が戻ると、次の操作を待たずに送り直す。送り直しは窓で知らせない", options, async () => {
+  await openStrip(2);
+  await failSaves("true");
+  await widenBed();
+  await page.waitFor(`${openDialog}?.textContent.includes("保存の失敗")`, "失敗の窓");
+  await page.click('dialog.notice [data-action="close"]');
+  await page.waitFor(`!${openDialog}`, "窓が閉じる");
+  // 回線はまだ戻っていない。送り直しても失敗するが、窓は出さない
+  await page.run(`window.dispatchEvent(new Event("online"))`);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(await page.run(`Boolean(${openDialog})`), false, "送り直しの失敗は、窓で知らせない");
+  assert.match(await status(), /保存に失敗しました/);
+  assert.equal(await savedWidth(), 100);
+  // 回線が戻る
+  await page.run(`window.restoreSaves(); window.dispatchEvent(new Event("online"))`);
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "送り直しの完了");
+  assert.equal(await savedWidth(), 150);
+});
+
 test("閉じる前: 保存が終わっていなければ確かめ、終わっていれば確かめない", options, async () => {
   await openStrip(1);
   assert.equal(await leaving(), false);

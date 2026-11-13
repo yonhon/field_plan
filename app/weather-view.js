@@ -7,11 +7,9 @@ import { record } from "./journal.js";
 import { addDays, localToday } from "./schedule.js";
 import { FETCH_DAYS, fetchAreas, fetchDay, fetchForecast, fetchStations, nearestStations, weatherSettled } from "./weather.js";
 import { draw } from "./draw.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 let ctx = null; // { state, setStatus, onWeatherChanged }
 let syncing = false;
 let twoWeekList = null;

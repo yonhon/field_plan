@@ -4,11 +4,9 @@
 // 名前の変更・コピー・削除などは、押したときに保存する（書きかけにしない）。データを変える処理は app.js が持ち、ctx.ops で受け取る
 import { draw } from "./draw.js";
 import { lastChangeAt } from "./journal.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 let ctx = null; // { state, notify, ops: { openPlan, newField, renameField, deleteField, newPlan, renamePlan, copyPlan, activatePlan, deletePlan, loadPlans, planStats } }
 let dialog = null;
 let shownFieldId = null; // 窓で選んでいる圃場

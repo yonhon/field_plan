@@ -4,11 +4,9 @@
 // アプリそのものの更新（updates.json）も、同じ日の欄に並べる。こちらの番号は A12 のように A を付ける。
 import { localToday } from "./schedule.js";
 import { draw } from "./draw.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 const MERGE_MINUTES = 30; // 同じ相手への同じ操作が、この時間のうちに続いたら 1 行にまとめる
 const SAVE_DELAY_MS = 800;
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];

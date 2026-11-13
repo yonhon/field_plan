@@ -107,3 +107,25 @@ test("圃場とプラン: 開いているプランを消すと、残ったプラ
   await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓を閉じる");
   assert.deepEqual(page.errors, []);
 });
+
+test("圃場とプラン: コピーが途中で失敗したら、作りかけのプランを残さない", options, async () => {
+  await page.loadApp(seed(), { field_plan_current_field: "f1", field_plan_prefs: JSON.stringify({ f1: { plan: "p1" } }) });
+  await openDialog();
+  // プランの行は保存でき、区域の写しの保存で失敗する
+  await page.run(`(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "field_plan_local" && JSON.parse(value).zones.length === 4) {
+        throw new Error("保存の失敗");
+      }
+      return setItem.call(this, key, value);
+    };
+  })()`);
+  await answer("Bの写し");
+  await fromMenu("plan:p2", "copyPlan");
+  await page.waitFor(`document.querySelector("dialog.notice[open]")?.textContent.includes("保存の失敗")`, "失敗の窓");
+  const data = await saved();
+  assert.deepEqual(data.plans.map((plan) => plan.id), ["p1", "p2", "p3"], "作りかけのプランは DB に残らない");
+  assert.equal(data.zones.length, 3);
+  assert.equal(await page.run(`document.querySelectorAll("${DIALOG} .fp-plan").length`), 2, "一覧にも出ない");
+});

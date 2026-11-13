@@ -7,11 +7,9 @@ import { record } from "./journal.js";
 import { workActuals } from "./logs.js";
 import { WORK_COLORS, existsOn, harvestEnd, workName } from "./schedule.js";
 import { draw } from "./draw.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 const BOX_TOP = 8;
 const BOX_HEIGHT = 84; // 畝の名前、株の印（〇）、条間と株間の文字が入る高さ
 const DIM_TOP = BOX_TOP + BOX_HEIGHT + 6;

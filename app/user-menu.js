@@ -4,11 +4,9 @@
 // 閉じるのは、メニューの外を押したとき、Esc を押したとき、ロゴと名前をもう一度押したとき。
 // ログインする前は開かない。DB を使わないモード（?local=1）では、ログアウトの代わりに、そのことを出す
 import { draw } from "./draw.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 const TITLE = "圃場計画"; // 圃場を開く前（ログインの画面など）に出す名前
 const MIN_NAME_PX = 80; // 名前の欄の幅の下限。前に出していた題「圃場計画」（20px の 4 文字）と同じ
 

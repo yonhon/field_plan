@@ -27,11 +27,9 @@ import {
 } from "./schedule-view.js";
 import { draw } from "./draw.js";
 import { openDiaryTarget } from "./diary-view.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 const MIN_GAP_DAYS = 3; // これ以上作業のない期間は、詰めて表示する
 

@@ -23,11 +23,22 @@ function modules(file = "app.js", found = new Set()) {
   return found;
 }
 
+test("index.html は、HTML の中に書いたスクリプトを持たず、Content-Security-Policy でこのサイトのスクリプトだけを許す", () => {
+  const html = readFileSync(join(APP, "index.html"), "utf8");
+  const policy = html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)"/)?.[1] ?? "";
+  assert.match(policy, /(^|;)\s*script-src 'self'\s*(;|$)/);
+  for (const [, tag, inside] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    assert.match(tag, /\bsrc=/, "src のない script がある");
+    assert.equal(inside.trim(), "", "script の中にコードがある");
+  }
+  assert.doesNotMatch(html, /\son[a-z]+\s*=\s*["']/i, "onclick などの属性がある");
+});
+
 test("一式に、app.js からたどれる部品と、index.html が読むファイルがすべて入っている", () => {
   const html = readFileSync(join(APP, "index.html"), "utf8");
-  const parts = JSON.parse(html.match(/const parts = (\[[^\]]*\]);/)[1]);
+  const parts = JSON.parse(readFileSync(join(APP, "boot.js"), "utf8").match(/const parts = (\[[^\]]*\]);/)[1]);
   const used = modules();
-  assert.deepEqual([...parts].sort(), [...used].sort(), "index.html の parts");
+  assert.deepEqual([...parts].sort(), [...used].sort(), "boot.js の parts");
   const linked = [...html.matchAll(/(?:href|src)="\.\/([^"]+)"/g)].map(([, path]) => path).filter((path) => path !== "sw.js");
   for (const file of [...used, ...linked]) {
     assert.ok(FILES.includes(file), `sw.js の FILES に ${file} がない`);

@@ -7,9 +7,7 @@
 // 作用機構の近いグループは同じ系統の色にし、同じ系統の中では後のものほど淡くする。
 // 表にないコードは、同じグループ（数字が同じ、M・P などの頭文字が同じ）の色にし、なければ白地に黒い枠にする。
 // FAMIC の部分（4.7）と一緒に切り離す。データは pesticide.js が読む
-
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+import { escapeHtml } from "./html.js";
 
 export const COMMITTEES = ["IRAC", "FRAC", "HRAC"];
 

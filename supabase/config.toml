@@ -7,5 +7,6 @@ project_id = "field_plan"
 verify_jwt = false
 
 [functions.field-weather]
-# 2 週間気温予報を画面に渡す。画面からログインした利用者だけが呼べるよう、JWT を確かめる
+# 2 週間気温予報を画面に渡す。JWT の確かめは、プロジェクトの署名があるかを見るだけで、公開キーも通す。
+# field.owners にいる利用者かどうかは、関数の中で確かめる（field-weather/index.ts の isOwner）
 verify_jwt = true

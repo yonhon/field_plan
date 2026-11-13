@@ -1,6 +1,7 @@
 // 農作業日記の計算（docs/actuals-plan.md の 11.1）。画面には触らない。
 // 本文は Markdown で、写真は文中に ![](images/<名前>) で書く。見出しごとの節への分け方は、
 // inoo_farm の scripts/build_sections.py と同じにする（diary-mcp は節を読むので、分け方が変わると答えが変わる）。
+import { escapeHtml } from "./html.js";
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const IMAGE = /!\[[^\]]*\]\(([^)]+)\)/g;
@@ -11,9 +12,6 @@ const FISCAL_START_MONTH = 4;
 export const PHOTO_SHORT_SIDE = 1080;
 export const PHOTO_QUALITY = 0.85;
 export const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
-
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function splitLines(text) {
   const lines = String(text ?? "").split(LINE_BREAK);

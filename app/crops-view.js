@@ -2,11 +2,9 @@
 import { confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { record } from "./journal.js";
 import { draw } from "./draw.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 // [列の名前, 見出し, 入力の種類]。int は整数、number は小数、check はチェック、fertilizer は肥料の選択
 const CROP_FIELDS = [
   ["name", "品目", "text"],

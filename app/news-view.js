@@ -1,11 +1,9 @@
 // 圃場図の上のタブの「ニュース」。県のページに載った記事（field.news。scripts/fetch-news.mjs が 1 日 2 回足す）を、
 // 未読と既読に分けて出す。未読があれば、タブの名前の後ろに ⚠ と件数を出す。「確認」を押した記事は既読へ移る
 import { draw } from "./draw.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 const SOURCE_NAMES = { nogyo: "病害虫防除技術センター", kenkyu: "農業研究センター" };
 const READ_SHOWN = 30; // 既読に出す件数（確認した新しい順）
@@ -44,7 +42,12 @@ export function renderNews() {
         (item) =>
           `<li data-news="${escapeHtml(item.key)}">` +
           `<span class="week-date news-date">${item.posted ? formatDay(item.posted) : ""}</span>` +
-          `<span class="news-title"><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>` +
+          // リンクにするのは http と https だけ（取り込みでも確かめているが、DB の値をそのまま信じない）
+          `<span class="news-title">${
+            /^https?:\/\//i.test(item.url)
+              ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>`
+              : escapeHtml(item.title)
+          }` +
           `${item.label ? `<span class="news-label">${escapeHtml(item.label)}</span>` : ""}</span>` +
           `<span class="muted">${escapeHtml(SOURCE_NAMES[item.source] || item.source)}</span>` +
           `<span class="week-actions">${

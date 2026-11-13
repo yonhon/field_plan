@@ -9,11 +9,9 @@ import * as famic from "./pesticide.js";
 import { draw } from "./draw.js";
 import { holesOf } from "./crops.js";
 import { confirmDiscard, processChange, processClick, processDirty, processHtml, processPreset, saveProcess, startProcess } from "./process-editor.js";
+import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
-const escapeHtml = (text) =>
-  String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 const RECENT = 5; // 「最近の記録」に出す件数
 const QUICK_TYPES = ["spray", "topdress", "weed", "water", "care", "plant"]; // 大きめのボタンで並べる種類

@@ -4,7 +4,7 @@
 // ファイルごとに更新を確かめる往復が要る。回線が悪いと、その往復だけで何秒も待つ。
 // 更新は、画面が出たあとで確かめる（画面から "check" が届く）。変わっていれば一式まとめて取り直し、
 // 取り終えてから入れ替えて、画面に知らせる。一式を同時に取るので、古い版と新しい版の部品は混ざらない。
-// JS の部品を足したら、FILES と index.html の parts の両方に足す（tests/sw.test.mjs が確かめる）
+// JS の部品を足したら、FILES と boot.js の parts の両方に足す（tests/sw.test.mjs が確かめる）
 const FILES = [
   "./",
   "styles.css",
@@ -38,6 +38,8 @@ const FILES = [
   "field-plans.js",
   "news-view.js",
   "toast.js",
+  "html.js",
+  "boot.js",
   "vendor/supabase-js-2.119.0.js",
   "icons/A_mark_color.svg",
   "icons/favicon-32.png",

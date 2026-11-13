@@ -77,6 +77,8 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `app/store.js` | データの読み書き |
 | `app/sw.js` | アプリのファイルを一式ブラウザーに取っておき、起動のときはサーバーを待たずに出す（Service Worker）。新しい版は画面が出たあとで取り、お知らせの「読み込み直す」で切り替える |
 | `app/vendor/` | 手元に置いた外のライブラリー（supabase-js）と、そのライセンスの表示 |
+| `app/boot.js` | 起動。部品の更新を確かめてから `app.js` を読み、Service Worker を登録する |
+| `app/html.js` | HTML に文字を入れるときの置き換え（`escapeHtml`）。どの画面もこれを使う |
 | `supabase/functions/field-mcp/` | 計画と作業の実績を Claude.ai から読むための MCP サーバー（Supabase Edge Function） |
 | `supabase/functions/field-weather/` | 2 週間気温予報を画面に渡す関数（ブラウザーから気象庁のこのデータを読めないため） |
 | `scripts/import_famic.py` | FAMIC の農薬登録情報（CSV）を DB に取り込む。`.github/workflows/famic.yml` が週に 1 回動かす |
@@ -84,6 +86,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `scripts/fetch-weather.mjs` | 気象の値（アメダスの観測所の日ごとの観測値）を、気象庁の過去の気象データの日別の表（正式な値）から取って DB に入れる。`.github/workflows/weather.yml` が毎日動かす |
 | `scripts/fetch-news.mjs` | 県のページ（病害虫防除技術センターの「新着更新情報」、農業研究センターの「お知らせ」）を読み、新しい記事を DB の `field.news` に足す。読み取りは `scripts/news.mjs`。`.github/workflows/news.yml` が 1 日 2 回（日本時間の 7 時と 16 時ごろ）動かす。初めて読むときは、載っている記事を確認済みとして入れる |
 | `scripts/import_jma_csv.py` | 気象庁の過去の気象データ（日別の CSV）を DB に入れる。いまは `fetch-weather.mjs` に日付を渡せば日別の表から入れ直せるので、ふだんは使わない |
+| `scripts/check_field_sql.py` | `sql/field.sql` を、手元の空の DB で流して確かめる（12 章） |
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
 | `tests/` | 図形、日程、苗数と施肥量の計算、作業の実績の計算、元に戻すと、MCP サーバーのテスト |
 | `tests/e2e/` | 主な操作と、DB からの読み直しを、Chrome で通して動かすテスト |
@@ -123,6 +126,8 @@ app_compat（この DB を使ってよい画面の版。画面からは読むだ
 ## 3. データを守る仕組み
 
 - テーブルは `field` スキーマに置き、RLS で `field.owners` に登録した利用者にだけ読み書きを許します。`sql/field.sql` は、すべての表に RLS を付け、最後に、RLS のない表と、許す相手を決めていない表がないことを確かめます。
+- 画面は、このサイトのスクリプトだけを動かします（`index.html` の Content-Security-Policy）。HTML の中に書いたスクリプトや、押すと動くリンク（`javascript:`）は動きません。画面は HTML の文字列を組み立てて描くので、文字の置き換え（`app/html.js` の `escapeHtml`）を 1 か所忘れても、そこからスクリプトを動かせないようにするためです。ニュースのリンクは、`http` と `https` だけをリンクにします。
+- 2 週間気温予報の関数（`field-weather`）は、`field.owners` にいる利用者だけが呼べます。関数の中で、送られてきたログインの印を DB に尋ねて確かめます。
 - 利用者の登録は、Supabase の設定で止めています（Authentication > Sign In / Providers の「Allow new users to sign up」）。公開キーを知っていても、利用者は作れません。利用者を足すときは、管理画面の Authentication > Users で作ります。
 - 下絵の画像（集成図など）には地番や氏名が写っていることがあるので、リポジトリに入れず、非公開のストレージ（`field-plan`）に置きます。
 - 農作業日記には、ほかの方の氏名や連絡先が入ります。日記は `inoo_farm` の `diary` スキーマにあり、API には出していません。画面は `sql/diary.sql` の関数だけを通して読み書きし、関数は `field.owners` に登録した本人でなければ止まります。写真は非公開のストレージ（`diary-photos`）に置きます。本物の日記は、テストにも画面の見本にも使いません。
@@ -466,6 +471,7 @@ push のたびに、できるようになったことごとに 1 件ずつ足し
 - **保存**: 「保存しました」は出しません。保存に 1 秒以上かかるときだけ「保存中…」を出します。
 - **進み具合**（画像を保存中… 45% など）: 終わるまで出ています。
 - **失敗**（保存に失敗しました、日記を読み込めませんでした、など）: 自然には消えません。「詳しく」で誤りの内容を窓に出し、「×」で閉じます。保存の失敗は、あわせて窓でも知らせます。
+- **保存の送り直し**: 図形の自動保存に失敗したときは、5 秒、15 秒、60 秒たったときと、回線が戻ったとき、次に保存するときに、もう一度送ります。送り直しの失敗は、窓では知らせません（お知らせは残ります）。
 
 ただし、DB の形が古い版の画面では正しく書けない形に変わったときは、古い版の画面は起動のときにデータを出す前に止まり、新しい版を取って読み込み直します。新しい版がまだ公開されていなければ、そう知らせて止まったままにします。どの版から使えるかは、DB の `field.app_compat` に持たせます。DB の形を変えるときの手順は `docs/implementation-rules.md` にあります。
 
@@ -592,3 +598,13 @@ node --test "tests/e2e/*.test.mjs"
 ```
 
 supabase-js（DB とログインのライブラリー）は、版を決めたファイルを `app/vendor/` に置いています。版を上げるときは、npm のパッケージ `@supabase/supabase-js` のその版から `dist/umd/supabase.js` を取り、`app/vendor/supabase-js-<版>.js` として置き、古いファイルを消して、`app/index.html` と `app/sw.js` の `FILES` のファイル名を直します。`LICENSE` が変わっていれば、`app/vendor/supabase-js.LICENSE.txt` も置き換えます。そのあと、ログインして、読み込みと保存ができることを確かめます。
+
+`sql/field.sql` を直したら、手元の空の DB で、最後まで流れることを確かめます。Docker と psycopg が要ります。Supabase が持っているもの（`auth`、`cron`、`storage`、役割）は、スクリプトが代わりを作ります。
+
+```
+docker run -d --rm --name fp-empty -e POSTGRES_PASSWORD=local -p 127.0.0.1:55432:5432 postgres:17-alpine
+python scripts/check_field_sql.py sql/field.sql --times 2 --whole
+docker stop fp-empty
+```
+
+文ごとに 2 回流して失敗した文を出し、そのあと、SQL Editor と同じようにファイル全体を 1 回で流します。どれも失敗が 0 なら通っています。`--dump <ファイル>` を付けると、できた定義（列、制約、索引、方針、関数、許可）を書き出すので、直す前と後を比べられます。

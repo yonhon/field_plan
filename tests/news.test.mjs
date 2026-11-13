@@ -1,7 +1,7 @@
 // ニュースの読み取り（scripts/news.mjs）。県のページの作りを写した短い HTML で確かめる。実行: node --test tests/news.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fullDate, monthDay, parseNotices, parseUpdates, plainText } from "../scripts/news.mjs";
+import { fullDate, linkUrl, monthDay, parseNotices, parseUpdates, plainText } from "../scripts/news.mjs";
 
 const NOGYO = "https://www.pref.okinawa.jp/shigoto/nogyo/1010700/index.html";
 const KENKYU = "https://www.pref.okinawa.jp/shigoto/kenkyu/1010703/index.html";
@@ -64,4 +64,22 @@ test("日付: 年のない日付は、1 か月以上先なら前の年", () => {
   assert.equal(monthDay("日付なし", "2026-11-12"), null);
   assert.equal(fullDate("成果（2026.1.5）"), "2026-01-05");
   assert.equal(plainText("a&nbsp;<b>b</b>&#65;"), "a bA");
+});
+
+test("リンク: href の &amp; を戻す。http と https のほかは捨てる", () => {
+  assert.equal(linkUrl("list.html?a=1&amp;b=2", NOGYO), "https://www.pref.okinawa.jp/shigoto/nogyo/1010700/list.html?a=1&b=2");
+  assert.equal(linkUrl("javascript:alert(1)", NOGYO), null);
+  assert.equal(linkUrl(" JavaScript:alert(1)", NOGYO), null);
+  assert.equal(linkUrl("data:text/html,x", NOGYO), null);
+  assert.equal(linkUrl("mailto:someone@example.test", NOGYO), null);
+  assert.equal(linkUrl("http://[", NOGYO), null);
+
+  const list = `<div class="news"><h2>新着更新情報</h2><ul>
+<li><span class="date">11月10日</span><a href="javascript:alert(1)">押すと動くリンク</a></li>
+<li><span class="date">11月9日</span><a href="a.html?x=1&amp;y=2">ふつうのリンク</a></li></ul></div>`;
+  const items = parseUpdates(list, NOGYO, "2026-11-13");
+  assert.deepEqual(items.map((item) => item.url), ["https://www.pref.okinawa.jp/shigoto/nogyo/1010700/a.html?x=1&y=2"]);
+
+  const notice = `<h2>お知らせ</h2><h3>お知らせ（2026.11.2）</h3><p><a href="javascript:alert(1)">資料</a></p>`;
+  assert.equal(parseNotices(notice, KENKYU)[0].url, KENKYU, "使えないリンクなら、このページ");
 });

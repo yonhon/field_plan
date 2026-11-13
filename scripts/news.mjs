@@ -17,15 +17,28 @@ export const NEWS_SOURCES = [
 
 const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", nbsp: " " };
 
+// HTML の文字の書き方（&amp; など）を、元の文字に戻す
+const decode = (text) =>
+  String(text).replace(/&(#\d+|#x[0-9a-f]+|\w+);/gi, (all, name) =>
+    ENTITIES[name] ?? (name[0] === "#" ? String.fromCodePoint(name[1] === "x" ? parseInt(name.slice(2), 16) : Number(name.slice(1))) : all)
+  );
+
 // タグを除いた文。空白はまとめる
 export function plainText(html) {
-  return String(html)
-    .replace(/<[^>]*>/g, "")
-    .replace(/&(#\d+|#x[0-9a-f]+|\w+);/gi, (all, name) =>
-      ENTITIES[name] ?? (name[0] === "#" ? String.fromCodePoint(name[1] === "x" ? parseInt(name.slice(2), 16) : Number(name.slice(1))) : all)
-    )
+  return decode(String(html).replace(/<[^>]*>/g, ""))
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// リンクの href を、URL にする。href の中の &amp; は & に戻す（戻さないと、違う URL になる）。
+// http と https のほか（javascript: など）は、画面でリンクにすると押したときに動いてしまうので、null を返す
+export function linkUrl(href, pageUrl) {
+  try {
+    const url = new URL(decode(href).trim(), pageUrl);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 const firstLink = (html) => /<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(html);
@@ -67,7 +80,10 @@ export function parseUpdates(html, pageUrl, today) {
     if (!link) {
       continue;
     }
-    const url = new URL(link[1], pageUrl).href;
+    const url = linkUrl(link[1], pageUrl);
+    if (!url) {
+      continue;
+    }
     const posted = monthDay(plainText(/class="date"[^>]*>([\s\S]*?)<\/span>/i.exec(li)?.[1] || ""), today);
     items.push({
       key: `nogyo|${posted || ""}|${url}`,
@@ -102,7 +118,7 @@ export function parseNotices(html, pageUrl) {
       key: `kenkyu|${title}`,
       source: "kenkyu",
       title,
-      url: link ? new URL(link[1], pageUrl).href : pageUrl,
+      url: (link && linkUrl(link[1], pageUrl)) || pageUrl,
       posted: fullDate(title),
       label: "",
     });

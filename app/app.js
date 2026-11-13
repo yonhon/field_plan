@@ -54,6 +54,7 @@ import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./sch
 import { currentBlockId, ganttHasFocus, initSchedule, openInSchedule, openProcessPlan, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash, selectedRowPreset } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
+import { escapeHtml } from "./html.js";
 
 const config = window.FIELD_PLAN_CONFIG;
 const $ = (id) => document.getElementById(id);
@@ -537,9 +538,6 @@ function selectedGaps() {
 // ---- 描画 ----
 
 const svgPoints = (points) => points.map(([x, y]) => `${x},${-y}`).join(" ");
-const escapeHtml = (text) =>
-  String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
 // scale は、印刷用に描くときの倍率（1 m あたりの px）。ふだんは画面の倍率を使う
 function renderMap(scale) {
   const printing = typeof scale === "number";
@@ -1131,7 +1129,26 @@ window.addEventListener("beforeunload", (event) => {
   }
 });
 
-async function flushSaves() {
+// 保存に失敗したあとの送り直し。失敗の窓を閉じてそのまま置いても、送り残しが送られないままにならないよう、
+// 間を空けて数回と、回線が戻った知らせが来たときに、もう一度送る。送り直しの失敗は、窓では知らせない（状態の文は残る）
+const RETRY_SAVE_MS = [5000, 15000, 60000];
+let retryTimer = null;
+let retries = 0;
+
+function retrySaves() {
+  clearTimeout(retryTimer);
+  if (pendingSaves.size) {
+    clearTimeout(saveTimer);
+    flushSaves({ quiet: true });
+  }
+}
+
+window.addEventListener("online", () => {
+  retries = 0;
+  retrySaves();
+});
+
+async function flushSaves({ quiet = false } = {}) {
   const saves = [...pendingSaves];
   pendingSaves.clear();
   try {
@@ -1160,10 +1177,19 @@ async function flushSaves() {
     if (!pendingSaves.size) {
       $("saveStatus").textContent = state.mapEditing ? EDIT_UNSAVED : "保存しました";
     }
+    clearTimeout(retryTimer);
+    retries = 0;
   } catch (error) {
     saves.filter(([key]) => !pendingSaves.has(key)).forEach(([key, id]) => pendingSaves.set(key, id));
     $("saveStatus").textContent = `保存に失敗しました: ${error.message}`;
-    notify(`変更を保存できませんでした。次に保存するときに、もう一度送ります。\n${error.message}`);
+    if (!quiet) {
+      notify(`変更を保存できませんでした。回線が戻ったときと、次に保存するときに、もう一度送ります。\n${error.message}`);
+    }
+    clearTimeout(retryTimer);
+    if (retries < RETRY_SAVE_MS.length) {
+      retryTimer = setTimeout(retrySaves, RETRY_SAVE_MS[retries]);
+      retries += 1;
+    }
   }
 }
 
@@ -2542,15 +2568,24 @@ async function copyPlan(field = state.field, plan = state.plan, plans = state.pl
       return ids.get(id);
     };
     const parents = { zones: [], blocks: ["zone_id"], beds: ["block_id"], plantings: ["bed_id"], works: ["block_id", "planting_id"] };
-    for (const [table, keys] of Object.entries(parents)) {
-      const rows = source[table].map((row) => {
-        const item = { ...row, id: fresh(row.id), plan_id: copy.id };
-        keys.forEach((key) => {
-          item[key] = row[key] ? fresh(row[key]) : null;
+    try {
+      for (const [table, keys] of Object.entries(parents)) {
+        const rows = source[table].map((row) => {
+          const item = { ...row, id: fresh(row.id), plan_id: copy.id };
+          keys.forEach((key) => {
+            item[key] = row[key] ? fresh(row[key]) : null;
+          });
+          return item;
         });
-        return item;
-      });
-      await state.store.upsert(table, rows);
+        await state.store.upsert(table, rows);
+      }
+    } catch (error) {
+      // 途中で失敗した。区域だけ、区画までだけ、といった半端なプランを DB に残さない（下の行は、プランと一緒に消える）。
+      // 一覧には足していないので、残すと、読み込み直したときに初めて現れる。消せなくても、元の失敗を知らせる
+      const created = copy;
+      copy = null;
+      await state.store.deletePlan(created.id).catch(() => {});
+      throw error;
     }
     record({ kind: "plan.copy", plan: copy, field, target: ["plan", copy.id], text: `プラン「${plan.name}」をコピーして、プラン「${copy.name}」を作成` });
     plans.push(copy);

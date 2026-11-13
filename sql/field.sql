@@ -208,11 +208,6 @@ insert into field.work_types (code, label, sort, default_days, min_gap_days, sco
   ('other',       'その他',      250, 1, 0, 'bed', false)
 on conflict (code) do update set sort = excluded.sort;
 
--- 発芽確認と資材の設置は、その他の中身にした。これまでの実績を移し替えてから、種類を消す
-update field.work_logs set work_type = 'other', spec = spec || '{"items": ["発芽確認"]}'::jsonb where work_type = 'check';
-update field.work_logs set work_type = 'other', spec = spec || '{"items": ["資材の設置"]}'::jsonb where work_type = 'install';
-delete from field.work_types where code in ('check', 'install');
-
 -- 管理作業の計画の、予定の中身（仕様、株の手入れ・その他の中身、予定の農薬や肥料）。入力の窓の内容をそのまま持つ
 alter table field.works add column if not exists detail jsonb not null default '{}';
 -- 入力の窓で一緒に入力した管理作業の計画のまとまり（直すとき、消すときに「一緒に入力した全部」を選べるように）
@@ -239,6 +234,11 @@ create index if not exists work_logs_field_date_idx on field.work_logs (field_id
 alter table field.work_logs add column if not exists end_date date;
 alter table field.work_logs drop constraint if exists work_logs_end_after_start;
 alter table field.work_logs add constraint work_logs_end_after_start check (end_date is null or end_date > date);
+
+-- 発芽確認と資材の設置は、その他の中身にした。これまでの実績を移し替えてから、種類を消す（実績の表を作ったあとで行う）
+update field.work_logs set work_type = 'other', spec = spec || '{"items": ["発芽確認"]}'::jsonb where work_type = 'check';
+update field.work_logs set work_type = 'other', spec = spec || '{"items": ["資材の設置"]}'::jsonb where work_type = 'install';
+delete from field.work_types where code in ('check', 'install');
 
 -- 記録の対象。1 件の記録に畝（作付）を何本でも付ける。区画の作業では区画を付ける。
 -- つながる計画の作業は、作付ごとに違うので、ここに持つ。先が消えても記録は残り、label の名前で読める
@@ -481,15 +481,6 @@ as $$
   select exists (select 1 from field.importers where user_id = auth.uid());
 $$;
 
--- 気象の値を取る観測所の番号（どの圃場かは返さない）
-create or replace function field.weather_stations() returns setof text
-language sql stable security definer set search_path = ''
-as $$
-  select distinct station
-  from field.fields f, lateral (values (f.weather ->> 'temp_station'), (f.weather ->> 'rain_station')) as v (station)
-  where station is not null and station <> '' and (field.is_importer() or field.is_owner());
-$$;
-
 -- FAMIC の入れ替えを始める（途中の表を空にする）
 create or replace function field.famic_begin() returns void
 language plpgsql security definer set search_path = ''
@@ -597,6 +588,15 @@ $$;
 -- 圃場の気象の設定。{ temp_station, rain_station（アメダスの観測所の番号）, office（府県予報区）, area（一次細分区域）,
 --   point（予報の気温の地点）, twoweek（2 週間気温予報の地点）}
 alter table field.fields add column if not exists weather jsonb not null default '{}';
+
+-- 気象の値を取る観測所の番号（どの圃場かは返さない）
+create or replace function field.weather_stations() returns setof text
+language sql stable security definer set search_path = ''
+as $$
+  select distinct station
+  from field.fields f, lateral (values (f.weather ->> 'temp_station'), (f.weather ->> 'rain_station')) as v (station)
+  where station is not null and station <> '' and (field.is_importer() or field.is_owner());
+$$;
 
 -- 日ごとの気象。アメダスの観測所ごと。画面が気象庁から直近の日を取って入れる。古い日は気象庁の CSV から入れる
 create table if not exists field.weather_daily (
@@ -762,7 +762,7 @@ begin
   end loop;
 end $$;
 
--- FAMIC の表と、画面の版（app_compat）は、画面からは読むだけ。FAMIC の入れ替えは DB に直接つないで行う（scripts/import_famic.py）
+-- FAMIC の表と、画面の版（app_compat）は、画面からは読むだけ。FAMIC の入れ替えは、取り込み係が famic_begin() と famic_finish() で行う（scripts/import_famic.py）
 do $$
 declare
   t text;
