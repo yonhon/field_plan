@@ -63,12 +63,9 @@ create table if not exists field.plans (
   created_at timestamptz not null default now()
 );
 
--- コピーの途中の印。前の版の画面は、印を付けてプランを作り、中身を 1 表ずつ写し終えたら印を外していた。
--- 途中で失敗して残ったプランは中身が欠けているので、画面も MCP も、印の付いたプランを出さず、
--- 印が付いたまま 1 時間たったプランは、画面が起動のときに消す。
--- いまの画面は、コピーを field.copy_plan() で行うので、印を付けない。前の版の画面が残っていないことを見てから、
--- 画面と MCP の印の扱いと一緒に、この列を消す
-alter table field.plans add column if not exists copying boolean not null default false;
+-- コピーの途中の印（copying）は、2026-11-13 に 1 日だけ使った。画面から 1 表ずつ送ってコピーしていたころ、途中で失敗して残った
+-- プランを隠すための列。コピーを field.copy_plan() にして、要らなくなったので消す（列を使う画面は、下の min_version = 3 で止める）
+alter table field.plans drop column if exists copying;
 
 -- 区域。有効圃場（耕起する場所）と、耕起しない場所（物置、井戸、通路、残渣処理場など）
 create table if not exists field.zones (
@@ -434,6 +431,8 @@ insert into field.app_compat (id) values (true) on conflict (id) do nothing;
 update field.fields set outline = jsonb_build_array(outline)
 where jsonb_typeof(outline) = 'array' and jsonb_array_length(outline) > 0 and jsonb_typeof(outline -> 0 -> 0) = 'number';
 update field.app_compat set min_version = 2 where min_version < 2;
+-- 版 3: プランのコピーを field.copy_plan() で行い、plans.copying の列に触らない。版 2 の画面は、この列を読み書きする
+update field.app_compat set min_version = 3 where min_version < 3;
 
 -- 圃場ごとだったころのメモの表。中身を dev_notes に写したあと、2026-10-24 に消した
 drop table if exists field.day_notes;

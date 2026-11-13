@@ -86,7 +86,6 @@ const HINTS = {
 };
 const TABLES = { zone: "zones", block: "blocks", bed: "beds" };
 const PLAN_TABLES = ["zones", "blocks", "beds", "plantings", "works"]; // プランの中身の表
-const STALE_COPY_MS = 60 * 60 * 1000; // コピーの途中の印が付いたまま、これより古いプランは、失敗して残ったものとして消す
 const CURRENT_PLAN_KEY = "field_plan_current_plan";
 const CURRENT_FIELD_KEY = "field_plan_current_field";
 const VIEW_DATE_KEY = "field_plan_view_date";
@@ -3848,11 +3847,6 @@ async function startApp() {
     );
     return;
   }
-  // 前の版の画面がコピーの途中で失敗して残したプラン（コピーの途中の印が付いている）を消す。
-  // 1 時間より前のものだけ（ほかの端末の前の版がコピーしている最中のものは消さない）。
-  // いまの版は、コピーを DB の関数で行うので、印を付けない。前の版の画面が残っていないことを見てから、印の列と一緒にこの片づけも消す。
-  // 消せなくても、起動は止めない（一覧には出ないので、次の起動で消せばよい）
-  state.store.removeStaleCopies(new Date(Date.now() - STALE_COPY_MS).toISOString()).catch(() => {});
   $("viewDate").value = state.viewDate;
   $("appView").hidden = false;
   $("viewTabs").hidden = false;

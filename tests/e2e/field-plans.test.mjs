@@ -130,37 +130,17 @@ test("圃場とプラン: コピーが途中で失敗したら、作りかけの
   assert.equal(await page.run(`document.querySelectorAll("${DIALOG} .fp-plan").length`), 2, "一覧にも出ない");
 });
 
-test("圃場とプラン: 写し終えたプランには、コピーの途中の印が残らない", options, async () => {
+test("圃場とプラン: 開いているプランをコピーすると、行に新しい ID を付けて写す", options, async () => {
   await page.loadApp(seed(), { field_plan_current_field: "f1", field_plan_prefs: JSON.stringify({ f1: { plan: "p1" } }) });
   await openDialog();
-  await answer("Bの写し");
-  await fromMenu("plan:p2", "copyPlan");
+  await answer("Aの写し");
+  await fromMenu("plan:p1", "copyPlan");
   await page.waitFor(`document.querySelectorAll("${DIALOG} .fp-plan").length === 3`, "写しのプランが一覧に出る");
-  const copy = (await saved()).plans.find((plan) => plan.name === "Bの写し");
-  assert.ok(!copy.copying, "印は外れている");
-});
-
-// コピーの途中で失敗し、取り消しも届かなかったプラン（中身が欠けている）。made は、作ってからの分
-const leftover = (made) => ({ id: "px", field_id: "f1", name: "欠けた写し", copying: true, created_at: new Date(Date.now() - made * 60000).toISOString() });
-
-test("圃場とプラン: コピーの途中のまま残ったプランは、一覧に出さず、1 時間たっていれば起動のときに消す", options, async () => {
-  const data = seed();
-  data.plans.push(leftover(61));
-  data.zones.push(zone("zx", "px"));
-  await page.loadApp(data, { field_plan_current_field: "f1", field_plan_prefs: JSON.stringify({ f1: { plan: "p1" } }) });
-  await page.waitFor(`!JSON.parse(localStorage.getItem("field_plan_local")).plans.some((plan) => plan.id === "px")`, "残ったプランが消える");
-  assert.equal((await saved()).zones.some((item) => item.plan_id === "px"), false, "中身も消える");
-  await openDialog();
-  assert.equal(await page.run(`document.querySelectorAll("${DIALOG} .fp-plan").length`), 2);
-  assert.deepEqual(page.errors, []);
-});
-
-test("圃場とプラン: コピーの途中のプランが新しければ、消さない（ほかの端末でコピーしている最中かもしれない）。一覧には出さない", options, async () => {
-  const data = seed();
-  data.plans.push(leftover(5));
-  await page.loadApp(data, { field_plan_current_field: "f1", field_plan_prefs: JSON.stringify({ f1: { plan: "p1" } }) });
-  await openDialog();
-  assert.equal(await page.run(`document.querySelectorAll("${DIALOG} .fp-plan").length`), 2, "一覧には出ない");
-  assert.ok((await saved()).plans.some((plan) => plan.id === "px"), "DB には残す");
+  const data = await saved();
+  const copy = data.plans.find((plan) => plan.name === "Aの写し");
+  const zones = data.zones.filter((item) => item.plan_id === copy.id);
+  assert.equal(zones.length, 1);
+  assert.notEqual(zones[0].id, "z1", "写した行には、新しい ID が付く");
+  assert.deepEqual(Object.keys(copy).sort(), ["field_id", "id", "name"], "プランの行に、余計な列を付けない");
   assert.deepEqual(page.errors, []);
 });

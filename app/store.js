@@ -20,7 +20,7 @@ const LOCAL_TAG_NAMES = {
 };
 // この画面の版。DB の field.app_compat の min_version より古ければ、起動のときに新しい版を読み込み直す。
 // 古い画面では正しく書けない形に DB を変えるときに 1 つ上げ、DB の min_version も同じ値にする（sql/field.sql）
-export const APP_VERSION = 2;
+export const APP_VERSION = 3;
 const LOCAL_KEY = "field_plan_local";
 
 // 下絵の署名付き URL。発行のたびに URL が変わると、ブラウザーのキャッシュが効かず、起動のたびに画像全体を読み直す。
@@ -153,20 +153,16 @@ export function createSupabaseStore(client, options) {
       }
       return url;
     },
-    // コピーの途中のプラン（copying）は、出さない。前の版の画面が、写し終える前に失敗して残したもので、中身が欠けている
     async loadPlans(fieldId) {
-      return check(await client.from("plans").select("*").eq("field_id", fieldId).eq("copying", false).order("created_at"));
-    },
-    // プランを、中身ごとコピーする。DB の関数が、プランを作り、区域・区画・畝・作付・作業を新しい ID で写す。作ったプランを返す
-    async copyPlan(id, name) {
-      return check(await client.rpc("copy_plan", { p_source: id, p_name: name }));
-    },
-    // コピーの途中のまま残ったプランを消す。before（日時）より前に作ったものだけ（ほかの端末でコピーしている最中のものは消さない）
-    async removeStaleCopies(before) {
-      check(await client.from("plans").delete().eq("copying", true).lt("created_at", before));
+      return check(await client.from("plans").select("*").eq("field_id", fieldId).order("created_at"));
     },
     async createPlan(plan) {
       return check(await client.from("plans").insert(plan).select().single());
+    },
+    // プランを、中身ごとコピーする。DB の関数が、プランを作り、区域・区画・畝・作付・作業を新しい ID で写す。作ったプランを返す。
+    // 1 つのトランザクションなので、途中で失敗しても、作りかけのプランは残らない
+    async copyPlan(id, name) {
+      return check(await client.rpc("copy_plan", { p_source: id, p_name: name }));
     },
     async renamePlan(id, name) {
       check(await client.from("plans").update({ name }).eq("id", id));
@@ -574,7 +570,7 @@ export function createLocalStore({ strict = false } = {}) {
       return read().images?.[path.slice("local:".length)] || "";
     },
     async loadPlans(fieldId) {
-      return (read().plans || []).filter((plan) => plan.field_id === fieldId && !plan.copying);
+      return (read().plans || []).filter((plan) => plan.field_id === fieldId);
     },
     // DB の関数（field.copy_plan）と同じに、1 回の書き込みで写す（途中で失敗したら、何も残らない）
     async copyPlan(id, name) {
@@ -601,12 +597,6 @@ export function createLocalStore({ strict = false } = {}) {
       }
       write(data);
       return copy;
-    },
-    async removeStaleCopies(before) {
-      const stale = (read().plans || []).filter((plan) => plan.copying && plan.created_at < before).map((plan) => plan.id);
-      for (const id of stale) {
-        await this.deletePlan(id);
-      }
     },
     async createPlan(plan) {
       const created = { id: crypto.randomUUID(), ...plan };

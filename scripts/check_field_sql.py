@@ -175,8 +175,8 @@ def check_copy_plan(c):
     expect("行の数が、プラン 1 つ分だけ増える", after == tuple(n * 2 if i else n + 1 for i, n in enumerate(before)))
     expect("中身が、ID を除いて元と同じ（親子のつながりも同じ）", c.execute(PLAN_SHAPE, {"p": copy}).fetchone()[0] == source)
     expect("元のプランは変わらない", c.execute(PLAN_SHAPE, {"p": plan}).fetchone()[0] == source)
-    row = c.execute("select name, field_id = %s, copying from field.plans where id = %s", (field, copy)).fetchone()
-    expect("名前と圃場が合い、コピーの途中の印は付かない", row == ("写し", True, False))
+    row = c.execute("select name, field_id = %s from field.plans where id = %s", (field, copy)).fetchone()
+    expect("名前と圃場が合う", row == ("写し", True))
     shared = c.execute(
         "select count(*) from (select id from field.zones union all select id from field.blocks union all select id from field.beds union all select id from field.plantings union all select id from field.works) t group by id having count(*) > 1"
     ).fetchall()
