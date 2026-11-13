@@ -567,6 +567,8 @@ python -m http.server 8765 --directory app
 node --test "tests/*.test.mjs"
 ```
 
+このテストは、`main` に push したときにも GitHub の上で動きます（`.github/workflows/deploy_app.yml`）。通らなければ、アプリは公開されません。
+
 主な操作を Chrome で通して動かすテストは、次のとおりです。`?local=1&strict=1` で動かすので、ログインも DB も使いません。Chrome は、いつもの場所か、環境変数 `CHROME_PATH` の場所から探します。見つからなければ、テストを飛ばします。
 
 ```

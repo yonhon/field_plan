@@ -24,6 +24,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # 計算のテストが通らなければ、公開しない。node --test の "*" は Node 21 からなので、版を決めて入れる
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Test
+        run: node --test "tests/*.test.mjs"
+
       - name: Setup Pages
         uses: actions/configure-pages@v6
 
