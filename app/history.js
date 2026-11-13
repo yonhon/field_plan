@@ -14,7 +14,7 @@ const MAX_STEPS = 50;
 const SETTLE_MS = 250; // 操作のあと、データが落ち着くのを待つ時間
 const LATE_MS = 1500; // 保存を待ってから変わるデータ（プランの作成など）を拾うための、遅い確認
 
-let ctx = null; // { state, busy, flush, refresh, setStatus }
+let ctx = null; // { state, busy, flush, refresh, reload, setStatus }
 const undoStack = [];
 const redoStack = [];
 let last = null; // 最後に確かめたときの写し
@@ -192,14 +192,27 @@ async function step(from, to, label) {
     }
     from.pop();
     to.push(current);
-    await restore(target);
+    try {
+      await restore(target);
+    } catch (error) {
+      throw Object.assign(error, { partial: true });
+    }
     last = snapshot();
     record({ kind: label === "元に戻" ? "history.undo" : "history.redo", text: label === "元に戻" ? "直前の操作を元に戻した" : "元に戻した操作をやり直した" });
     ctx.refresh();
     ctx.setStatus(`${label}しました（あと ${from.length} 回${label}せます）`);
   } catch (error) {
-    ctx.setStatus(`${label}せませんでした: ${error.message}`);
-    last = snapshot();
+    if (error.partial) {
+      // 書き込みの途中で失敗した。画面は戻したあとの内容、DB は途中まで戻した状態で、履歴は戻し終えた扱いになっている。
+      // そのまま続けると、画面に見えている計画と DB の計画が違うままになる。DB から読み直して画面を DB にそろえ、履歴を空にする
+      ctx.setStatus(`${label}せなかったので、DB から読み直しています…`);
+      await ctx.reload();
+      resetHistory();
+      ctx.setStatus(`DB の内容を読み直しました。${label}せませんでした: ${error.message}`);
+    } else {
+      ctx.setStatus(`${label}せませんでした: ${error.message}`);
+      last = snapshot();
+    }
   }
   busy = false;
   renderButtons();

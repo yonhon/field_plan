@@ -1167,6 +1167,196 @@ async function flushSaves() {
   }
 }
 
+// ---- DB から読み直す ----
+// ほかの端末（PC とスマホ）で変えた内容を拾うときと、「元に戻す」が途中で失敗して画面と DB がずれたときに使う。
+// 範囲は、起動のときに読むもののうち、いまの圃場とプランのぶん。「元に戻す」が書き換えるもの（history.js）をすべて含む
+
+const RELOAD_AFTER_HIDDEN_MS = 60 * 1000; // 画面が隠れてからこの時間がたって戻ってきたら、読み直す
+const RELOAD_RETRY_MS = [2000, 5000, 10000, 30000]; // 読み直せなかったときに、次に試すまでの間
+
+// いま画面が持っている内容を、読み直した内容（fetchCurrent）と同じ形にする
+const currentData = () => ({
+  fields: state.fields,
+  plans: state.plans,
+  allWorkTypes: state.allWorkTypes,
+  crops: state.crops,
+  fertilizers: state.fertilizers,
+  logs: state.logs,
+  tables: Object.fromEntries(PLAN_TABLES.map((table) => [table, state[table]])),
+});
+
+// DB から読む。state はまだ変えない
+async function fetchCurrent() {
+  const [fields, allWorkTypes, crops, fertilizers, plans, tables, logs] = await Promise.all([
+    state.store.loadFields(),
+    state.store.loadWorkTypes(),
+    state.store.listAll("crops"),
+    state.store.listAll("fertilizers"),
+    state.store.loadPlans(state.field.id),
+    loadTables(PLAN_TABLES, state.plan.id),
+    state.store.loadLogs(state.field.id),
+  ]);
+  const field = fields.find((item) => item.id === state.field.id);
+  if (field) {
+    field.outline = outlineParts(field.outline);
+  }
+  return { fields, plans, allWorkTypes, crops, fertilizers, logs, tables };
+}
+
+// 読み直した内容を入れる。開いていた圃場かプランが DB にないとき（ほかの端末で消した）は、起動からやり直す
+function applyCurrent(data) {
+  const field = data.fields.find((item) => item.id === state.field.id);
+  const plan = data.plans.find((item) => item.id === state.plan.id);
+  if (!field || !plan) {
+    location.reload();
+    return false;
+  }
+  const { tables, ...rest } = data;
+  Object.assign(state, rest, { field, workTypes: data.allWorkTypes.filter(isPlannable) });
+  setPlanData(plan, tables);
+  return true;
+}
+
+// 比べるために、行を ID の順に、列を名前の順にそろえる（画面で足した行は、DB から読んだ行と並びが違う）
+function canonical(value) {
+  if (Array.isArray(value)) {
+    const items = value.map(canonical);
+    const key = (item) => (item && typeof item === "object" && !Array.isArray(item) ? item.id ?? item.code : undefined);
+    return items.every((item) => key(item) !== undefined) ? items.sort((a, b) => (String(key(a)) < String(key(b)) ? -1 : 1)) : items;
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((name) => [name, canonical(value[name])]));
+  }
+  return value;
+}
+
+// 比べる形にする。外形は、開いたことのある圃場だけが多角形の並びに直っているので、どの圃場もそろえる
+const comparable = (data) => canonical({ ...data, fields: data.fields.map((field) => ({ ...field, outline: outlineParts(field.outline) })) });
+
+// 画面の内容（local）が、DB から読んだ内容（remote）と同じか。
+// 画面で作った行には、DB が入れる列（作った日時など）がまだないことがあるので、画面にある列だけを比べる
+function sameContent(local, remote) {
+  if (Array.isArray(local)) {
+    return Array.isArray(remote) && local.length === remote.length && local.every((item, index) => sameContent(item, remote[index]));
+  }
+  if (local && typeof local === "object") {
+    return Boolean(remote) && typeof remote === "object" && Object.keys(local).every((name) => sameContent(local[name], remote[name]));
+  }
+  return local === remote || (local == null && remote == null);
+}
+
+// データを入れ替えたあと、どの画面も描き直す。なくなった図形を選んだままにしない
+function refreshViews() {
+  if (state.selected && !shapePoints(state.selected)) {
+    state.selected = null;
+  }
+  state.selectedVertex = null;
+  state.draft = [];
+  render();
+  renderSchedule();
+  renderCrops();
+  renderJournal();
+  renderLogs();
+  renderPlantingDetail();
+}
+
+// 「元に戻す」が途中で失敗したあとに呼ぶ。画面は戻したあとの内容、DB は途中までなので、DB から読み直して画面を DB にそろえる。
+// 失敗するのは、たいてい回線が切れたときで、読み直しもすぐにはできない。読めるまで図と日程の操作を止め、間を空けて繰り返す
+async function reloadFromDb() {
+  state.planBusy = true;
+  renderPlanButtons();
+  try {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        if (!applyCurrent(await fetchCurrent())) {
+          return;
+        }
+        break;
+      } catch {
+        const wait = RELOAD_RETRY_MS[Math.min(attempt, RELOAD_RETRY_MS.length - 1)];
+        // 回線が戻ったら、待たずに試す
+        await new Promise((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            window.removeEventListener("online", done);
+            resolve();
+          };
+          const timer = setTimeout(done, wait);
+          window.addEventListener("online", done);
+        });
+      }
+    }
+  } finally {
+    state.planBusy = false;
+    renderPlans();
+  }
+  refreshViews();
+}
+
+// 書きかけや送り残しがあるか。あるあいだは、読み直さない（入れ替えると、書きかけが消えたり、窓が古い行を指したままになったりする）
+function midEdit() {
+  const element = document.activeElement;
+  const typing = element && (element.tagName === "TEXTAREA" || element.tagName === "INPUT" || element.tagName === "SELECT" || element.isContentEditable);
+  return Boolean(
+    state.planBusy ||
+      settings.open ||
+      state.mapEditing ||
+      mapDraft.ops.length ||
+      pendingSaves.size ||
+      state.store.writing() ||
+      document.querySelector("dialog[open]") ||
+      typing
+  );
+}
+
+// 「計画は PC、確認と実績はスマホ」と 2 台で使うと、開いたままの画面は古い内容を出し続け、そこで直すと、もう一方の変更を上書きする。
+// 画面が隠れてしばらくたってから戻ってきたら、DB から読み直す。DB が画面と同じなら、何もしない（「元に戻す」の履歴も残る）。
+// 違っていたら入れ替えて、履歴を空にする（古い写しに戻すと、ほかの端末の変更を消してしまう）
+let hiddenAt = null;
+let reloadDue = false; // 読み直すことになっているが、書きかけなどがあって、まだ読み直していない
+let reloading = false;
+
+async function reloadIfChanged() {
+  if (!reloadDue || reloading || !state.field || !state.plan || midEdit()) {
+    return;
+  }
+  reloading = true;
+  try {
+    const before = JSON.stringify(comparable(currentData()));
+    const data = await fetchCurrent();
+    // 読んでいるあいだに操作が始まっていたら、読んだものは使わない（次に戻ってきたときに読み直す）
+    if (midEdit() || JSON.stringify(comparable(currentData())) !== before) {
+      return;
+    }
+    reloadDue = false;
+    if (sameContent(JSON.parse(before), comparable(data))) {
+      return;
+    }
+    if (applyCurrent(data)) {
+      renderPlans();
+      refreshViews();
+      resetHistory();
+      setStatus("ほかの画面での変更を読み込みました");
+    }
+  } catch {
+    // 圏外など。次に戻ってきたときに読み直す
+  } finally {
+    reloading = false;
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    hiddenAt = Date.now();
+    return;
+  }
+  if (hiddenAt !== null && Date.now() - hiddenAt >= RELOAD_AFTER_HIDDEN_MS) {
+    reloadDue = true;
+  }
+  hiddenAt = null;
+  reloadIfChanged();
+});
+
 // すぐに保存する操作（追加、削除、分割など）を包む
 async function persist(action) {
   $("saveStatus").textContent = "保存中…";
@@ -3728,20 +3918,9 @@ async function startApp() {
       clearTimeout(saveTimer);
       await flushSaves();
     },
-    // データを入れ替えたあと、どの画面も描き直す。なくなった図形を選んだままにしない
-    refresh: () => {
-      if (state.selected && !shapePoints(state.selected)) {
-        state.selected = null;
-      }
-      state.selectedVertex = null;
-      state.draft = [];
-      render();
-      renderSchedule();
-      renderCrops();
-      renderJournal();
-      renderLogs();
-      renderPlantingDetail();
-    },
+    refresh: refreshViews,
+    // 戻すのに途中で失敗したとき、DB から読み直す
+    reload: reloadFromDb,
   });
 }
 
