@@ -122,7 +122,8 @@ app_compat（この DB を使ってよい画面の版。画面からは読むだ
 
 ## 3. データを守る仕組み
 
-- テーブルは `field` スキーマに置き、RLS で `field.owners` に登録した利用者にだけ読み書きを許します。
+- テーブルは `field` スキーマに置き、RLS で `field.owners` に登録した利用者にだけ読み書きを許します。`sql/field.sql` は、すべての表に RLS を付け、最後に、RLS のない表と、許す相手を決めていない表がないことを確かめます。
+- 利用者の登録は、Supabase の設定で止めています（Authentication > Sign In / Providers の「Allow new users to sign up」）。公開キーを知っていても、利用者は作れません。利用者を足すときは、管理画面の Authentication > Users で作ります。
 - 下絵の画像（集成図など）には地番や氏名が写っていることがあるので、リポジトリに入れず、非公開のストレージ（`field-plan`）に置きます。
 - 農作業日記には、ほかの方の氏名や連絡先が入ります。日記は `inoo_farm` の `diary` スキーマにあり、API には出していません。画面は `sql/diary.sql` の関数だけを通して読み書きし、関数は `field.owners` に登録した本人でなければ止まります。写真は非公開のストレージ（`diary-photos`）に置きます。本物の日記は、テストにも画面の見本にも使いません。
 - 圃場の場所、面積、作付の予定などは、このリポジトリに書きません。DB にだけ置きます。
@@ -535,7 +536,7 @@ bun x supabase secrets set "FIELD_MCP_TOKEN=$t" --remote=byhthaiwbutqstrqbwwc
 **URL そのものが鍵です。** 人に見せたり、公開の場所や会話に貼ったりしないでください。
 漏れた疑いがあるときは、「コネクタ URL の作り方」をもう一度実行します。合言葉が入れ替わり、古い URL は使えなくなります。
 
-呼び出しは `field.mcp_access_log` に残ります。合言葉が違う呼び出し（`authorized` が false）が続いていないかを、ここで確かめられます。
+呼び出しは `field.mcp_access_log` に残ります。合言葉が違う呼び出し（`authorized` が false）が続いていないかを、ここで確かめられます。90 日より古い行は、毎日 3:40 に pg_cron が消します。
 
 ### サーバーを配備する
 

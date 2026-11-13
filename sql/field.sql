@@ -383,6 +383,13 @@ create table if not exists field.mcp_access_log (
   user_agent text
 );
 
+-- 毎日 3:40（日本時間）に、90 日より古い呼び出しの記録を消す。合言葉が違う呼び出しも 1 件ずつ残るので、
+-- 消さないと、関数の URL を叩かれ続けたぶんだけ増える。同じ名前で登録し直すと、置き換わる
+select cron.schedule(
+  'field-mcp-access-log-purge', '40 18 * * *',
+  $$delete from field.mcp_access_log where at < now() - interval '90 days'$$
+);
+
 create index if not exists works_plan_start_idx on field.works (plan_start);
 
 -- ---- 農薬の使用基準（FAMIC の農薬登録情報） ----
@@ -697,6 +704,20 @@ alter default privileges in schema field revoke all on tables from public, anon;
 
 grant usage on schema field to authenticated;
 grant select, insert, update, delete on all tables in schema field to authenticated;
+
+-- 上の許可は、すべての表に付く。表を足して、下の方針（policy）の一覧に足し忘れても開いたままにならないよう、
+-- ここで、すべての表に RLS を付ける。方針のない表は、だれも読み書きできない（ファイルの最後で確かめる）
+do $$
+declare
+  t text;
+begin
+  for t in
+    select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'field' and c.relkind in ('r', 'p')
+  loop
+    execute format('alter table field.%I enable row level security', t);
+  end loop;
+end $$;
 revoke all on field.owners from authenticated;
 revoke all on field.mcp_access_log from authenticated;
 revoke all on field.audit_log from authenticated;
@@ -791,3 +812,25 @@ drop policy if exists field_plan_owner_all on storage.objects;
 create policy field_plan_owner_all on storage.objects for all to authenticated
   using (bucket_id = 'field-plan' and field.is_owner())
   with check (bucket_id = 'field-plan' and field.is_owner());
+
+-- 確かめ。RLS のない表と、方針の一覧に足し忘れた表（RLS はあるが方針がない表）があれば、失敗させる。
+-- 方針がなくてよいのは、画面から読み書きしない 4 つの表だけ
+do $$
+declare
+  missing text;
+begin
+  select string_agg(c.relname, ', ' order by c.relname) into missing
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'field' and c.relkind in ('r', 'p') and not c.relrowsecurity;
+  if missing is not null then
+    raise exception 'RLS のない表があります: %', missing;
+  end if;
+  select string_agg(c.relname, ', ' order by c.relname) into missing
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'field' and c.relkind in ('r', 'p')
+    and c.relname not in ('owners', 'importers', 'mcp_access_log', 'audit_log')
+    and not exists (select 1 from pg_policy p where p.polrelid = c.oid);
+  if missing is not null then
+    raise exception '方針（policy）のない表があります。方針の一覧に足してください: %', missing;
+  end if;
+end $$;
