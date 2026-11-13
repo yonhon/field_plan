@@ -1179,6 +1179,8 @@ async function flushSaves({ quiet = false } = {}) {
     }
     clearTimeout(retryTimer);
     retries = 0;
+    // 送り残しがあって見送っていた読み直しを、送り終えたので試す
+    reloadSoon();
   } catch (error) {
     saves.filter(([key]) => !pendingSaves.has(key)).forEach(([key, id]) => pendingSaves.set(key, id));
     $("saveStatus").textContent = `保存に失敗しました: ${error.message}`;
@@ -1321,8 +1323,6 @@ async function reloadFromDb() {
 
 // 書きかけや送り残しがあるか。あるあいだは、読み直さない（入れ替えると、書きかけが消えたり、窓が古い行を指したままになったりする）
 function midEdit() {
-  const element = document.activeElement;
-  const typing = element && (element.tagName === "TEXTAREA" || element.tagName === "INPUT" || element.tagName === "SELECT" || element.isContentEditable);
   return Boolean(
     state.planBusy ||
       settings.open ||
@@ -1331,8 +1331,26 @@ function midEdit() {
       pendingSaves.size ||
       state.store.writing() ||
       document.querySelector("dialog[open]") ||
-      typing
+      typingUnsaved()
   );
+}
+
+// 打ちかけの文字があるか。文字を打つ欄にカーソルがあり、中身が、描いたときから変わっているとき。
+// カーソルがあるだけの欄、選ぶ欄、チェックの欄、日付の欄は、描き直しても失うものがないので、書きかけに数えない
+// （PC では、タブを切り替えて戻っても、カーソルは前の欄に残る。それだけで見送ると、戻っても読み直さないことになる）。
+// 日記の画面は、読み直しでは描き直さないので、打っていても数えない
+const TEXT_INPUTS = ["text", "number", "email", "password", "search", "tel", "url", ""];
+
+function typingUnsaved() {
+  const element = document.activeElement;
+  if (!element || element.closest?.("#diaryView")) {
+    return false;
+  }
+  if (element.isContentEditable) {
+    return true;
+  }
+  const text = element.tagName === "TEXTAREA" || (element.tagName === "INPUT" && TEXT_INPUTS.includes(element.type));
+  return text && element.value !== element.defaultValue;
 }
 
 // 「計画は PC、確認と実績はスマホ」と 2 台で使うと、開いたままの画面は古い内容を出し続け、そこで直すと、もう一方の変更を上書きする。
@@ -1341,16 +1359,45 @@ function midEdit() {
 let hiddenAt = null;
 let reloadDue = false; // 読み直すことになっているが、書きかけなどがあって、まだ読み直していない
 let reloading = false;
+let reloadTimer = null;
+
+// 読み直しを見送ったとき（書きかけがある、読んでいるあいだに操作が始まった、読めなかった）は、読み直せるまで試し続ける。
+// 見送ったままにすると、窓を閉じても、欄を離れても読み直さず、古い内容のまま直して、ほかの端末の変更を上書きする。
+// 窓を閉じたとき、欄を離れたとき、送り残しを送り終えたとき、回線が戻ったときは、すぐに試す（下の知らせと flushSaves）。
+// それ以外のきっかけ（図の編集を閉じた、書き込みが終わった、など）は、間を空けて試して拾う
+const RELOAD_WAIT_EDIT_MS = 3000; // 書きかけがあって見送ったあと、次に試すまで
+const RELOAD_WAIT_FAILED_MS = 30000; // 読めなかったあと、次に試すまで
+
+function reloadLater(wait) {
+  clearTimeout(reloadTimer);
+  // 画面が隠れているあいだは試さない（戻ってきたときに試す）
+  if (reloadDue && document.visibilityState !== "hidden") {
+    reloadTimer = setTimeout(reloadIfChanged, wait);
+  }
+}
+
+// 読み直すことになっていれば、すぐに試す。知らせの中では、カーソルの位置や窓の開き閉じがまだ変わっていないので、ひと呼吸おく
+function reloadSoon() {
+  if (reloadDue) {
+    reloadLater(0);
+  }
+}
 
 async function reloadIfChanged() {
-  if (!reloadDue || reloading || !state.field || !state.plan || midEdit()) {
+  clearTimeout(reloadTimer);
+  if (!reloadDue || reloading || !state.field || !state.plan) {
+    return;
+  }
+  if (midEdit()) {
+    reloadLater(RELOAD_WAIT_EDIT_MS);
     return;
   }
   reloading = true;
+  let wait = RELOAD_WAIT_EDIT_MS;
   try {
     const before = JSON.stringify(comparable(currentData()));
     const data = await fetchCurrent();
-    // 読んでいるあいだに操作が始まっていたら、読んだものは使わない（次に戻ってきたときに読み直す）
+    // 読んでいるあいだに操作が始まっていたら、読んだものは使わない（あとで読み直す）
     if (midEdit() || JSON.stringify(comparable(currentData())) !== before) {
       return;
     }
@@ -1365,15 +1412,18 @@ async function reloadIfChanged() {
       setStatus("ほかの画面での変更を読み込みました");
     }
   } catch {
-    // 圏外など。次に戻ってきたときに読み直す
+    // 圏外など。回線が戻ったときか、しばらくしてから読み直す
+    wait = RELOAD_WAIT_FAILED_MS;
   } finally {
     reloading = false;
+    reloadLater(wait);
   }
 }
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     hiddenAt = Date.now();
+    clearTimeout(reloadTimer);
     return;
   }
   if (hiddenAt !== null && Date.now() - hiddenAt >= RELOAD_AFTER_HIDDEN_MS) {
@@ -1382,6 +1432,10 @@ document.addEventListener("visibilitychange", () => {
   hiddenAt = null;
   reloadIfChanged();
 });
+// 欄を離れた、窓を閉じた、回線が戻った。窓を閉じた知らせ（close）は上の要素へ伝わらないので、伝わる前の段で受ける
+document.addEventListener("focusout", reloadSoon, true);
+document.addEventListener("close", reloadSoon, true);
+window.addEventListener("online", reloadSoon);
 
 // すぐに保存する操作（追加、削除、分割など）を包む
 async function persist(action) {

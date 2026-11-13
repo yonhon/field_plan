@@ -127,7 +127,7 @@ test("隠れていたのが 1 分より短ければ、読み直さない", optio
   assert.equal(await shownBeds(), "bed1,bed2");
 });
 
-test("窓を開いているあいだは読み直さず、次に戻ってきたときに読み直す", options, async () => {
+test("窓を開いているあいだは読み直さず、窓を閉じたら、次に戻るのを待たずに読み直す", options, async () => {
   await openStrip(2);
   await page.click('.strip-bed[data-bed="bed2"]');
   await page.click("#stripDeleteBtn");
@@ -137,8 +137,116 @@ test("窓を開いているあいだは読み直さず、次に戻ってきた�
   await settle();
   assert.equal(await shownBeds(), "bed1,bed2", "窓が開いているあいだは、入れ替えない");
   await page.click('dialog.notice [data-action="cancel"]');
-  await page.waitFor(`!document.querySelector("dialog.notice")`, "窓が閉じる");
-  await awayFor(1);
+  await waitBeds("bed1,bed2,bed3");
+  assert.deepEqual(page.errors, []);
+});
+
+test("カーソルが欄にあるだけなら、戻ったときに読み直す（選ぶ欄、打っていない入力欄）", options, async () => {
+  await openStrip(2);
+  await page.run(`(() => {
+    const holder = document.createElement("div");
+    holder.innerHTML = '<select id="someSelect"><option>a</option><option>b</option></select>';
+    document.body.append(holder);
+    document.getElementById("someSelect").focus();
+  })()`);
+  assert.equal(await page.run(`document.activeElement.id`), "someSelect");
+  await changeElsewhere(`data.beds.push(${JSON.stringify(bed(3))})`);
+  await awayFor(61);
+  await waitBeds("bed1,bed2,bed3");
+
+  // 打っていない文字の欄（中身が、描いたときのまま）
+  await page.run(`(() => {
+    const holder = document.createElement("div");
+    holder.innerHTML = '<input id="cleanText" type="text" value="前のまま" />';
+    document.body.append(holder);
+    document.getElementById("cleanText").focus();
+  })()`);
+  await changeElsewhere(`data.beds.push(${JSON.stringify(bed(4))})`);
+  await awayFor(61);
+  await waitBeds("bed1,bed2,bed3,bed4");
+  assert.deepEqual(page.errors, []);
+});
+
+test("打ちかけの文字があるあいだは読み直さず、欄を離れたら、次に戻るのを待たずに読み直す", options, async () => {
+  await openStrip(2);
+  await page.run(`(() => {
+    const holder = document.createElement("div");
+    holder.innerHTML = '<input id="typedText" type="text" value="前の文字" />';
+    document.body.append(holder);
+    const input = document.getElementById("typedText");
+    input.focus();
+    input.value = "打ちかけ";
+  })()`);
+  await changeElsewhere(`data.beds.push(${JSON.stringify(bed(3))})`);
+  await awayFor(61);
+  await settle();
+  assert.equal(await shownBeds(), "bed1,bed2", "打ちかけがあるあいだは、入れ替えない");
+  assert.equal(await page.run(`document.getElementById("typedText").value`), "打ちかけ");
+  await page.run(`document.getElementById("typedText").blur()`);
+  await waitBeds("bed1,bed2,bed3");
+  assert.deepEqual(page.errors, []);
+});
+
+test("送り残しがあるあいだは読み直さず、送り終えたら読み直す", options, async () => {
+  await openStrip(2);
+  // 保存を失敗させて、畝 1 の幅を変える（送り残しができる）
+  await page.run(`(() => {
+    const setItem = Storage.prototype.setItem;
+    window.restoreSaves = () => (Storage.prototype.setItem = setItem);
+    Storage.prototype.setItem = function (key, value) {
+      if (key === ${JSON.stringify(KEY)}) {
+        throw new Error("保存の失敗");
+      }
+      return setItem.call(this, key, value);
+    };
+    window.prompt = () => "150";
+  })()`);
+  await page.click('[data-dim="width:0"]');
+  await page.waitFor(`document.querySelector("dialog[open]")?.textContent.includes("保存の失敗")`, "失敗の窓");
+  await page.click('dialog.notice [data-action="close"]');
+  await page.waitFor(`!document.querySelector("dialog[open]")`, "窓が閉じる");
+  // ほかの端末が畝を足す（保存は止めてあるので、じかに書く）
+  await page.run(`(() => {
+    window.restoreSaves();
+    const data = JSON.parse(localStorage.getItem(${JSON.stringify(KEY)}));
+    data.beds.push(${JSON.stringify(bed(3))});
+    localStorage.setItem(${JSON.stringify(KEY)}, JSON.stringify(data));
+    const setItem = Storage.prototype.setItem;
+    window.restoreSaves = () => (Storage.prototype.setItem = setItem);
+    Storage.prototype.setItem = function (key, value) {
+      if (key === ${JSON.stringify(KEY)}) {
+        throw new Error("保存の失敗");
+      }
+      return setItem.call(this, key, value);
+    };
+  })()`);
+  await awayFor(61);
+  await settle();
+  assert.equal(await shownBeds(), "bed1,bed2", "送り残しがあるあいだは、入れ替えない");
+  // 回線が戻る。送り残しを送り終えたら、読み直す。送った幅は残る
+  await page.run(`window.restoreSaves(); window.dispatchEvent(new Event("online"))`);
+  await waitBeds("bed1,bed2,bed3");
+  const [a, b] = (await page.saved()).beds.find((item) => item.id === "bed1").shape;
+  assert.equal(Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) * 100), 150, "送り残しは、DB に入っている");
+  assert.equal(await page.run(`document.querySelector('[data-dim="width:0"]').textContent`), "150cm");
+});
+
+test("知らせの出ない書きかけ（図の編集など）が終わったときも、間を空けた試しで拾って読み直す", options, async () => {
+  await openStrip(2);
+  // 閉じる知らせを出さない窓で、書きかけがある状態にする
+  await page.run(`(() => {
+    const box = document.createElement("dialog");
+    box.id = "quietBox";
+    box.setAttribute("open", "");
+    document.body.append(box);
+  })()`);
+  await changeElsewhere(`data.beds.push(${JSON.stringify(bed(3))})`);
+  await awayFor(61);
+  await settle();
+  assert.equal(await shownBeds(), "bed1,bed2");
+  await page.run(`document.getElementById("quietBox").removeAttribute("open")`);
+  await settle();
+  assert.equal(await shownBeds(), "bed1,bed2", "知らせがないので、すぐには読み直さない");
   await waitBeds("bed1,bed2,bed3");
   assert.deepEqual(page.errors, []);
 });
