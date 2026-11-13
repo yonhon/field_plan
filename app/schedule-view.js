@@ -43,6 +43,8 @@ export const SCOPE_LABELS = { block: "区画の作業（畝立ての前まで）
 let ctx = null; // { state, setStatus, queueSave, cropColor, plantingOn }
 // いま編集している相手。target は "block"（区画の作業）か、畝の ID
 const sel = { blockId: null, target: "block", plantingId: null };
+// URL の区画で開いたとき、前に開いていたのがその区画の畝なら、その畝に戻す（データを読んでから、keepSelection で）
+let restoreBed = false;
 let problems = []; // 日程の無理。描くたびに求め直す
 export const ARRANGE_MODES = {
   block: { before: "畝立てをこの日に始められるように逆算", forward: "最初の作業をこの日に始める" },
@@ -125,12 +127,37 @@ async function run(action) {
 
 // ---- 描画 ----
 
+// 日程の画面で開いていた区画・畝を、プランごとにブラウザーへ覚える（次に開いたときに、同じ区画・畝を開く）
+const savedPlace = () => (state().field && state().plan ? loadPref(state().field.id, "schedulePlace")?.[state().plan.id] || null : null);
+
+function rememberPlace() {
+  if (!state().field || !state().plan || !sel.blockId) {
+    return;
+  }
+  const place = { blockId: sel.blockId, target: sel.target, plantingId: sel.plantingId };
+  const saved = savedPlace();
+  if (saved && saved.blockId === place.blockId && saved.target === place.target && saved.plantingId === place.plantingId) {
+    return;
+  }
+  const places = loadPref(state().field.id, "schedulePlace") || {};
+  savePref(state().field.id, "schedulePlace", { ...places, [state().plan.id]: place });
+}
+
 function keepSelection() {
   const blocks = state().blocks;
-  if (!blocks.some((block) => block.id === sel.blockId)) {
-    sel.blockId = blocks[0]?.id || null;
-    sel.target = "block";
+  if (!blocks.length) {
+    Object.assign(sel, { blockId: null, target: "block", plantingId: null });
+    return;
   }
+  const saved = savedPlace();
+  if (!blocks.some((block) => block.id === sel.blockId)) {
+    // 開いていた区画がこのプランにない（起動したとき、プランを替えたとき）: 前にこのプランで開いていた区画・畝。なければ先頭の区画
+    const known = saved && blocks.some((block) => block.id === saved.blockId);
+    Object.assign(sel, known ? { blockId: saved.blockId, target: saved.target, plantingId: saved.plantingId } : { blockId: blocks[0].id, target: "block", plantingId: null });
+  } else if (restoreBed && saved?.blockId === sel.blockId) {
+    Object.assign(sel, { target: saved.target, plantingId: saved.plantingId });
+  }
+  restoreBed = false;
   if (sel.target !== "block" && !blockBeds(sel.blockId).some((bed) => bed.id === sel.target)) {
     sel.target = "block";
   }
@@ -144,8 +171,9 @@ function keepSelection() {
   }
 }
 
-// 圃場図で選んだ区画や畝を、日程でも開く
-export function openInSchedule(kind, id) {
+// 圃場図で選んだ区画や畝を、日程でも開く。restore: URL の区画で開いたとき（前にその区画の畝を開いていたら、その畝に戻す）
+export function openInSchedule(kind, id, { restore = false } = {}) {
+  restoreBed = restore;
   if (kind === "block") {
     Object.assign(sel, { blockId: id, target: "block", plantingId: null });
   } else if (kind === "planting") {
@@ -163,6 +191,7 @@ export function renderSchedule() {
     return;
   }
   keepSelection();
+  rememberPlace();
   const blocks = state().blocks;
   $("scheduleEmpty").hidden = blocks.length > 0;
   $("scheduleBody").hidden = blocks.length === 0;
@@ -281,6 +310,7 @@ function onPick(value) {
   if (planting) {
     // 日程の画面に戻ったときも、この畝の区画を開く
     Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: planting.id });
+    rememberPlace();
     ctx.openDetail("planting", planting.id);
   } else {
     Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: null });

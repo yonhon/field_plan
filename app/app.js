@@ -3745,7 +3745,7 @@ function openRoute(route, mode) {
   if (route.view === "planting") {
     openPlantingDetail(route.kind, route.id);
   } else if (route.block) {
-    openInSchedule("block", route.block);
+    openInSchedule("block", route.block, { restore: true });
   }
   showView(route.view, { history: mode });
 }

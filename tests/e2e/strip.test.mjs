@@ -436,3 +436,20 @@ test("株の並びと苗数: 定植の実績に株間と条数があれば、そ
   assert.equal(numbers, "苗 240/苗 424");
   assert.deepEqual(page.errors, []);
 });
+
+test("日程で開いていた畝を、次に開いたときも開く（URL に区画があるときも）", options, async () => {
+  await openStrip(3);
+  await chooseBed("bed2");
+  const prefs = await page.run(`localStorage.getItem("field_plan_prefs")`);
+  assert.equal(JSON.parse(prefs).f1.schedulePlace.p1.target, "bed2");
+
+  await page.loadApp(seed(3), { field_plan_current_field: "f1", field_plan_prefs: prefs });
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(`document.querySelector('.strip-bed[data-bed="bed2"]')?.classList.contains("is-selected")`, "前に開いていた bed2 を開く");
+
+  // 再読み込み（URL は #schedule/block/b1）でも、畝に戻す
+  await page.run(`location.reload()`);
+  await page.waitFor(`document.querySelector('.strip-bed[data-bed="bed2"]')?.classList.contains("is-selected")`, "再読み込みでも bed2 を開く");
+  assert.equal(await page.run(`location.hash`), "#schedule/block/b1");
+  assert.deepEqual(page.errors, []);
+});
