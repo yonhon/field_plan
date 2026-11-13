@@ -3968,9 +3968,72 @@ async function logout() {
     return;
   }
   clearDiaryDrafts();
-  await state.client.auth.signOut();
+  loggingOut = true;
+  // この端末のログインだけを取り消す。既定（global）は、すべての端末のログインを取り消すので、
+  // スマホでログアウトすると、PC のログインも 1 時間以内に切れる
+  await state.client.auth.signOut({ scope: "local" });
   forgetImageUrls();
   location.reload();
+}
+
+// ---- ログインが切れたとき ----
+// 開いたままの画面でログインが切れると（ほかのタブでのログアウト、ログインの更新の失敗）、そのあとの保存は権限の誤りで失敗する。
+// 読み込み直すと送り残しが消えるので、読み込み直さずにログインの窓を出し、ログインできたら、送り残しを送って DB から読み直す
+let loggingOut = false; // 自分で押したログアウトの途中（このあと読み込み直すので、窓は出さない）
+let userEmail = "";
+let reloginBox = null;
+
+function askLogin() {
+  if (!reloginBox) {
+    reloginBox = document.createElement("dialog");
+    reloginBox.className = "notice relogin";
+    draw(
+      reloginBox,
+      '<form><p class="notice-text">ログインが切れました。ログインし直すと、このまま続けられます。送っていない変更は、ログインのあとで送ります。</p>' +
+        '<label>メールアドレス<input name="email" type="email" autocomplete="username" required /></label>' +
+        '<label>パスワード<input name="password" type="password" autocomplete="current-password" required /></label>' +
+        '<div class="row"><button class="primary-btn" type="submit">ログイン</button></div>' +
+        '<p class="error" role="alert"></p></form>'
+    );
+    // Esc では閉じない（閉じても、保存は失敗し続ける）
+    reloginBox.addEventListener("cancel", (event) => event.preventDefault());
+    reloginBox.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = event.target;
+      const message = form.querySelector(".error");
+      const button = form.querySelector("button");
+      message.textContent = "";
+      button.disabled = true;
+      try {
+        const { data, error } = await state.client.auth.signInWithPassword({ email: form.email.value, password: form.password.value });
+        if (error) {
+          message.textContent = "ログインできませんでした。メールアドレスとパスワードを確かめてください。";
+          return;
+        }
+        form.password.value = "";
+        reloginBox.close();
+        userEmail = data.user?.email || userEmail;
+        setUserMenu({ email: userEmail, logout });
+        setStatus("ログインし直しました");
+        // 送り残しを送り、切れていたあいだにほかの端末で変わった内容を読み直す
+        retries = 0;
+        retrySaves();
+        reloadDue = true;
+        reloadIfChanged();
+      } catch (error) {
+        message.textContent = `ログインできませんでした: ${error.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    document.body.append(reloginBox);
+  }
+  if (!reloginBox.open) {
+    reloginBox.querySelector('[name="email"]').value = userEmail;
+    reloginBox.querySelector(".error").textContent = "";
+    reloginBox.showModal();
+    reloginBox.querySelector(userEmail ? '[name="password"]' : '[name="email"]').focus();
+  }
 }
 
 async function main() {
@@ -3985,6 +4048,12 @@ async function main() {
 
   state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, { db: { schema: "field" }, global: { fetch: fetchWithOperation } });
   state.store = inOrder(createSupabaseStore(state.client, { url: config.supabaseUrl, anonKey: config.supabaseAnonKey }));
+  // 画面を出したあとにログインが切れたら、ログインの窓を出す。知らせの中からは supabase-js を呼べない（待ち合いになる）ので、あとで出す
+  state.client.auth.onAuthStateChange((event) => {
+    if (event === "SIGNED_OUT" && !loggingOut && !$("appView").hidden) {
+      setTimeout(askLogin, 0);
+    }
+  });
 
   $("loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -3997,13 +4066,15 @@ async function main() {
       $("loginError").textContent = "ログインできませんでした。メールアドレスとパスワードを確かめてください。";
       return;
     }
-    setUserMenu({ email: signedIn.user?.email, logout });
+    userEmail = signedIn.user?.email || "";
+    setUserMenu({ email: userEmail, logout });
     await startApp();
   });
 
   const { data } = await state.client.auth.getSession();
   if (data.session) {
-    setUserMenu({ email: data.session.user?.email, logout });
+    userEmail = data.session.user?.email || "";
+    setUserMenu({ email: userEmail, logout });
     await startApp();
   } else {
     $("loginView").hidden = false;
