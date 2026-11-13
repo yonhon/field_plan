@@ -1331,9 +1331,35 @@ function midEdit() {
       pendingSaves.size ||
       state.store.writing() ||
       document.querySelector("dialog[open]") ||
-      typingUnsaved()
+      typingUnsaved() ||
+      heldPointers.size
   );
 }
+
+// 押しているあいだ（ドラッグの最中）も、書きかけに数える。ドラッグは、押したときの行をつかんだまま動かすので、
+// 途中でデータを入れ替えると、離したときに、動かした結果が保存されない（帯の図の畝）。
+// 押した、離したは、どの部品が受けるよりも前に受ける。離したら、見送っていた読み直しをすぐ試す（reloadSoon）
+const heldPointers = new Set();
+
+function releasePointers(event) {
+  const held = heldPointers.size > 0;
+  if (event?.pointerId === undefined) {
+    heldPointers.clear();
+  } else {
+    heldPointers.delete(event.pointerId);
+  }
+  if (held && !heldPointers.size) {
+    reloadSoon();
+  }
+}
+
+window.addEventListener("pointerdown", (event) => heldPointers.add(event.pointerId), true);
+window.addEventListener("pointerup", releasePointers, true);
+window.addEventListener("pointercancel", releasePointers, true);
+// 離した知らせが届かないことがある（押したまま、ほかの窓へ移った、など）。押したままの印が残ると、読み直さなくなるので、
+// ボタンを押していないマウスが動いたとき、窓が前面でなくなったときに、印を下ろす
+window.addEventListener("pointermove", (event) => event.pointerType === "mouse" && event.buttons === 0 && heldPointers.size && releasePointers(), true);
+window.addEventListener("blur", () => releasePointers());
 
 // 打ちかけの文字があるか。文字を打つ欄にカーソルがあり、中身が、描いたときから変わっているとき。
 // カーソルがあるだけの欄、選ぶ欄、チェックの欄、日付の欄は、描き直しても失うものがないので、書きかけに数えない

@@ -251,6 +251,34 @@ test("知らせの出ない書きかけ（図の編集など）が終わった�
   assert.deepEqual(page.errors, []);
 });
 
+test("ドラッグしているあいだは読み直さず、離したら読み直す。動かした結果は保存される", options, async () => {
+  await openStrip(2);
+  const shapeOf = async () => JSON.stringify((await page.saved()).beds.find((item) => item.id === "bed1").shape);
+  const before = await shapeOf();
+  // 読み直しを見送らせておく（閉じる知らせを出さない窓）。窓をなくすと、3 秒以内に、間を空けた試しが来る
+  await page.run(`(() => {
+    const box = document.createElement("dialog");
+    box.id = "quietBox";
+    box.setAttribute("open", "");
+    document.body.append(box);
+  })()`);
+  await changeElsewhere(`data.beds.push(${JSON.stringify(bed(3))})`);
+  await awayFor(61);
+  await settle();
+  await page.run(`document.getElementById("quietBox").remove()`);
+  // 畝 1 を右へ動かし、押したまま 3.5 秒止まる。そのあいだに、間を空けた試しが来る
+  let during = null;
+  await page.drag('.strip-bed[data-bed="bed1"]', 30, async () => {
+    await settle(3500);
+    during = await shownBeds();
+  });
+  assert.equal(during, "bed1,bed2", "ドラッグしているあいだは、入れ替えない");
+  await waitBeds("bed1,bed2,bed3");
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました" || document.getElementById("saveStatus").textContent === "ほかの画面での変更を読み込みました"`, "保存の完了");
+  assert.notEqual(await shapeOf(), before, "動かした結果は、DB に入っている");
+  assert.deepEqual(page.errors, []);
+});
+
 test("元に戻すのに途中で失敗したら、DB から読み直して画面を DB にそろえ、履歴を空にする。読み直せるまで操作を止める", options, async () => {
   await openStrip(3);
   await deleteBed("bed3", "bed1,bed2");

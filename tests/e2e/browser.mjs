@@ -219,8 +219,8 @@ async function launch() {
     }
   };
 
-  // 要素を、右へ dx ピクセル、本物のマウスの操作でドラッグする
-  const drag = async (selector, dx) => {
+  // 要素を、右へ dx ピクセル、本物のマウスの操作でドラッグする。held を渡すと、離す前（押したまま止まっているあいだ）に呼ぶ
+  const drag = async (selector, dx, held = null) => {
     const target = JSON.stringify(selector);
     await waitFor(`Boolean(document.querySelector(${target}))`, selector);
     const point = await run(`(() => {
@@ -234,6 +234,7 @@ async function launch() {
     for (let step = 1; step <= 5; step += 1) {
       await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x + (dx * step) / 5, y: point.y, button: "left", buttons: 1 });
     }
+    await held?.();
     await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x + dx, y: point.y, button: "left", clickCount: 1 });
   };
 
