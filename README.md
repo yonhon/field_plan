@@ -76,6 +76,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `app/updates.json` | アプリの更新の一覧（「履歴」の画面に出る） |
 | `app/store.js` | データの読み書き |
 | `app/sw.js` | アプリのファイルを一式ブラウザーに取っておき、起動のときはサーバーを待たずに出す（Service Worker）。新しい版は画面が出たあとで取り、お知らせの「読み込み直す」で切り替える |
+| `app/vendor/` | 手元に置いた外のライブラリー（supabase-js）と、そのライセンスの表示 |
 | `supabase/functions/field-mcp/` | 計画と作業の実績を Claude.ai から読むための MCP サーバー（Supabase Edge Function） |
 | `supabase/functions/field-weather/` | 2 週間気温予報を画面に渡す関数（ブラウザーから気象庁のこのデータを読めないため） |
 | `scripts/import_famic.py` | FAMIC の農薬登録情報（CSV）を DB に取り込む。`.github/workflows/famic.yml` が週に 1 回動かす |
@@ -574,3 +575,5 @@ node --test "tests/*.test.mjs"
 ```
 node --test "tests/e2e/*.test.mjs"
 ```
+
+supabase-js（DB とログインのライブラリー）は、版を決めたファイルを `app/vendor/` に置いています。版を上げるときは、npm のパッケージ `@supabase/supabase-js` のその版から `dist/umd/supabase.js` を取り、`app/vendor/supabase-js-<版>.js` として置き、古いファイルを消して、`app/index.html` と `app/sw.js` の `FILES` のファイル名を直します。`LICENSE` が変わっていれば、`app/vendor/supabase-js.LICENSE.txt` も置き換えます。そのあと、ログインして、読み込みと保存ができることを確かめます。

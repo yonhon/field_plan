@@ -493,7 +493,8 @@
 
     <div id="ganttTip" class="gantt-tip" role="tooltip" hidden></div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- supabase-js は、版を決めたファイルを手元に置いて読む（外のサーバーからは読まない）。版の上げ方は README の 12 章 -->
+    <script src="./vendor/supabase-js-2.119.0.js"></script>
     <script src="./config.js"></script>
     <script type="module">
       // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。

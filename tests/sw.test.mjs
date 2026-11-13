@@ -34,6 +34,20 @@ test("一式に、app.js からたどれる部品と、index.html が読むフ�
   }
 });
 
+test("index.html は、外のサーバーからスクリプトを読まない", () => {
+  const html = readFileSync(join(APP, "index.html"), "utf8");
+  const sources = [...html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']?([^"'\s>]+)/gi)].map(([, src]) => src);
+  assert.ok(sources.length > 0, "src のある script が見つからない");
+  for (const src of sources) {
+    assert.match(src, /^\.\//, `${src} は、app/ の中のファイルではない`);
+  }
+  // 手元に置いたライブラリーは、決めた版のファイルが 1 つだけ
+  const vendored = sources.filter((src) => src.startsWith("./vendor/"));
+  assert.equal(vendored.length, 1);
+  assert.match(vendored[0], /^\.\/vendor\/supabase-js-\d+\.\d+\.\d+\.js$/);
+  assert.ok(readFileSync(join(APP, vendored[0])).length > 0);
+});
+
 // Cache API をまねる
 function fakeCaches() {
   const stores = new Map();

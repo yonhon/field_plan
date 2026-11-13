@@ -38,6 +38,7 @@ const FILES = [
   "field-plans.js",
   "news-view.js",
   "toast.js",
+  "vendor/supabase-js-2.119.0.js",
   "icons/A_mark_color.svg",
   "icons/favicon-32.png",
   "icons/apple-touch-icon.png",

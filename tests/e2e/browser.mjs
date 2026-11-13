@@ -156,9 +156,10 @@ async function launch() {
     page = await connect((await pageTarget(port)).webSocketDebuggerUrl);
     await page.send("Page.enable");
     await page.send("Runtime.enable");
-    // 外のサーバーが遅いと、スクリプトが待たされて起動が遅れる。?local=1 では要らないので読まない
+    // 外のサーバーが遅いと、フォントの読み込みが待たされて起動が遅れる。テストには要らないので読まない。
+    // supabase-js（app/vendor/）も、?local=1 では使わないので読まない（読むと、画面を開くたびに 0.1 秒ほど延びる）
     await page.send("Network.enable");
-    await page.send("Network.setBlockedURLs", { urls: ["*cdn.jsdelivr.net*", "*fonts.googleapis.com*", "*fonts.gstatic.com*"] });
+    await page.send("Network.setBlockedURLs", { urls: ["*/vendor/*", "*fonts.googleapis.com*", "*fonts.gstatic.com*"] });
   } catch (error) {
     page?.close();
     chrome.kill();
