@@ -86,6 +86,7 @@ const HINTS = {
 };
 const TABLES = { zone: "zones", block: "blocks", bed: "beds" };
 const PLAN_TABLES = ["zones", "blocks", "beds", "plantings", "works"]; // プランの中身の表
+const STALE_COPY_MS = 60 * 60 * 1000; // コピーの途中の印が付いたまま、これより古いプランは、失敗して残ったものとして消す
 const CURRENT_PLAN_KEY = "field_plan_current_plan";
 const CURRENT_FIELD_KEY = "field_plan_current_field";
 const VIEW_DATE_KEY = "field_plan_view_date";
@@ -2558,7 +2559,8 @@ async function copyPlan(field = state.field, plan = state.plan, plans = state.pl
     } else {
       source = await loadTables(PLAN_TABLES, plan.id);
     }
-    copy = await state.store.createPlan({ field_id: field.id, name });
+    // コピーの途中の印を付けて作る。写し終えるまでは、どの画面の一覧にも出ない
+    copy = await state.store.createPlan({ field_id: field.id, name, copying: true });
     // 行ごとに新しい ID を振り、親を指す列は新しい ID に付け替える
     const ids = new Map();
     const fresh = (id) => {
@@ -2579,9 +2581,12 @@ async function copyPlan(field = state.field, plan = state.plan, plans = state.pl
         });
         await state.store.upsert(table, rows);
       }
+      await state.store.finishPlanCopy(copy.id);
+      copy.copying = false;
     } catch (error) {
       // 途中で失敗した。区域だけ、区画までだけ、といった半端なプランを DB に残さない（下の行は、プランと一緒に消える）。
-      // 一覧には足していないので、残すと、読み込み直したときに初めて現れる。消せなくても、元の失敗を知らせる
+      // 消すのも失敗したとき（回線が切れたまま）は、コピーの途中の印が付いたまま残る。印の付いたプランは一覧に出ず、
+      // 1 時間たったあとの起動で消える（startApp）。消せなくても、元の失敗を知らせる
       const created = copy;
       copy = null;
       await state.store.deletePlan(created.id).catch(() => {});
@@ -3873,6 +3878,9 @@ async function startApp() {
     );
     return;
   }
+  // コピーの途中で失敗して残ったプランを消す。1 時間より前のものだけ（ほかの端末でコピーしている最中のものは消さない）。
+  // 消せなくても、起動は止めない（一覧には出ないので、次の起動で消せばよい）
+  state.store.removeStaleCopies(new Date(Date.now() - STALE_COPY_MS).toISOString()).catch(() => {});
   $("viewDate").value = state.viewDate;
   $("appView").hidden = false;
   $("viewTabs").hidden = false;

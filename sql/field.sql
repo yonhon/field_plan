@@ -63,6 +63,11 @@ create table if not exists field.plans (
   created_at timestamptz not null default now()
 );
 
+-- コピーの途中の印。プランのコピーは、印を付けてプランを作り、中身を写し終えたら印を外す。
+-- 途中で失敗して残ったプランは中身が欠けているので、画面も MCP も、印の付いたプランを出さない。
+-- 印が付いたまま 1 時間たったプランは、画面が起動のときに消す
+alter table field.plans add column if not exists copying boolean not null default false;
+
 -- 区域。有効圃場（耕起する場所）と、耕起しない場所（物置、井戸、通路、残渣処理場など）
 create table if not exists field.zones (
   id uuid primary key default gen_random_uuid(),

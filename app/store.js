@@ -153,8 +153,17 @@ export function createSupabaseStore(client, options) {
       }
       return url;
     },
+    // コピーの途中のプラン（copying）は、出さない。写し終える前に失敗して残ったもので、中身が欠けている
     async loadPlans(fieldId) {
-      return check(await client.from("plans").select("*").eq("field_id", fieldId).order("created_at"));
+      return check(await client.from("plans").select("*").eq("field_id", fieldId).eq("copying", false).order("created_at"));
+    },
+    // 写し終えたプランの、コピーの途中の印を外す
+    async finishPlanCopy(id) {
+      check(await client.from("plans").update({ copying: false }).eq("id", id));
+    },
+    // コピーの途中のまま残ったプランを消す。before（日時）より前に作ったものだけ（ほかの端末でコピーしている最中のものは消さない）
+    async removeStaleCopies(before) {
+      check(await client.from("plans").delete().eq("copying", true).lt("created_at", before));
     },
     async createPlan(plan) {
       return check(await client.from("plans").insert(plan).select().single());
@@ -565,10 +574,21 @@ export function createLocalStore({ strict = false } = {}) {
       return read().images?.[path.slice("local:".length)] || "";
     },
     async loadPlans(fieldId) {
-      return (read().plans || []).filter((plan) => plan.field_id === fieldId);
+      return (read().plans || []).filter((plan) => plan.field_id === fieldId && !plan.copying);
+    },
+    async finishPlanCopy(id) {
+      update((data) => {
+        delete data.plans.find((plan) => plan.id === id).copying;
+      });
+    },
+    async removeStaleCopies(before) {
+      const stale = (read().plans || []).filter((plan) => plan.copying && plan.created_at < before).map((plan) => plan.id);
+      for (const id of stale) {
+        await this.deletePlan(id);
+      }
     },
     async createPlan(plan) {
-      const created = { id: crypto.randomUUID(), ...plan };
+      const created = { id: crypto.randomUUID(), ...(plan.copying ? { created_at: new Date().toISOString() } : {}), ...plan };
       update((data) => {
         data.plans = [...(data.plans || []), created];
       });

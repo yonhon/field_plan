@@ -48,7 +48,9 @@ const source = createDataSource({
   query: async () => {
     return {
       fields: await rows("fields", "created_at"),
-      plans: await rows("plans", "created_at"),
+      // コピーの途中のプランは出さない（写し終える前に失敗して残ったもので、中身が欠けている）
+      // deno-lint-ignore no-explicit-any
+      plans: (await rows("plans", "created_at")).filter((plan: any) => !plan.copying),
       zones: await rows("zones", "created_at"),
       blocks: await rows("blocks", "created_at"),
       beds: await rows("beds", "seq"),
