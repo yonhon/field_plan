@@ -3729,6 +3729,12 @@ h4.diary-heading {
     height: 110px;
   }
 
+  /* ボタンはタブと同じ行に収まらないので、タブの上の行に右詰めで並べる。タブの下に並べると、タブと入力欄の枠が離れてしまう */
+  .diary-tools {
+    order: -1;
+    width: 100%;
+  }
+
   .diary-period .text-btn {
     padding: 6px 2px;
     font-size: 12px;
