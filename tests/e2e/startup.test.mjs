@@ -113,11 +113,11 @@ test("再読み込み: 品目の画面で読み込み直しても、品目と肥
     fertilizers: [{ id: "fe1", name: "試験の肥料", n_pct: 10, p_pct: 10, k_pct: 10 }],
   };
   await page.loadApp(data);
-  await page.click('.tab-btn[data-view="crops"]');
+  await page.click('.tab-btn[data-view="master"]');
   const rows = () => page.run(`[...document.querySelectorAll("#cropTable tbody tr, #fertilizerTable tbody tr")].map((row) => row.dataset.id)`);
   assert.deepEqual(await rows(), ["c1", "fe1"]);
   await page.run("location.reload()");
-  await page.waitFor(`location.hash === "#crops" && document.getElementById("viewTabs")?.hidden === false && document.querySelectorAll("#cropTable tbody tr").length > 0`, "品目の画面で読み込み直す");
+  await page.waitFor(`location.hash === "#master/crops" && document.getElementById("viewTabs")?.hidden === false && document.querySelectorAll("#cropTable tbody tr").length > 0`, "台帳の品目で読み込み直す");
   assert.deepEqual(await rows(), ["c1", "fe1"]);
   assert.deepEqual(page.errors, []);
 });

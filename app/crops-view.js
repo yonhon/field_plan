@@ -1,4 +1,5 @@
-// 「品目」の画面。品目ごとの設定値と、肥料の銘柄を登録する。どちらもすべてのプランで共通。
+// 「台帳」の画面。品目ごとの設定値、工程作業日数（作業の種類と目安の日数。描くのは schedule-view.js の renderTypes）、
+// 肥料の銘柄を、サブタブに分けて登録する。どれもすべての圃場とプランで共通。
 import { confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { record } from "./journal.js";
 import { draw } from "./draw.js";
@@ -29,7 +30,41 @@ const FERTILIZER_FIELDS = [
   ["k_pct", "カリ（%）", "number"],
 ];
 
-let ctx = null; // { state, setStatus }
+let ctx = null; // { state, setStatus, showView }
+
+// 台帳のサブタブ。URL は #master/サブタブ。最後に開いたサブタブを、ブラウザーに覚える（台帳は圃場によらないので、圃場ごとではない）
+export const MASTER_TABS = ["crops", "work-days", "fertilizers"];
+const MASTER_TAB_KEY = "field_plan_master_tab";
+let masterTab = (() => {
+  try {
+    const saved = localStorage.getItem(MASTER_TAB_KEY);
+    return MASTER_TABS.includes(saved) ? saved : MASTER_TABS[0];
+  } catch {
+    return MASTER_TABS[0];
+  }
+})();
+
+export const currentMasterTab = () => masterTab;
+
+export function setMasterTab(tab) {
+  if (!MASTER_TABS.includes(tab)) {
+    return;
+  }
+  masterTab = tab;
+  try {
+    localStorage.setItem(MASTER_TAB_KEY, tab);
+  } catch {
+    // 覚えられなくても、いまの表示は変わらない
+  }
+  document.querySelectorAll("[data-mastertab]").forEach((button) => {
+    const on = button.dataset.mastertab === tab;
+    button.classList.toggle("is-on", on);
+    button.setAttribute("aria-selected", String(on));
+  });
+  document.querySelectorAll("[data-masterpanel]").forEach((panel) => {
+    panel.hidden = panel.dataset.masterpanel !== tab;
+  });
+}
 
 async function run(action) {
   ctx.setStatus("保存中…");
@@ -225,6 +260,15 @@ export function initCrops(context) {
       record({ kind: "fertilizers.add", target: ["fertilizer", fertilizer.id], plan: false, text: `肥料「${fertilizer.name}」を追加` });
     });
   });
-  // 品目の画面で再読み込みすると、この準備の前に画面を開く（そのときは描けない）ので、ここで描く
+  // サブタブを押したら、そのサブタブの URL で台帳を開き直す（履歴に積む）
+  document.querySelector(".master-tabs").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-mastertab]");
+    if (button && button.dataset.mastertab !== masterTab) {
+      setMasterTab(button.dataset.mastertab);
+      ctx.showView("master");
+    }
+  });
+  setMasterTab(masterTab);
+  // 台帳の画面で再読み込みすると、この準備の前に画面を開く（そのときは描けない）ので、ここで描く
   renderCrops();
 }

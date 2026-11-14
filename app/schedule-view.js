@@ -812,7 +812,7 @@ function startAfter(works) {
   return last ? addDays(last.plan_end, 1 + (typeFor(ownerOf(last), last.work_type)?.min_gap_days || 0)) : "";
 }
 
-// 作業の種類と目安の日数の表（「品目」の画面にある）
+// 作業の種類と目安の日数の表（台帳の「工程作業日数」）
 export function renderTypes() {
   draw(
     $("typeRows"),

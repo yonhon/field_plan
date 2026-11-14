@@ -35,7 +35,7 @@ import {
   translatePoints,
   worldToImage,
 } from "./geometry.js";
-import { initCrops, renderCrops } from "./crops-view.js";
+import { MASTER_TABS, currentMasterTab, initCrops, renderCrops, setMasterTab } from "./crops-view.js";
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
 import { setPlace, setPlaceActions, setUserMenu } from "./user-menu.js";
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
@@ -3788,11 +3788,12 @@ $("fieldSettings").addEventListener("click", (event) => {
 // ---- 圃場図と日程の切り替え ----
 
 // 作付の詳細（planting）は、日程のタブの中の画面として扱う
-// 画面の URL。#map、#schedule、#crops、#diary、#journal、作付の詳細は #detail/planting/作付の ID。
+// 画面の URL。#map、#schedule、#diary、#journal、作付の詳細は #detail/planting/作付の ID。
+// 台帳は、開いているサブタブを付けて #master/サブタブ（crops、work-days、fertilizers）。前の品目の画面の URL（#crops）は、台帳の品目を開く。
 // 日程の画面は、開いている区画を付けて #schedule/block/区画の ID にする。
 // 前にあった区画の詳細（#detail/block/区画の ID）は、日程の画面でその区画を開く
 // 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）
-const VIEW_NAMES = ["map", "schedule", "crops", "diary", "journal"];
+const VIEW_NAMES = ["map", "schedule", "master", "diary", "journal"];
 
 function routeFromHash() {
   const hash = decodeURIComponent(location.hash.slice(1));
@@ -3804,6 +3805,13 @@ function routeFromHash() {
   if (block) {
     return { view: "schedule", block: block[1] };
   }
+  const master = /^master\/([\w-]+)$/.exec(hash);
+  if (master && MASTER_TABS.includes(master[1])) {
+    return { view: "master", tab: master[1] };
+  }
+  if (hash === "crops") {
+    return { view: "master", tab: "crops" };
+  }
   return VIEW_NAMES.includes(hash) ? { view: hash } : null;
 }
 
@@ -3811,6 +3819,9 @@ function hashOf(view) {
   if (view === "planting") {
     const target = plantingTarget();
     return `#detail/${target.kind}/${target.id}`;
+  }
+  if (view === "master") {
+    return `#master/${currentMasterTab()}`;
   }
   return view === "schedule" ? scheduleHash() : `#${view}`;
 }
@@ -3820,6 +3831,8 @@ function openRoute(route, mode) {
     openPlantingDetail(route.kind, route.id);
   } else if (route.block) {
     openInSchedule("block", route.block, { restore: true });
+  } else if (route.tab) {
+    setMasterTab(route.tab);
   }
   showView(route.view, { history: mode });
 }
@@ -3838,7 +3851,7 @@ function showView(view, { history: mode = "push" } = {}) {
   $("appView").hidden = view !== "map";
   $("scheduleView").hidden = view !== "schedule";
   $("plantingView").hidden = view !== "planting";
-  $("cropsView").hidden = view !== "crops";
+  $("masterView").hidden = view !== "master";
   $("diaryView").hidden = view !== "diary";
   $("journalView").hidden = view !== "journal";
   // 右下の「＋ 入力する」は圃場図だけ（日程の画面と作付の詳細では、頭の「＋ 作業を入力」を使う）
@@ -3861,7 +3874,7 @@ function showView(view, { history: mode = "push" } = {}) {
   } else if (view === "planting") {
     renderPlantingDetail();
     window.scrollTo(0, 0);
-  } else if (view === "crops") {
+  } else if (view === "master") {
     renderCrops();
     renderTypes();
   } else if (view === "diary") {
@@ -3955,8 +3968,9 @@ function openTarget(entry) {
   }
   const kind = entry.target_kind;
   const id = entry.target_id;
-  if (kind === "crop" || kind === "fertilizer") {
-    showView("crops");
+  if (kind === "crop" || kind === "fertilizer" || kind === "type") {
+    setMasterTab({ crop: "crops", fertilizer: "fertilizers", type: "work-days" }[kind]);
+    showView("master");
   } else if (kind === "planting" && state.plantings.some((item) => item.id === id)) {
     // 作付と作業: 日程の画面でその区画を開き、窓の工程の計画をその作付（区画）で開く
     openInSchedule("planting", id);
@@ -4089,7 +4103,7 @@ async function startApp() {
   } else if (!route) {
     showView("map", { history: "replace" });
   }
-  initCrops({ state, setStatus });
+  initCrops({ state, setStatus, showView });
   initDiary({ state, setStatus });
   try {
     await initJournal({ state, openTarget, setStatus });

@@ -35,7 +35,7 @@
       <nav id="viewTabs" class="control-group" aria-label="画面の切り替え" hidden>
         <button class="tab-btn is-active" data-view="map">圃場図<span id="mapBadge" class="tab-badge" hidden></span></button>
         <button class="tab-btn" data-view="schedule">日程</button>
-        <button class="tab-btn" data-view="crops">品目</button>
+        <button class="tab-btn" data-view="master">台帳</button>
         <button class="tab-btn" data-view="diary">日記</button>
         <button class="tab-btn" data-view="journal">履歴</button>
       </nav>
@@ -455,31 +455,34 @@
       <div id="plantingBody" class="schedule-body"></div>
     </main>
 
-    <main id="cropsView" class="schedule" hidden>
-      <section class="panel">
+    <!-- 台帳: 計画と記録が参照する、すべての圃場とプランで共通の登録（品目、工程作業日数、肥料）。
+         サブタブごとに URL を持つ（#master/crops、#master/work-days、#master/fertilizers）。最後に開いたサブタブを覚える -->
+    <main id="masterView" class="schedule" hidden>
+      <div class="master-tabs" role="tablist" aria-label="台帳">
+        <button type="button" role="tab" class="master-tab" data-mastertab="crops">品目</button>
+        <button type="button" role="tab" class="master-tab" data-mastertab="work-days">工程作業日数</button>
+        <button type="button" role="tab" class="master-tab" data-mastertab="fertilizers">肥料</button>
+      </div>
+      <section class="panel master-panel" data-masterpanel="crops" role="tabpanel">
         <div class="panel-heading">
-          <h2>品目</h2>
+          <p class="muted">品目ごとの設定値です。作付に品目を割り当てると、畝の寸法とこの値から、苗数と肥料の量を計算します。苗数は、定植・播種の実績に株間・条数を記録した作付では、実績の値で計算します。空の欄は計算に使いません。すべての圃場とプランで共通です。</p>
           <button id="addCropBtn" class="chip-btn edit-only">品目を追加</button>
         </div>
-        <p class="muted">品目ごとの設定値です。作付に品目を割り当てると、畝の寸法とこの値から、苗数と肥料の量を計算します。苗数は、定植・播種の実績に株間・条数を記録した作付では、実績の値で計算します。空の欄は計算に使いません。すべてのプランで共通です。</p>
         <div class="table-scroll"><table id="cropTable" class="work-table crop-table"></table></div>
       </section>
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>肥料</h2>
-          <button id="addFertilizerBtn" class="chip-btn edit-only">肥料を追加</button>
-        </div>
-        <p class="muted">窒素の成分（%）から、肥料の量を計算します。</p>
-        <div class="table-scroll"><table id="fertilizerTable" class="work-table crop-table"></table></div>
-      </section>
-
-      <section class="panel edit-only">
-        <h2>作業の種類と目安の日数</h2>
-        <p class="muted">ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。品目を登録した作付では、収穫までの日数などは品目の設定を使います。</p>
+      <section class="panel master-panel" data-masterpanel="work-days" role="tabpanel" hidden>
+        <p class="muted">作業の種類ごとの目安の日数です。ひな形から作るときの日付と、開始日を入れたときの終了日に使います。「あとにあける日数」は、その作業が終わってから次の作業までの間隔です。品目を登録した作付では、収穫までの日数などは品目の設定を使います。すべての圃場とプランで共通です。</p>
         <table class="type-table">
           <thead><tr><th>作業</th><th>かかる日数</th><th>あとにあける日数</th></tr></thead>
           <tbody id="typeRows"></tbody>
         </table>
+      </section>
+      <section class="panel master-panel" data-masterpanel="fertilizers" role="tabpanel" hidden>
+        <div class="panel-heading">
+          <p class="muted">肥料の銘柄と成分です。窒素の成分（%）から、肥料の量を計算します。すべての圃場とプランで共通です。</p>
+          <button id="addFertilizerBtn" class="chip-btn edit-only">肥料を追加</button>
+        </div>
+        <div class="table-scroll"><table id="fertilizerTable" class="work-table crop-table"></table></div>
       </section>
     </main>
 

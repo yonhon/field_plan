@@ -56,7 +56,7 @@ test("利用者のメニュー: ロゴで開き、もう一度押す・Esc・外
   // メニューの外を押すと閉じる
   await page.click("#brandMenu");
   await page.waitFor(`!document.getElementById("userMenu").hidden`, "メニューが開く");
-  await page.click('.tab-btn[data-view="crops"]');
+  await page.click('.tab-btn[data-view="master"]');
   await page.waitFor(`document.getElementById("userMenu").hidden`, "外を押して閉じる");
   assert.equal(await page.run(`document.getElementById("brandMenu").getAttribute("aria-expanded")`), "false");
   assert.deepEqual(page.errors, []);

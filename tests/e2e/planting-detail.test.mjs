@@ -173,7 +173,7 @@ test("作付の詳細から別のタブに移って日程のタブに戻ると�
   await openFromMap("pl2");
   const detailOf = (planting) => `location.hash === "#detail/planting/${planting}" && !document.getElementById("plantingView").hidden`;
 
-  for (const view of ["map", "crops"]) {
+  for (const view of ["map", "master"]) {
     await page.click(`.tab-btn[data-view="${view}"]`);
     await page.waitFor(`document.getElementById("plantingView").hidden`, `${view} に移る`);
     await page.click('.tab-btn[data-view="schedule"]');

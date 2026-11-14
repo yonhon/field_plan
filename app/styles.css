@@ -1490,6 +1490,59 @@ body.plan-busy #scheduleView {
   vertical-align: bottom;
 }
 
+/* 品目の表は列が多く横に送るので、品目の名前の列を左に固定する（送っても、どの品目の行かが分かる） */
+#cropTable th:first-child,
+#cropTable td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: 1px 0 0 var(--line);
+}
+
+/* 台帳のサブタブ。日記の「編集 ｜ プレビュー」、圃場の設定の窓と同じく、中身の欄の真上につなげる */
+/* 下の欄の枠に 1px 重ねる。.schedule の間隔（12px）のぶんも詰める */
+.master-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: -13px;
+}
+
+.master-tab {
+  position: relative;
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.master-tab.is-on {
+  z-index: 1;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.master-panel {
+  border-top-left-radius: 0;
+}
+
+.master-panel .panel-heading {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.master-panel .panel-heading .muted {
+  flex: 1;
+  margin-top: 0;
+}
+
 .summary-table {
   max-width: 720px;
 }
@@ -1739,9 +1792,10 @@ body.plan-busy #scheduleView {
     overflow: visible;
   }
 
-  /* 日程の入力欄は、値だけを見せる */
+  /* 日程の入力欄と、台帳の工程作業日数は、値だけを見せる */
   .work-table input,
-  .work-table select {
+  .work-table select,
+  .type-table input {
     padding: 0;
     border: 0;
     background: transparent;
@@ -1751,6 +1805,22 @@ body.plan-busy #scheduleView {
 
   .work-table input[type="date"]::-webkit-calendar-picker-indicator {
     display: none;
+  }
+
+  .work-table input::-webkit-inner-spin-button,
+  .work-table input::-webkit-outer-spin-button,
+  .type-table input::-webkit-inner-spin-button,
+  .type-table input::-webkit-outer-spin-button {
+    display: none;
+  }
+
+  /* 工程作業日数の見出しは、狭い幅では折り返す（「あとにあける日数」が欄の外にはみ出さないように） */
+  .type-table th {
+    white-space: normal;
+  }
+
+  .type-table input {
+    width: 48px;
   }
 
   .work-table input[type="text"] {
