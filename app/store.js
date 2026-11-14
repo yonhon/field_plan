@@ -305,6 +305,17 @@ export function createSupabaseStore(client, options) {
       }
       return data.stations || [];
     },
+    // Google フォトで選んだ写真。ブラウザーから直接読めないときに、Supabase の関数を通して読む（app/google-photos.js）
+    async googlePhoto(url, token) {
+      const { data, error } = await client.functions.invoke("field-photos", { body: { url, token } });
+      if (error) {
+        throw error;
+      }
+      if (!(data instanceof Blob)) {
+        throw new Error("写真の中身を受け取れませんでした");
+      }
+      return data;
+    },
     // ---- 農作業日記。diary スキーマは API に出していないので、field の関数（sql/diary.sql）を通す ----
     async diaryDays(from, to) {
       return check(await client.rpc("diary_get_days", { p_from: from, p_to: to }));
@@ -764,6 +775,14 @@ export function createLocalStore({ strict = false } = {}) {
     },
     async twoWeekStations() {
       return [];
+    },
+    // 動作確認では、関数を通さずに読む（テストは、読み先を手元に差し替える）
+    async googlePhoto(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`写真を読めませんでした（${response.status}）`);
+      }
+      return response.blob();
     },
     // ---- 農作業日記。DB の関数（sql/diary.sql）と同じ動きを、このブラウザーの保存で行う ----
     // data.diary = { days: { 日付: 日 }, photos: { 名前: 写真 }, files: { 場所: data URL }, history: [...], sections: { 日付: [...] } }

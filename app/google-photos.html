@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Google のログインから戻る先（app/google-photos.js）。受け取ったアクセストークンを、開いた画面へ送る。
+         この窓は、続けて Google フォトの選ぶ画面になる（開いた画面が移す）ので、閉じない -->
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self'; object-src 'none'; base-uri 'self'" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Google フォト</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f7f6f1;
+        color: #13262a;
+        font-family: system-ui, sans-serif;
+        font-size: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="message">Google フォトを開いています…</p>
+    <script src="google-photos-callback.js"></script>
+  </body>
+</html>

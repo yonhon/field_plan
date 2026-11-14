@@ -518,8 +518,8 @@ test("日記: 小見出しのボタンで ### を付け、小見出しは下げ�
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="diary"]');
   await page.click('#diaryMain [data-action="edit"]');
-  // 並びは「見出し」「小見出し」「写真を入れる」「やめる」「保存」
-  assert.deepEqual(await page.run(`[...document.querySelectorAll("#diaryMain .diary-tools > *")].map((el) => el.textContent.trim())`), ["見出し", "小見出し", "写真を入れる", "やめる", "保存"]);
+  // 並びは「見出し」「小見出し」「写真を入れる」「Google フォト」「やめる」「保存」
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("#diaryMain .diary-tools > *")].map((el) => el.textContent.trim())`), ["見出し", "小見出し", "写真を入れる", "Google フォト", "やめる", "保存"]);
   await page.click("#diaryBody");
   await page.type("島にんじん");
   await page.click('#diaryMain [data-action="heading"]');
@@ -571,5 +571,102 @@ test("日記: 見出し・小見出しのボタンを押しても、入力欄の
   // 取り消すと、1 つ前（小見出し）に戻る
   await page.run(`document.execCommand("undo")`);
   assert.match(await page.run(`document.getElementById("diaryBody").value`), new RegExp(`### 41 行目`));
+  assert.deepEqual(page.errors, []);
+});
+
+// Google フォト（Picker API）の代わりを、画面の中に置く。窓は開いたふりだけ。写真の読み先（lh3）は、直接読むと失敗させ（CORS で止められたとき）、
+// 関数を通す読み方（動作確認の保存では、そのまま fetch）で読めるようにする。呼んだ URL は window.googleCalls に残す
+const fakeGooglePhotos = () =>
+  page.run(`(() => {
+    window.googleCalls = [];
+    window.fakeWindow = { location: { href: "" }, closed: false, close() { this.closed = true; } };
+    window.open = () => window.fakeWindow;
+    const realFetch = window.fetch;
+    let polls = 0;
+    const json = (body) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+    window.fetch = async (input, init = {}) => {
+      const url = String(input?.url || input);
+      if (!url.startsWith("https://")) {
+        return realFetch(input, init);
+      }
+      window.googleCalls.push((init.method || "GET") + " " + url.split("?")[0] + (init.headers?.Authorization ? " (token)" : ""));
+      if (url.endsWith("/v1/sessions") && init.method === "POST") {
+        return json({ id: "s1", pickerUri: "https://photos.google.com/picker/s1", pollingConfig: { pollInterval: "0.1s", timeoutIn: "60s" }, mediaItemsSet: false });
+      }
+      if (url.endsWith("/v1/sessions/s1") && init.method === "DELETE") {
+        return json({});
+      }
+      if (url.endsWith("/v1/sessions/s1")) {
+        polls += 1;
+        return json({ id: "s1", mediaItemsSet: polls >= 2 });
+      }
+      if (url.includes("/v1/mediaItems")) {
+        return json({ mediaItems: [
+          { id: "m1", type: "PHOTO", createTime: "2026-11-13T23:30:05Z", mediaFile: { baseUrl: "https://lh3.googleusercontent.com/ppa/m1", filename: "PXL_20261114_083005.jpg" } },
+          { id: "m2", type: "VIDEO", createTime: "2026-11-13T23:31:00Z", mediaFile: { baseUrl: "https://lh3.googleusercontent.com/ppa/m2", filename: "PXL_movie.mp4" } },
+        ] });
+      }
+      if (url.startsWith("https://lh3.googleusercontent.com/")) {
+        if (init.headers?.Authorization) {
+          throw new TypeError("Failed to fetch"); // 直接読むと、CORS で止められる
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = 40;
+        canvas.height = 30;
+        canvas.getContext("2d").fillRect(0, 0, 10, 10);
+        return new Response(await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg")));
+      }
+      throw new Error("想定していない読み先: " + url);
+    };
+  })()`);
+
+test("日記: 「Google フォト」でログインして選んだ写真を入れ、撮影日時と元のファイル名を残す。動画は入れない", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="diary"]');
+  await page.click('#diaryMain [data-action="edit"]');
+  await page.click("#diaryBody");
+  await fakeGooglePhotos();
+  await page.click('#diaryMain [data-action="google-photos"]');
+  // ログインの窓を、Google のログインの画面へ移す
+  await page.waitFor(`window.fakeWindow.location.href.startsWith("https://accounts.google.com/o/oauth2/v2/auth?")`, "ログインの画面");
+  const auth = new URL(await page.run("window.fakeWindow.location.href"));
+  assert.equal(auth.searchParams.get("redirect_uri"), await page.run(`new URL("google-photos.html", document.baseURI).href`));
+  assert.equal(auth.searchParams.get("scope"), "https://www.googleapis.com/auth/photospicker.mediaitems.readonly");
+  assert.equal(await page.run(`document.querySelector('#diaryMain [data-action="google-photos"]').textContent`), "選ぶのをやめる");
+  // 戻り先のページ（google-photos.html）が送るのと同じ知らせ。state が違うものは受けない
+  await page.run(`window.postMessage({ type: "google-photos-auth", state: "other", access_token: "bad", expires_in: "3600" }, location.origin)`);
+  await page.run(`window.postMessage({ type: "google-photos-auth", state: ${JSON.stringify(auth.searchParams.get("state"))}, access_token: "tok", expires_in: "3600" }, location.origin)`);
+  await page.waitFor(`window.fakeWindow.location.href === "https://photos.google.com/picker/s1/autoclose"`, "Google フォトの選ぶ画面");
+  await page.waitFor(`document.getElementById("diaryBody").value.includes("![](images/${TODAY}_01.jpg)")`, "写真が入る");
+  assert.equal(await page.run(`document.getElementById("diaryBody").value.includes("_02.jpg")`), false, "動画は入れない");
+  assert.equal(await page.run(`document.querySelector('#diaryMain [data-action="google-photos"]').textContent`), "Google フォト");
+  const calls = await page.run("window.googleCalls");
+  assert.ok(calls.includes("POST https://photospicker.googleapis.com/v1/sessions (token)"));
+  assert.ok(calls.includes("GET https://lh3.googleusercontent.com/ppa/m1=w2048-h2048 (token)"), "まず直接読む");
+  assert.ok(calls.includes("GET https://lh3.googleusercontent.com/ppa/m1=w2048-h2048"), "読めなければ、関数を通す");
+  await page.waitFor(`window.googleCalls.includes("DELETE https://photospicker.googleapis.com/v1/sessions/s1 (token)")`, "選んだ一覧を消す");
+
+  await page.click('#diaryMain [data-action="save"]');
+  await saved();
+  const photo = (await diary()).photos[`${TODAY}_01.jpg`];
+  assert.equal(photo.original_name, "PXL_20261114_083005.jpg");
+  // 撮影日時は、この端末の時刻（テストの Chrome の時刻帯）で
+  assert.equal(photo.taken_at, await page.run(`(() => { const d = new Date("2026-11-13T23:30:05Z"); const p = (n) => String(n).padStart(2, "0"); return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()); })()`));
+  assert.deepEqual([photo.width, photo.height], [40, 30]);
+
+  assert.deepEqual(page.errors, []);
+});
+
+test("日記: 「Google フォト」は、ログインの途中で「選ぶのをやめる」を押すとやめる", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="diary"]');
+  await page.click('#diaryMain [data-action="edit"]');
+  await fakeGooglePhotos();
+  await page.click('#diaryMain [data-action="google-photos"]');
+  await page.waitFor(`window.fakeWindow.location.href.startsWith("https://accounts.google.com/")`, "ログインの画面");
+  await page.click('#diaryMain [data-action="google-photos"]');
+  await page.waitFor(`document.querySelector('#diaryMain [data-action="google-photos"]').textContent === "Google フォト"`, "やめる");
+  assert.equal(await page.run("window.fakeWindow.closed"), true, "ログインの窓を閉じる");
+  assert.equal(await page.run(`Boolean(document.querySelector("dialog.notice[open]"))`), false, "やめたときは知らせを出さない");
   assert.deepEqual(page.errors, []);
 });

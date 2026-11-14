@@ -36,6 +36,7 @@ import { specText } from "./logs.js";
 import { inputHtml } from "./pesticide.js";
 import { openLogEditor } from "./log-view.js";
 import { escapeHtml } from "./html.js";
+import { cancelGooglePhotos, googlePhotosBusy, googlePhotosEnabled, pickGooglePhotos } from "./google-photos.js";
 
 const $ = (id) => document.getElementById(id);
 const DRAFTS_KEY = "field_plan_diary_drafts";
@@ -648,7 +649,8 @@ function editorHtml() {
       : `<button type="button" class="chip-btn" data-action="heading">見出し</button>` +
         `<button type="button" class="chip-btn" data-action="subheading">小見出し</button>` +
         `<label class="chip-btn diary-photo-btn${view.uploading ? " is-busy" : ""}"><span id="diaryPhotoLabel">${escapeHtml(view.uploading || "写真を入れる")}</span>` +
-        `<input id="diaryPhotoInput" type="file" accept="image/*" multiple${view.uploading ? " disabled" : ""} /></label>`) +
+        `<input id="diaryPhotoInput" type="file" accept="image/*" multiple${view.uploading ? " disabled" : ""} /></label>` +
+        (googlePhotosEnabled() ? googlePhotosButton() : "")) +
     `<button type="button" class="text-btn" data-action="cancel">やめる</button>` +
     `<button type="button" class="primary-btn diary-save-btn" data-action="save">保存</button></div>`;
   // 編集とプレビューは、入力欄の真上につなげたタブ。選んでいるタブは、下の入力欄とつながって見える
@@ -909,6 +911,48 @@ async function runSearch() {
   renderDiary();
 }
 
+// 「Google フォト」のボタン。選んでいるあいだは「選ぶのをやめる」にする。写真を上げているあいだは押せない
+function googlePhotosButton() {
+  const busy = googlePhotosBusy();
+  return `<button type="button" class="chip-btn" data-action="google-photos" title="Google フォトの写真を選んで入れます"${view.uploading ? " disabled" : ""}>${busy ? "選ぶのをやめる" : "Google フォト"}</button>`;
+}
+
+function updateGooglePhotosButton() {
+  const button = document.querySelector('#diaryMain [data-action="google-photos"]');
+  if (button) {
+    button.textContent = googlePhotosBusy() ? "選ぶのをやめる" : "Google フォト";
+    button.disabled = Boolean(view.uploading);
+  }
+}
+
+// Google フォトで選んだ写真を入れる。ボタンを押したその場で呼ぶ（Google フォトの窓を開くため、await の前に pickGooglePhotos を呼ぶ）
+async function importGooglePhotos() {
+  const e = view.editing;
+  if (!e || view.uploading) {
+    return;
+  }
+  let photos = [];
+  try {
+    const picking = pickGooglePhotos({
+      store: ctx.state.store,
+      onStatus: (text) => {
+        ctx.setStatus(text);
+        updateGooglePhotosButton();
+      },
+    });
+    updateGooglePhotosButton();
+    photos = await picking;
+  } catch (error) {
+    updateGooglePhotosButton();
+    notify(error.message);
+    return;
+  }
+  updateGooglePhotosButton();
+  if (photos.length && view.editing === e) {
+    addPhotos(photos);
+  }
+}
+
 // 写真を縮めた JPEG にする。向き（EXIF）は画素に反映し、位置情報などの EXIF は描き直しで外れる
 async function shrink(file) {
   let source;
@@ -951,6 +995,7 @@ function setUploading(text) {
     label.parentElement.classList.toggle("is-busy", Boolean(text));
     $("diaryPhotoInput").disabled = Boolean(text);
   }
+  updateGooglePhotosButton();
 }
 
 // 本文を書き換える。入力欄があれば値を入れ直し、打っている人のカーソルは、ずれた分だけ動かして保つ。
@@ -1002,7 +1047,8 @@ function changeBody(e, change) {
 }
 
 // 選んだ写真を縮めて上げ、本文に入れる。選んですぐ、入れる所に仮の行を置き（押したことが分かるように）、
-// 上げ終えたら写真に置き換える。上げているあいだは、もう一度は選べない
+// 上げ終えたら写真に置き換える。上げているあいだは、もう一度は選べない。
+// files は、選んだファイル（File）か、Google フォトで選んだ写真 { blob, name, takenAt }
 async function addPhotos(files) {
   const e = view.editing;
   if (!e || !files.length || view.uploading) {
@@ -1020,10 +1066,12 @@ async function addPhotos(files) {
   const names = [];
   let failure = null;
   try {
-    for (const [i, file] of files.entries()) {
+    for (const [i, item] of files.entries()) {
       setUploading(progress(i + 1));
       ctx.setStatus(`写真を${progress(i + 1)}`);
-      const takenAt = /jpe?g$/i.test(file.type) ? exifDateTime(await file.arrayBuffer()) : null;
+      const file = item.blob || item;
+      const originalName = item.name || null;
+      const takenAt = item.takenAt ?? (/jpe?g$/i.test(file.type) ? exifDateTime(await file.arrayBuffer()) : null);
       const { blob, width, height } = await shrink(file);
       let name = null;
       for (let tries = 0; tries < 20 && !name; tries += 1) {
@@ -1041,8 +1089,8 @@ async function addPhotos(files) {
       if (!name) {
         throw new Error("写真の名前を決められませんでした。");
       }
-      await ctx.state.store.diaryAddPhoto({ name, date: e.date, takenAt, originalName: file.name, width, height });
-      view.meta[name] = { taken_at: takenAt, original_name: file.name || null };
+      await ctx.state.store.diaryAddPhoto({ name, date: e.date, takenAt, originalName, width, height });
+      view.meta[name] = { taken_at: takenAt, original_name: originalName };
       e.known.push(name);
       names.push(name);
     }
@@ -1212,6 +1260,12 @@ export function initDiary(context) {
         await loadPeriod().catch((error) => ctx.setStatus(`日記を読み込めませんでした: ${error.message}`));
       }
       openEditor(target.dataset.date, target.dataset.key || "");
+    } else if (action === "google-photos") {
+      if (googlePhotosBusy()) {
+        cancelGooglePhotos();
+      } else {
+        importGooglePhotos();
+      }
     } else if (action === "save") {
       saveEditor();
     } else if (action === "cancel") {
