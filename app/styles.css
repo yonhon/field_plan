@@ -3728,11 +3728,16 @@ h4.diary-heading {
   touch-action: pan-y;
 }
 
+/* 矢印は線の印で描き、ボタンの真ん中に置く（「‹」の文字は、字の枠の中で片寄っていて、真ん中からずれて見える） */
 .diary-viewer-nav {
   position: absolute;
   top: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 40px;
   height: 56px;
+  padding: 0;
   border: 0;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.45);
@@ -3747,6 +3752,13 @@ h4.diary-heading {
 .diary-viewer-nav:hover,
 .diary-viewer-nav:focus-visible {
   opacity: 1;
+}
+
+/* 指やマウスで操作しているあいだは、ボタンやリンクに注目の印の枠を出さない（app.js の data-input）。
+   窓を開いたときに最初のボタンへ注目を置くと、iPad の Chrome（WebKit）は、指で開いても枠を出すため。
+   キーボードを押すと data-input が keyboard になり、ブラウザーの枠が出る */
+:root[data-input="pointer"] :is(button, a, summary, label, [role="tab"]):focus-visible {
+  outline: none;
 }
 
 .diary-viewer-nav.is-prev {

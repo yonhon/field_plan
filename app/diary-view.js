@@ -1191,8 +1191,8 @@ function openPhoto(name, names = [name]) {
     const tagNames = [...PHOTO_TAG_KINDS.flatMap(([kind]) => tags[kind] || []), ...(tags.use ? [tags.use] : [])];
     const nav =
       list.length > 1
-        ? '<button type="button" class="diary-viewer-nav is-prev" data-action="prev" aria-label="前の写真">‹</button>' +
-          '<button type="button" class="diary-viewer-nav is-next" data-action="next" aria-label="次の写真">›</button>'
+        ? '<button type="button" class="diary-viewer-nav is-prev" data-action="prev" aria-label="前の写真"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>' +
+          '<button type="button" class="diary-viewer-nav is-next" data-action="next" aria-label="次の写真"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>'
         : "";
     draw(
       dialog,

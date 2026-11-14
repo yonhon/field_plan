@@ -496,6 +496,15 @@ test("日記: 写真の窓の ‹ › で、同じ見出しの写真を行き来
   await page.click(`#diaryMain [data-photo="${names[1]}"]`);
   await page.waitFor(`Boolean(document.querySelector("dialog.diary-viewer[open]"))`, "写真の窓");
   assert.equal(await shown(), `${names[1]} 2 / 3`);
+  // 矢印の印は、灰色の四角の真ん中にある
+  const offsets = await page.run(`[...document.querySelectorAll("dialog.diary-viewer[open] .diary-viewer-nav")].map((button) => {
+    const box = button.getBoundingClientRect();
+    const mark = button.querySelector("svg").getBoundingClientRect();
+    return [Math.round(Math.abs(box.left + box.width / 2 - (mark.left + mark.width / 2))), Math.round(Math.abs(box.top + box.height / 2 - (mark.top + mark.height / 2)))];
+  })`);
+  assert.deepEqual(offsets, [[0, 0], [0, 0]]);
+  // 指やマウスで開いたあいだは、注目の印の枠を出さない印（data-input="pointer"）。キーを押すと keyboard
+  assert.equal(await page.run(`document.documentElement.dataset.input`), "pointer");
   await page.click('dialog.diary-viewer [data-action="next"]');
   assert.equal(await shown(), `${names[2]} 3 / 3`);
   await page.click('dialog.diary-viewer [data-action="next"]');
@@ -504,6 +513,7 @@ test("日記: 写真の窓の ‹ › で、同じ見出しの写真を行き来
   assert.equal(await shown(), `${names[2]} 3 / 3`);
   await page.press("ArrowLeft", "ArrowLeft", 37);
   assert.equal(await shown(), `${names[1]} 2 / 3`);
+  assert.equal(await page.run(`document.documentElement.dataset.input`), "keyboard");
   await page.click('dialog.diary-viewer [data-action="close"]');
 
   // ほかの見出しの写真は 1 枚なので、‹ › は出さない（見出しをまたがない）

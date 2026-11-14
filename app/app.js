@@ -1362,6 +1362,10 @@ window.addEventListener("pointerup", releasePointers, true);
 window.addEventListener("pointercancel", releasePointers, true);
 // 離した知らせが届かないことがある（押したまま、ほかの窓へ移った、など）。押したままの印が残ると、読み直さなくなるので、
 // ボタンを押していないマウスが動いたとき、窓が前面でなくなったときに、印を下ろす
+// 直前の操作が、指・マウスか、キーボードか。指やマウスのときは、ボタンに注目の印の枠を出さない（styles.css の :root[data-input]）
+for (const [type, mode] of [["pointerdown", "pointer"], ["keydown", "keyboard"]]) {
+  window.addEventListener(type, () => document.documentElement.setAttribute("data-input", mode), true);
+}
 window.addEventListener("pointermove", (event) => event.pointerType === "mouse" && event.buttons === 0 && heldPointers.size && releasePointers(), true);
 window.addEventListener("blur", () => releasePointers());
 
