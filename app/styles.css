@@ -735,14 +735,14 @@ body.plan-busy #scheduleView {
 }
 
 .zoom-ctl button {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 22px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
 }
