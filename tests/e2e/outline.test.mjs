@@ -49,12 +49,12 @@ test("外形: 離れた部分を描き足すと、面積は合計になり、区
   await page.loadApp(seed(rect(0, 0, 40, 20), { zones: [zone("z1", rect(2, 2, 36, 16)), zone("z2", rect(60, 2, 20, 16))] }));
   assert.equal(await badge(), "⚠1"); // 離れた有効圃場は、外形からはみ出している
 
-  // 離れた場所が図に入るよう、縮める
+  // 離れた場所が図に入るよう、縮める（ふだんの図なので、Ctrl + ホイール）
   await page.run(`(() => {
     const map = document.getElementById("map");
     const box = map.getBoundingClientRect();
     for (let i = 0; i < 5; i += 1) {
-      map.dispatchEvent(new WheelEvent("wheel", { deltaY: 100, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2, bubbles: true, cancelable: true }));
+      map.dispatchEvent(new WheelEvent("wheel", { deltaY: 100, ctrlKey: true, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2, bubbles: true, cancelable: true }));
     }
   })()`);
   // 外形は、「図を編集」の帯の「外形を描く」で描く

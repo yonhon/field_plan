@@ -201,8 +201,16 @@
           <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="圃場図"></svg>
           <div class="map-overlay">
             <div class="scale-bar"><span id="scaleBarLine"></span><span id="scaleBarLabel"></span></div>
-            <button id="fitBtn" class="chip-btn">全体を表示</button>
+            <div class="map-controls">
+              <!-- 拡大・縮小のボタン。ふだんの図では、ホイールと指 1 本はページのスクロールに使うので、ここでも拡大・縮小できるようにする -->
+              <div class="zoom-ctl" role="group" aria-label="拡大・縮小">
+                <button id="zoomInBtn" type="button" title="拡大" aria-label="拡大">＋</button>
+                <button id="zoomOutBtn" type="button" title="縮小" aria-label="縮小">−</button>
+              </div>
+              <button id="fitBtn" class="chip-btn">全体を表示</button>
+            </div>
           </div>
+          <p id="mapHint" class="map-hint" aria-live="polite" hidden></p>
         </div>
 
         <!-- 工程表の欄。圃場図ではすべての区画と畝を、日程の画面では選んだ区画だけを描く（1 つの欄を、開いた画面へ移す） -->

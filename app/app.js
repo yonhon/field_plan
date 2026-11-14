@@ -541,6 +541,10 @@ const svgPoints = (points) => points.map(([x, y]) => `${x},${-y}`).join(" ");
 // scale は、印刷用に描くときの倍率（1 m あたりの px）。ふだんは画面の倍率を使う
 function renderMap(scale) {
   const printing = typeof scale === "number";
+  if (!printing) {
+    // 指 1 本をページのスクロールに渡すかは、指を置く前に決まる（touch-action）ので、描くたびに付け直す
+    map.classList.toggle("is-cooperative", mapCooperative());
+  }
   const z = printing ? scale : zoom();
   const lengthLabels = []; // PDF に書く、辺の長さ。ほかの図形に隠れないように、最後に足す
   const fontSize = 12 / z;
@@ -2797,6 +2801,33 @@ function pressedSelected(event) {
   return Boolean(points) && gap === undefined && edge === undefined && pointInPolygon(clientToWorld(event), points);
 }
 
+// ふだんの図（作図の道具が出ておらず、圃場の設定の窓でもない）か。ふだんの図では、ホイールと指 1 本はページのスクロールに使い、
+// 拡大・縮小は Ctrl（Mac は ⌘）+ ホイール、タッチパッドのピンチ、指 2 本、＋・− のボタンで行う（図を動かすのは、マウスのドラッグか指 2 本）。
+// 編集中と設定の窓では、これまでどおり、ホイールで拡大・縮小し、指 1 本で図や図形を動かす
+function mapCooperative() {
+  return !settings.open && !drawingToolsShown();
+}
+
+// 図の上に、少しのあいだ説明を出す。同じ説明は、開いているあいだに 1 回だけ（スクロールのたびに出すと、かえって邪魔になる）
+const hintsShown = new Set();
+let hintTimer = null;
+function showMapHint(text) {
+  if (hintsShown.has(text)) {
+    return;
+  }
+  hintsShown.add(text);
+  $("mapHint").textContent = text;
+  $("mapHint").hidden = false;
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => {
+    $("mapHint").hidden = true;
+  }, 2500);
+}
+
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const WHEEL_HINT = `拡大・縮小は ${isMac ? "⌘" : "Ctrl"} + ホイールか、右下の ＋ − で`;
+const TOUCH_HINT = "図を動かす・拡大縮小は、指 2 本で";
+
 // 図の編集の道具（「図を編集」で出す帯）が出ているか。スマホやタブレットの幅では出さない（.edit-only）。
 // 出ていないときは、図形を動かしたり描いたりせず、なぞったら図が動くだけにする（選ぶ・見るための図なので）
 function drawingToolsShown() {
@@ -3067,6 +3098,7 @@ map.addEventListener("pointerdown", (event) => {
     gesture = { kind: "pinch" };
     return;
   }
+  $("mapHint").hidden = true;
   const target = event.target;
   // 畝の文字を押したときは、その畝（品目名なら作付の詳細）。文字は押せない（pointer-events: none）ので、位置から求める
   const labelHit = mapLabelAt(event);
@@ -3152,14 +3184,21 @@ map.addEventListener("pointermove", (event) => {
   pointers.set(event.pointerId, current);
 
   if (gesture.kind === "pinch" && pointers.size === 2) {
+    // 指 2 本: 間を広げ狭めして拡大・縮小し、2 本の真ん中を動かして図を動かす
     const other = [...pointers.entries()].find(([id]) => id !== event.pointerId)[1];
     const before = distance(previous, other);
     const after = distance(current, other);
+    const z = zoom();
+    setView({
+      ...state.view,
+      x: state.view.x - (current[0] - previous[0]) / 2 / z,
+      y: state.view.y - (current[1] - previous[1]) / 2 / z,
+    });
     if (before > 0 && after > 0) {
       const middle = { clientX: (current[0] + other[0]) / 2, clientY: (current[1] + other[1]) / 2 };
       zoomAt(clientToWorld(middle), before / after);
-      renderMap();
     }
+    renderMap();
   } else if (gesture.kind === "vertex") {
     const points = [...shapePoints(state.selected)];
     points[gesture.index] = clientToWorld(event);
@@ -3184,6 +3223,10 @@ map.addEventListener("pointermove", (event) => {
     gesture.last = world;
     renderMap();
   } else if (gesture.kind === "pan") {
+    // ふだんの図の指 1 本は、ページのスクロール（ブラウザーが受けると pointercancel が来る）。図は動かさない
+    if (event.pointerType === "touch" && mapCooperative()) {
+      return;
+    }
     if (!gesture.moved && distance(gesture.start, current) < CLICK_TOLERANCE_PX) {
       return;
     }
@@ -3200,6 +3243,10 @@ map.addEventListener("pointermove", (event) => {
 function endPointer(event) {
   pointers.delete(event.pointerId);
   const finished = gesture;
+  // 指 1 本でスクロールした（ブラウザーが受けた）ときは、図を動かすには指 2 本と知らせる
+  if (event.type === "pointercancel" && event.pointerType === "touch" && finished?.kind === "pan" && mapCooperative()) {
+    showMapHint(TOUCH_HINT);
+  }
   if (pointers.size === 0) {
     gesture = null;
   }
@@ -3317,12 +3364,39 @@ map.addEventListener("pointercancel", endPointer);
 map.addEventListener(
   "wheel",
   (event) => {
+    // ふだんの図では、ホイールはページのスクロール。Ctrl か ⌘ を押しながら（タッチパッドのピンチも ctrlKey が付く）なら拡大・縮小
+    if (mapCooperative() && !event.ctrlKey && !event.metaKey) {
+      showMapHint(WHEEL_HINT);
+      return;
+    }
     event.preventDefault();
     zoomAt(clientToWorld(event), event.deltaY > 0 ? 1.2 : 1 / 1.2);
     renderMap();
   },
   { passive: false }
 );
+
+// ふだんの図で指 2 本を置いたときは、ブラウザーのスクロールと拡大をさせず、図の操作（pointer の pinch）にする
+for (const type of ["touchstart", "touchmove"]) {
+  map.addEventListener(
+    type,
+    (event) => {
+      if (event.touches.length > 1 && mapCooperative() && event.cancelable) {
+        event.preventDefault();
+      }
+    },
+    { passive: false }
+  );
+}
+
+// ＋・− のボタン: 図の真ん中を中心に拡大・縮小する
+function zoomCenter(factor) {
+  const box = map.getBoundingClientRect();
+  zoomAt(clientToWorld({ clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 }), factor);
+  renderMap();
+}
+$("zoomInBtn").addEventListener("click", () => zoomCenter(1 / 1.5));
+$("zoomOutBtn").addEventListener("click", () => zoomCenter(1.5));
 
 window.addEventListener("resize", renderMap);
 

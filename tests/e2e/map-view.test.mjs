@@ -149,3 +149,85 @@ test("「読み込み直す」は、送り残しの保存を送り終えてか�
   assert.notEqual(moved.block, BLOCK[0][0]);
   assert.ok(Math.abs(moved.block - BLOCK[0][0] - (moved.bed - BED[0][0])) < 1e-9, "区画と畝が同じだけ動いて保存される");
 });
+
+// ---- ふだんの図の、ホイールとタッチ（ページのスクロールに渡す） ----
+
+const viewWidth = () => page.run(`Number(document.getElementById("map").getAttribute("viewBox").split(" ")[2])`);
+const viewBox = () => page.run(`document.getElementById("map").getAttribute("viewBox")`);
+const mapCenter = () => page.run(`(() => { const box = document.getElementById("map").getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()`);
+
+async function wheel(modifiers = 0) {
+  const { x, y } = await mapCenter();
+  await page.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY: 120, modifiers });
+  await sleep(150);
+}
+
+// 指を置き、steps 回に分けて動かして離す。fingers は指ごとの [始めの位置からのずれ, 動かす量]（[[dx, dy], [mx, my]]）
+async function touch(fingers) {
+  const { x, y } = await mapCenter();
+  const at = (t) => fingers.map(([[dx, dy], [mx, my]], id) => ({ x: x + dx + mx * t, y: y + dy + my * t, id }));
+  await page.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(0) });
+  for (let step = 1; step <= 6; step += 1) {
+    await page.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: at(step / 6) });
+  }
+  await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await sleep(150);
+}
+
+test("ふだんの図: ホイールだけでは拡大・縮小せず、説明を出す。Ctrl + ホイールと ＋・− では拡大・縮小する", options, async () => {
+  await page.viewport(1280, 600); // ページがスクロールできる高さ
+  await openMap();
+  // PC の幅では、左の欄（.map-area）がスクロールする
+  const scrollTop = () => page.run(`scrollY + document.querySelector(".map-area").scrollTop`);
+  const width = await viewWidth();
+  const scrolled = await scrollTop();
+  await wheel();
+  assert.equal(await viewWidth(), width, "ホイールだけでは変わらない");
+  assert.ok((await scrollTop()) > scrolled, "図の外と同じく、欄がスクロールする");
+  assert.equal(await page.run(`document.getElementById("mapHint").hidden`), false, "説明が出る");
+  assert.match(await page.run(`document.getElementById("mapHint").textContent`), /Ctrl \+ ホイール/);
+
+  await wheel(2); // Ctrl
+  assert.ok((await viewWidth()) > width, "Ctrl + ホイール（下へ）で縮小");
+
+  const before = await viewWidth();
+  await page.click("#zoomInBtn");
+  assert.ok((await viewWidth()) < before, "＋ で拡大");
+  await page.click("#zoomOutBtn");
+  assert.ok(Math.abs((await viewWidth()) - before) < 1e-6, "− で戻る");
+  assert.deepEqual(page.errors, []);
+});
+
+test("図の編集中は、これまでどおりホイールだけで拡大・縮小する", options, async () => {
+  await openMap();
+  await page.click("#mapEditBtn");
+  const width = await viewWidth();
+  await wheel();
+  assert.ok((await viewWidth()) > width);
+  assert.equal(await page.run(`document.getElementById("mapHint").hidden`), true, "説明は出さない");
+  assert.deepEqual(page.errors, []);
+});
+
+test("ふだんの図: 指 1 本では図を動かさず、指 2 本で動かし、広げると拡大する。畝のタップは今までどおり", options, async () => {
+  await page.viewport(390);
+  await openMap();
+  assert.equal(await page.run(`document.getElementById("map").classList.contains("is-cooperative")`), true);
+  // 区画を指でタップすると選ぶ
+  const point = await page.run(`(() => { document.querySelector(".map-frame").scrollIntoView({ block: "nearest" }); const p = new DOMPoint(${INSIDE[0]}, ${-INSIDE[1]}).matrixTransform(document.getElementById("map").getScreenCTM()); return { x: p.x, y: p.y }; })()`);
+  await page.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...point, id: 0 }] });
+  await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await page.waitFor(`document.querySelector('#map [data-shape="b1"]').classList.contains("is-selected")`, "タップで区画を選ぶ");
+  const box = await viewBox();
+  const scrolled = await page.run("scrollY");
+  await touch([[[0, 0], [0, -120]]]);
+  assert.equal(await viewBox(), box, "指 1 本では動かない");
+  assert.ok((await page.run("scrollY")) > scrolled, "指 1 本でページがスクロールする");
+
+  await touch([[[-40, 0], [60, 0]], [[40, 0], [60, 0]]]);
+  assert.notEqual(await viewBox(), box, "指 2 本で動く");
+  const width = await viewWidth();
+  await touch([[[-30, 0], [-40, 0]], [[30, 0], [40, 0]]]);
+  assert.ok((await viewWidth()) < width, "2 本の間を広げると拡大");
+
+  assert.deepEqual(page.errors, []);
+});

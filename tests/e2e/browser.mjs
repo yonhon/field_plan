@@ -345,6 +345,8 @@ async function launch() {
     loadApp,
     close,
     errors: page.errors,
+    // DevTools の命令をそのまま送る（ホイールやタッチなど、ほかの道具にない入力）
+    send: (method, params) => page.send(method, params),
     saved: () => run(`JSON.parse(localStorage.getItem(${JSON.stringify(LOCAL_KEY)}))`),
   };
 }
