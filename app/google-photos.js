@@ -16,7 +16,11 @@ const SIZE = "=w2048-h2048";
 let token = null; // { value, expires }
 let current = null; // 選んでいる途中の { cancelled }
 
-export const googlePhotosEnabled = () => Boolean(window.FIELD_PLAN_CONFIG?.googleClientId);
+// Android か。Android では「写真を入れる」の写真を選ぶ画面から Google フォトを選べるので、「Google フォト」のボタンは出さない
+// （ボタンが増えると、スマホの幅で日記のボタンが 2 行になる）。Chrome は userAgentData、そのほかはユーザーエージェントの文字で見る
+export const isAndroid = () => (navigator.userAgentData?.platform || "") === "Android" || /Android/i.test(navigator.userAgent);
+
+export const googlePhotosEnabled = () => Boolean(window.FIELD_PLAN_CONFIG?.googleClientId) && !isAndroid();
 export const googlePhotosBusy = () => Boolean(current);
 
 // 選んでいる途中でやめる。待っているのをやめるだけで、Google フォトの窓は閉じない（つながりが切れていて閉じられない）

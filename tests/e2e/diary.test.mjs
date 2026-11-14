@@ -670,3 +670,28 @@ test("日記: 「Google フォト」は、ログインの途中で「選ぶの�
   assert.equal(await page.run(`Boolean(document.querySelector("dialog.notice[open]"))`), false, "やめたときは知らせを出さない");
   assert.deepEqual(page.errors, []);
 });
+
+test("日記: Android では「Google フォト」のボタンを出さない（「写真を入れる」から Google フォトを選べるため）", options, async () => {
+  const userAgent = await page.run("navigator.userAgent");
+  const as = (platform) =>
+    page.send("Emulation.setUserAgentOverride", {
+      userAgent: platform === "Android" ? "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36" : userAgent,
+      userAgentMetadata: { platform, platformVersion: "", architecture: "", model: "", mobile: platform === "Android" },
+    });
+  try {
+    await as("Android");
+    await page.loadApp(seed());
+    await page.click('.tab-btn[data-view="diary"]');
+    await page.click('#diaryMain [data-action="edit"]');
+    assert.equal(await page.run(`navigator.userAgentData.platform`), "Android");
+    assert.equal(await page.run(`Boolean(document.querySelector('#diaryMain [data-action="google-photos"]'))`), false);
+    assert.equal(await page.run(`Boolean(document.getElementById("diaryPhotoInput"))`), true, "「写真を入れる」は出す");
+  } finally {
+    await as("Windows");
+  }
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="diary"]');
+  await page.click('#diaryMain [data-action="edit"]');
+  assert.equal(await page.run(`Boolean(document.querySelector('#diaryMain [data-action="google-photos"]'))`), true, "PC では出す");
+  assert.deepEqual(page.errors, []);
+});
