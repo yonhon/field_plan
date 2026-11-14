@@ -387,7 +387,9 @@ function asideHtml(c, active) {
   return [famicEnabled() && active ? usageHtml(c) : "", accumulationHtml(), forecastHtml()].join("");
 }
 
-// 農薬の使用回数。有効成分ごと（その下に本剤ごと）の回数と上限
+// 農薬の使用回数。有効成分ごとの回数と上限と、その下に、その成分を含む本剤ごとの回数と上限。
+// 並びは、最初に使った順。2 つの成分を含む本剤は、それぞれの成分の下に出す。総使用回数に数える成分のない本剤（成分の分からないものも）は、最後に出す。
+// 黄色い枠には、上限に達したものだけを出す。総使用回数の条件は、成分の行に添え書きで出す
 function usageHtml(c) {
   const logs = state().logs || [];
   const table = usageTable(logs, c.planting.id, c.planting.crop_name);
@@ -395,19 +397,22 @@ function usageHtml(c) {
     return '<section class="panel"><h2>農薬の使用回数</h2><p class="muted">この作付の防除の実績は、まだありません。</p></section>';
   }
   const over = (item) => item.max && item.count >= item.max;
+  const count = (item) => `<td class="num${over(item) ? " usage-over" : ""}">${item.count}</td><td class="num">${item.max ?? "-"}</td>`;
+  const productRow = (item, cls) => `<tr class="${cls}"><td>本剤 ${nameHtml(item.name, item.reg_no)}</td>${count(item)}</tr>`;
+  const ingredientRow = (item) =>
+    `<tr class="usage-ingredient"><td>${escapeHtml(item.name)}${ingredientIconsHtml(item.name)}` +
+    (item.condition ? `<span class="usage-condition">条件: ${escapeHtml(item.condition)}</span>` : "") +
+    `</td>${count(item)}</tr>`;
   const rows = [
-    ...table.ingredients.map(
-      (item) =>
-        `<tr><td>${escapeHtml(item.name)}${ingredientIconsHtml(item.name)}</td><td class="num${over(item) ? " usage-over" : ""}">${item.count}</td><td class="num">${item.max ?? "-"}</td></tr>`
-    ),
-    ...table.products.map(
-      (item) =>
-        `<tr class="usage-product"><td>本剤 ${nameHtml(item.name, item.reg_no)}</td><td class="num${over(item) ? " usage-over" : ""}">${item.count}</td><td class="num">${item.max ?? "-"}</td></tr>`
-    ),
+    ...table.ingredients.flatMap((ingredient) => [
+      ingredientRow(ingredient),
+      ...table.products.filter((product) => product.ingredients.includes(ingredient.name)).map((product) => productRow(product, "usage-product")),
+    ]),
+    ...table.products.filter((product) => !product.ingredients.length).map((product) => productRow(product, "usage-product usage-alone")),
   ].join("");
   const notes = [
     ...table.ingredients.filter(over).map((item) => `${item.name}は上限に達しています。`),
-    ...table.ingredients.filter((item) => item.condition).map((item) => `${item.name}の総使用回数には条件があります: ${item.condition}`),
+    ...table.products.filter(over).map((item) => `本剤 ${item.name}は上限に達しています。`),
   ];
   const first = firstHarvestDay(logs, c.planting.id, c.planting.crop_name);
   return (

@@ -192,3 +192,45 @@ test("作付の詳細から別のタブに移って日程のタブに戻ると�
   await page.waitFor(`!document.getElementById("scheduleView").hidden && document.querySelector('.strip-bed[data-bed="bed2"]')?.classList.contains("is-selected")`, "日程の画面で、畝2 を選んだまま");
   assert.deepEqual(page.errors, []);
 });
+
+// 防除の記録。standard は記録した時点の使用基準の写し。totals と total_max は成分の順
+const sprayLog = (id, date, inputs) => ({ ...plantLog(id, "pl2", "bed2", null, {}), date, work_type: "spray", finishes: false, inputs });
+const sprayInput = (seq, regNo, name, ingredients, totals, totalMax, timesMax) => ({
+  id: `${regNo}-${seq}`,
+  seq,
+  kind: "pesticide",
+  reg_no: regNo,
+  name,
+  dilution: 1000,
+  method: "散布",
+  standard: { reg_no: regNo, product: name, ingredients, rows: [{ crop_name: "試験菜", crop: "試験菜", totals, total_max: totalMax, times_max: timesMax, preharvest_days: 1 }] },
+});
+
+test("農薬の使用回数: 最初に使った順に、成分の下にその成分を含む本剤を出す。条件は添え書き、黄色い枠は上限に達したものだけ", options, async () => {
+  const data = seed();
+  data.famic = { products: [], uses: [] };
+  // DB と同じく、新しい記録が先
+  data.workLogs.push(
+    sprayLog("s2", "2026-10-25", [
+      sprayInput(1, 2002, "乙水和剤", ["成分B", "成分A"], ["2回以内", "4回以内(粒剤は3回以内)"], [2, 4], 3),
+      { id: "x-1", seq: 2, kind: "pesticide", reg_no: 3003, name: "写しのない剤", standard: null },
+    ]),
+    sprayLog("s1", "2026-10-20", [sprayInput(1, 1001, "甲粒剤", ["成分A", ""], ["4回以内(粒剤は3回以内)", ""], [4, null], 1)])
+  );
+  await page.loadApp(data);
+  await openFromMap("pl2");
+  await page.waitFor(`Boolean(document.querySelector(".usage-table"))`, "使用回数の表");
+  // 名前の後ろの作用機構分類のアイコンは除いて読む
+  const rows = await page.run(`[...document.querySelectorAll(".usage-table tbody tr")].map((row) => row.className + "|" + (() => { const cell = row.cells[0].cloneNode(true); cell.querySelectorAll("svg").forEach((icon) => icon.remove()); return cell.textContent.trim(); })() + "|" + row.cells[1].textContent + "/" + row.cells[2].textContent)`);
+  assert.deepEqual(rows, [
+    "usage-ingredient|成分A条件: 4回以内(粒剤は3回以内)|2/4",
+    "usage-product|本剤 甲粒剤|1/1",
+    "usage-product|本剤 乙水和剤|1/3",
+    "usage-ingredient|成分B|1/2",
+    "usage-product|本剤 乙水和剤|1/3",
+    "usage-product usage-alone|本剤 写しのない剤|1/-",
+  ]);
+  const notes = await page.run(`[...document.querySelectorAll("#plantingView .famic-warnings li")].map((item) => item.textContent)`);
+  assert.deepEqual(notes, ["本剤 甲粒剤は上限に達しています。"], "条件は黄色い枠に出さない");
+  assert.deepEqual(page.errors, []);
+});

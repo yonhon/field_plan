@@ -381,39 +381,62 @@ export function pesticideCounts(logs, plantingId, excludeLogId = null) {
   return { products, ingredients };
 }
 
-// 作付の、有効成分ごとの使用回数と上限の表。上限は、その作付の品目の使用基準の写しのうち、いちばん新しい記録のもの
+// 作付の、有効成分ごとの使用回数と上限の表。上限は、その作付の品目の使用基準の写しのうち、いちばん新しい記録のもの。
+// 有効成分と本剤は、最初に使った順（記録の日の古い順。同じ日は記録の中の資材の順）に並べる。
+// 本剤には、総使用回数に数える有効成分（ingredients）を付ける。画面は、有効成分の行の下に、その成分を含む本剤を出す
 export function usageTable(logs, plantingId, cropName) {
   const counts = pesticideCounts(logs, plantingId);
   const limits = new Map();
   const conditions = new Map();
   const productRows = new Map();
+  const ingredientOrder = [];
   const sorted = [...logs].filter((log) => (log.targets || []).some((target) => target.planting_id === plantingId)).sort((a, b) => a.date.localeCompare(b.date));
   for (const log of sorted) {
     for (const input of log.inputs || []) {
-      // 使用基準の写しがない記録でも、本剤の名前は記録に入れた名前で出す（登録番号のままにしない）
-      if (input.kind === "pesticide" && input.reg_no && !productRows.has(String(input.reg_no))) {
-        productRows.set(String(input.reg_no), { name: input.name || String(input.reg_no), max: null });
+      if (input.kind !== "pesticide" || !input.reg_no) {
+        continue;
       }
-      const standard = input.kind === "pesticide" && input.standard;
+      const reg = String(input.reg_no);
+      // 使用基準の写しがない記録でも、本剤の名前は記録に入れた名前で出す（登録番号のままにしない）
+      if (!productRows.has(reg)) {
+        productRows.set(reg, { name: input.name || reg, max: null, ingredients: [] });
+      }
+      const standard = input.standard;
       if (!standard) {
         continue;
       }
       const row = standard.rows?.find((item) => item.crop_name === cropName) || null;
-      productRows.set(String(input.reg_no), { name: standard.product || input.name, max: row?.times_max ?? null });
+      const names = (standard.ingredients || []).filter(Boolean);
+      productRows.set(reg, { name: standard.product || input.name, max: row?.times_max ?? null, ingredients: names });
       (standard.ingredients || []).forEach((name, k) => {
         if (name) {
+          if (!ingredientOrder.includes(name)) {
+            ingredientOrder.push(name);
+          }
           limits.set(name, row?.total_max?.[k] ?? null);
           const text = row?.totals?.[k] || "";
           if (text.includes("(")) {
             conditions.set(name, text);
+          } else {
+            conditions.delete(name);
           }
         }
       });
     }
   }
+  const productOrder = [...productRows.keys()];
+  const byOrder = (order) => (a, b) => order.indexOf(a) - order.indexOf(b);
   return {
-    ingredients: [...counts.ingredients.entries()].map(([name, count]) => ({ name, count, max: limits.get(name) ?? null, condition: conditions.get(name) || "" })),
-    products: [...counts.products.entries()].map(([reg, count]) => ({ reg_no: reg, count, name: productRows.get(reg)?.name || reg, max: productRows.get(reg)?.max ?? null })),
+    ingredients: [...counts.ingredients.keys()]
+      .sort(byOrder(ingredientOrder))
+      .map((name) => ({ name, count: counts.ingredients.get(name), max: limits.get(name) ?? null, condition: conditions.get(name) || "" })),
+    products: [...counts.products.keys()].sort(byOrder(productOrder)).map((reg) => ({
+      reg_no: reg,
+      count: counts.products.get(reg),
+      name: productRows.get(reg)?.name || reg,
+      max: productRows.get(reg)?.max ?? null,
+      ingredients: productRows.get(reg)?.ingredients || [],
+    })),
   };
 }
 

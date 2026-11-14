@@ -574,14 +574,16 @@ export const TOOLS = [
               name: item.name,
               reg_no: item.reg_no,
               ...(rac.product(item.reg_no) ? { rac: rac.product(item.reg_no) } : {}),
+              ...(item.ingredients.length ? { ingredients: item.ingredients } : {}),
               count: item.count,
               max: item.max,
+              ...(item.max && item.count >= item.max ? { reached_limit: true } : {}),
             })),
             ...(harvestFrom ? { harvest_ok_from: harvestFrom } : {}),
           };
         }),
         note:
-          "回数は、このアプリの防除の記録から数えた回数で、1 件の記録で 1 回です。max は使用基準の上限（記録した時点の写し）で、空は写しがないものです。condition は、上限に条件があるときの基準の文です。rac は作用機構分類（IRAC は殺虫剤、FRAC は殺菌剤、HRAC は除草剤のコード）で、同じコードの農薬を続けて使わない（ローテーション）目安です。「分類なし」は天敵や展着剤など分類の対象外、「分類不明」は分類の表にない成分です。harvest_ok_from は、最後の防除と使用時期（収穫の何日前まで）から求めた、基準を満たす最初の収穫日です。登録内容は変わることがあるので、使う前に農薬のラベルで確かめてください。",
+          "回数は、このアプリの防除の記録から数えた回数で、1 件の記録で 1 回です。ingredients と products は、最初に使った順です。本剤の ingredients は、総使用回数に数える有効成分です。reached_limit は、上限に達したものです。max は使用基準の上限（記録した時点の写し）で、空は写しがないものです。condition は、上限に条件があるときの基準の文です。rac は作用機構分類（IRAC は殺虫剤、FRAC は殺菌剤、HRAC は除草剤のコード）で、同じコードの農薬を続けて使わない（ローテーション）目安です。「分類なし」は天敵や展着剤など分類の対象外、「分類不明」は分類の表にない成分です。harvest_ok_from は、最後の防除と使用時期（収穫の何日前まで）から求めた、基準を満たす最初の収穫日です。登録内容は変わることがあるので、使う前に農薬のラベルで確かめてください。",
       };
     },
   },

@@ -356,7 +356,7 @@ test("get_pesticide_usage: 作付ごとの使用回数と上限", async () => {
   const negi = usage.plantings[0];
   assert.deepEqual(negi.sprays, [{ date: "2027-04-20", products: ["テスト乳剤 2000 倍 散布"] }]);
   assert.deepEqual(negi.ingredients, [{ name: "成分A", count: 1, max: 3, condition: "3回以内(植付前は1回以内)" }]);
-  assert.deepEqual(negi.products, [{ name: "テスト乳剤", reg_no: "12345", count: 1, max: 2 }]);
+  assert.deepEqual(negi.products, [{ name: "テスト乳剤", reg_no: "12345", ingredients: ["成分A"], count: 1, max: 2 }]);
   assert.equal(negi.harvest_ok_from, "2027-05-04");
   // 使用基準の写しにない品目は、上限が空
   assert.equal(usage.plantings[1].ingredients[0].max, null);

@@ -2816,9 +2816,31 @@ body.plan-busy #scheduleView {
   font-size: 12px;
 }
 
+/* 有効成分の行の下に、その成分を含む本剤を字下げして並べる。本剤の行の上には線を引かず、成分と本剤の組を 1 つに見せる */
+.usage-product td {
+  border-top: 0;
+}
+
 .usage-product td:first-child {
   padding-left: 16px;
-  color: #3d5154;
+  color: var(--memo);
+}
+
+/* 総使用回数に数える成分のない本剤（成分が分からないものも）は、最後に字下げせずに並べる */
+.usage-alone td {
+  border-top: 1px solid var(--line);
+}
+
+.usage-alone td:first-child {
+  padding-left: 6px;
+}
+
+/* 総使用回数の条件。警告ではないので、成分の名前の下に添え書きで出す */
+.usage-condition {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: normal;
 }
 
 .usage-over {

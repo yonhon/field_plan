@@ -300,13 +300,24 @@ test("農薬の使用回数は、作付ごとに、登録番号と有効成分�
     table.ingredients.map((item) => [item.name, item.count, item.max, Boolean(item.condition)]),
     [["成分A", 3, 3, false], ["成分B", 2, 2, true]]
   );
-  assert.deepEqual(table.products.map((item) => [item.reg_no, item.count, item.max]), [["100", 2, 3], ["200", 2, 3]]);
+  assert.deepEqual(table.products.map((item) => [item.reg_no, item.count, item.max, item.ingredients]), [["100", 2, 3, ["成分A", "成分B"]], ["200", 2, 3, ["成分A"]]]);
   // 最後の防除（3/12）と、収穫 7 日前まで
   assert.equal(firstHarvestDay(logs, "p1", "レタス"), "2026-03-19");
   assert.equal(firstHarvestDay(logs, "p2", "レタス"), null);
   // 使用基準の写しがない記録は、本剤の名前を記録に入れた名前で出す。上限は空
   const plain = usageTable([spray("s4", "2026-03-01", ["p1"], [{ kind: "pesticide", reg_no: "300", name: "粒剤 5", standard: null }])], "p1", "レタス");
-  assert.deepEqual(plain.products, [{ reg_no: "300", count: 1, name: "粒剤 5", max: null }]);
+  assert.deepEqual(plain.products, [{ reg_no: "300", count: 1, name: "粒剤 5", max: null, ingredients: [] }]);
+});
+
+test("農薬の使用回数の表は、最初に使った順に並べる。記録の並び（新しい順）に左右されない", () => {
+  // 記録は DB から新しい順に届く
+  const logs = [
+    spray("s2", "2026-03-10", ["p1"], [pesticide(200, ["成分C", ""]), pesticide(300, ["成分B", ""])]),
+    spray("s1", "2026-03-01", ["p1"], [pesticide(100, ["成分A", ""])]),
+  ];
+  const table = usageTable(logs, "p1", "レタス");
+  assert.deepEqual(table.ingredients.map((item) => item.name), ["成分A", "成分C", "成分B"], "古い日から、同じ日は記録の資材の順");
+  assert.deepEqual(table.products.map((item) => item.reg_no), ["100", "200", "300"]);
 });
 
 test("防除の指摘", () => {
