@@ -78,6 +78,8 @@ async function run(action) {
   renderCrops();
 }
 
+// 文字と選ぶ欄には、値の文字（.cell-value）も添える。スマホとタブレットの縦の幅では表を見るだけにするので、入力欄の代わりにこれを出し、
+// 欄の中で折り返す（入力欄は折り返せず、長い品目名や肥料の銘柄が欄の幅で切れてしまう）
 function cell(row, [key, , kind]) {
   const value = row[key];
   if (kind === "check") {
@@ -87,10 +89,11 @@ function cell(row, [key, , kind]) {
     const options = ctx.state.fertilizers
       .map((item) => `<option value="${item.id}"${item.id === value ? " selected" : ""}>${escapeHtml(item.name)}</option>`)
       .join("");
-    return `<select data-field="${key}"><option value="">なし</option>${options}</select>`;
+    const chosen = ctx.state.fertilizers.find((item) => item.id === value);
+    return `<select data-field="${key}"><option value="">なし</option>${options}</select><span class="cell-value">${escapeHtml(chosen?.name || "")}</span>`;
   }
   if (kind === "text") {
-    return `<input type="text" data-field="${key}" value="${escapeHtml(value)}" />`;
+    return `<input type="text" data-field="${key}" value="${escapeHtml(value)}" /><span class="cell-value">${escapeHtml(value || "")}</span>`;
   }
   return `<input type="number" min="0" step="${kind === "int" ? 1 : "any"}" data-field="${key}" value="${value ?? ""}" />`;
 }

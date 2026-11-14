@@ -1490,7 +1490,17 @@ body.plan-busy #scheduleView {
   vertical-align: bottom;
 }
 
+/* 値の文字。スマホとタブレットの縦の幅で、入力欄の代わりに出す（crops-view.js の cell） */
+.crop-table .cell-value {
+  display: none;
+}
+
 /* 品目の表は列が多く横に送るので、品目の名前の列を左に固定する（送っても、どの品目の行かが分かる） */
+/* 品目の名前の欄は、長い名前（「ナス（PC筑陽・2条2本仕立て）」など）が読める幅にする */
+#cropTable td:first-child input {
+  width: 15em;
+}
+
 #cropTable th:first-child,
 #cropTable td:first-child {
   position: sticky;
@@ -1812,6 +1822,28 @@ body.plan-busy #scheduleView {
   .type-table input::-webkit-inner-spin-button,
   .type-table input::-webkit-outer-spin-button {
     display: none;
+  }
+
+  /* 品目と肥料の表: 文字と選ぶ欄は、入力欄の代わりに値の文字を出し、欄の中で折り返す */
+  .crop-table input[type="text"],
+  .crop-table select {
+    display: none;
+  }
+
+  .crop-table .cell-value {
+    display: block;
+    min-width: 4em;
+    max-width: 14em;
+    white-space: normal;
+  }
+
+  /* 固定する品目の名前の列は、画面を取りすぎないよう 7 文字ほどで折り返す */
+  #cropTable td:first-child .cell-value {
+    width: 7em;
+  }
+
+  #cropTable td:has(> [data-field="note"]) .cell-value {
+    min-width: 14em;
   }
 
   /* 工程作業日数の見出しは、狭い幅では折り返す（「あとにあける日数」が欄の外にはみ出さないように） */

@@ -120,6 +120,10 @@ test("台帳: 品目の表を横に送っても、品目の名前の列は左に
     await page.click('.tab-btn[data-view="master"]');
     await openOn("crops");
     const left = () => page.run(`Math.round(document.querySelector('#cropTable tr[data-id="c1"] td').getBoundingClientRect().left - document.querySelector("#cropTable").closest(".table-scroll").getBoundingClientRect().left)`);
+    // 入力欄の代わりに、名前の文字を出す（欄の幅で切れない）
+    assert.equal(await page.run(`getComputedStyle(document.querySelector('#cropTable tr[data-id="c1"] [data-field="name"]')).display`), "none");
+    assert.equal(await page.run(`document.querySelector('#cropTable tr[data-id="c1"] .cell-value').textContent`), await page.run(`document.querySelector('#cropTable tr[data-id="c1"] [data-field="name"]').value`));
+    assert.ok(await page.run(`document.querySelector('#cropTable tr[data-id="c1"] .cell-value').offsetWidth > 0`));
     const before = await left();
     await page.run(`document.querySelector("#cropTable").closest(".table-scroll").scrollLeft = 300`);
     assert.equal(await page.run(`document.querySelector("#cropTable").closest(".table-scroll").scrollLeft > 0`), true, "横に送れる");
