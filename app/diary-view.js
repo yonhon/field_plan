@@ -36,22 +36,39 @@ import { specText } from "./logs.js";
 import { inputHtml } from "./pesticide.js";
 import { openLogEditor } from "./log-view.js";
 import { escapeHtml } from "./html.js";
-import { cancelGooglePhotos, googlePhotosBusy, googlePhotosEnabled, isAndroid, pickGooglePhotos } from "./google-photos.js";
+import { cancelGooglePhotos, googlePhotosBusy, googlePhotosEnabled, pickGooglePhotos } from "./google-photos.js";
 
-// Android では、日記を書く欄のボタンを短い表示にする（見出しは「##」、小見出しは「###」、写真を入れるは写真を追加する印）。
-// スマホの幅でも、「編集 ｜ プレビュー」のタブと同じ 1 行に並び、「編集」のタブが入力欄の枠につながる。
-// 名前は、長押し（title）と読み上げ（aria-label）で分かるようにする。写真の印はカメラにしない（撮る意味に取られるため）
-const compactTools = () => isAndroid();
-const ADD_PHOTO_ICON =
-  '<svg class="diary-photo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-  '<path d="M14 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8"/><path d="M4 17l4.5-5 3.5 4 2.5-2.5L20 19"/><circle cx="9" cy="8.5" r="1.5"/><path d="M19 2v6M16 5h6"/></svg>';
+// 日記を書く欄のボタンは、文字の表示（「見出し」など）と印の表示（「##」など）の両方を持ち、
+// 文字の表示で「編集 ｜ プレビュー」のタブと同じ 1 行に収まらないときだけ、印の表示にする（fitTools）。どの端末でも、その端末で測って決める。
+// 1 行に並ぶと、「編集」のタブが入力欄の枠につながる。描き直さずに切り替えるので、打っている途中（日本語の変換中）に幅が変わっても切れない。
+// 名前は、長押し（title）と読み上げ（aria-label）で分かるようにする。写真の印はカメラにしない（撮る意味に取られるため）。
+// Google フォトの印は、雲に下向きの矢印（クラウドから取り込む）。Google のロゴは使わない（商標で、形を変えて使えない）
+const icon = (paths) =>
+  `<svg class="diary-tool-icon tool-short" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+const ADD_PHOTO_ICON = icon('<path d="M14 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8"/><path d="M4 17l4.5-5 3.5 4 2.5-2.5L20 19"/><circle cx="9" cy="8.5" r="1.5"/><path d="M19 2v6M16 5h6"/>');
+const CLOUD_ICON = icon('<path d="M7 18H6.5a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 17.6 8.1 4 4 0 0 1 17.5 18H17"/><path d="M12 11v9M9 17l3 3 3-3"/>');
+const STOP_ICON = icon('<path d="M6 6l12 12M18 6L6 18"/>');
+// 文字の表示と印の表示の組。どちらを出すかは、バーの is-compact で決める（CSS）
+const both = (full, short) => `<span class="tool-full">${full}</span>${short}`;
 
-// 「写真を入れる」のボタンの文字。上げているあいだは進み具合。短い表示では、ふだんは印だけで、上げているあいだは「1/3…」だけ
-function photoLabelText(text) {
-  if (!compactTools()) {
-    return text || "写真を入れる";
+// 写真を上げているあいだの、印の表示での進み具合（「上げています 1/3…」→「1/3…」）
+const shortProgress = (text) => (text ? (text.match(/\d+\/\d+…/) || [text])[0] : "");
+
+// ボタンが 1 行に収まるかを測り、印の表示にするかを決める。決めた値は view.compactTools に持ち、描くときもそこから付ける。
+// 測るときは、いったん文字の表示に戻して、タブとボタンを 1 行に並べたときに要る幅を足し合わせる（同じ処理の中なので、画面には出ない）
+function fitTools() {
+  const bar = document.querySelector("#diaryMain .diary-editor-bar");
+  if (!bar) {
+    return;
   }
-  return text ? (text.match(/\d+\/\d+…/) || [text])[0] : "";
+  bar.classList.remove("is-compact");
+  const gap = (el) => parseFloat(getComputedStyle(el).columnGap) || 0;
+  const tools = bar.querySelector(".diary-tools");
+  const items = [...tools.children];
+  const width = (el) => el.getBoundingClientRect().width;
+  const need = width(bar.querySelector(".diary-tabs")) + gap(bar) + items.reduce((sum, el) => sum + width(el), 0) + gap(tools) * Math.max(0, items.length - 1);
+  view.compactTools = need > bar.clientWidth + 0.5;
+  bar.classList.toggle("is-compact", view.compactTools);
 }
 
 const $ = (id) => document.getElementById(id);
@@ -658,14 +675,16 @@ function editorHtml() {
   const e = view.editing;
   // タブと同じ行の右に、「見出し」「小見出し」「写真を入れる」「やめる」「保存」の順に並べる。
   // 「見出し」「小見出し」「写真を入れる」は、編集のタブのときだけ出す
-  const compact = compactTools();
+  const compact = Boolean(view.compactTools);
   const tools =
     `<div class="diary-tools">` +
     (e.preview
       ? ""
-      : `<button type="button" class="chip-btn" data-action="heading" title="見出し" aria-label="見出し">${compact ? "##" : "見出し"}</button>` +
-        `<button type="button" class="chip-btn" data-action="subheading" title="小見出し" aria-label="小見出し">${compact ? "###" : "小見出し"}</button>` +
-        `<label class="chip-btn diary-photo-btn${view.uploading ? " is-busy" : ""}" title="写真を入れる"${compact ? ' aria-label="写真を入れる"' : ""}>${compact ? ADD_PHOTO_ICON : ""}<span id="diaryPhotoLabel">${escapeHtml(photoLabelText(view.uploading))}</span>` +
+      : `<button type="button" class="chip-btn" data-action="heading" title="見出し" aria-label="見出し">${both("見出し", '<span class="tool-short">##</span>')}</button>` +
+        `<button type="button" class="chip-btn" data-action="subheading" title="小見出し" aria-label="小見出し">${both("小見出し", '<span class="tool-short">###</span>')}</button>` +
+        `<label class="chip-btn diary-photo-btn${view.uploading ? " is-busy" : ""}" title="写真を入れる" aria-label="写真を入れる">` +
+        `<span id="diaryPhotoLabel" class="tool-full">${escapeHtml(view.uploading || "写真を入れる")}</span>${ADD_PHOTO_ICON}` +
+        `<span id="diaryPhotoProgress" class="tool-short">${escapeHtml(shortProgress(view.uploading))}</span>` +
         `<input id="diaryPhotoInput" type="file" accept="image/*" multiple${view.uploading ? " disabled" : ""} /></label>` +
         (googlePhotosEnabled() ? googlePhotosButton() : "")) +
     `<button type="button" class="text-btn" data-action="cancel">やめる</button>` +
@@ -680,14 +699,14 @@ function editorHtml() {
     `</div>${tools}</div>`;
   const content = e.preview
     ? `<div class="diary-preview">${e.body.trim() ? sectionBlocks(e.body).map((block) => blockHtml(block, "", 3)).join("") : '<p class="muted">まだ何も書いていません。</p>'}</div>`
-    : `<textarea id="diaryBody" data-field="body" rows="16" placeholder="作業の内容を書きます。${compact ? "「##」（見出し）" : "「見出し」"}で作物や作業ごとに見出しを付けると、あとで探しやすくなります。">${escapeHtml(e.body)}</textarea>`;
+    : `<textarea id="diaryBody" data-field="body" rows="16" placeholder="作業の内容を書きます。「見出し」（##）で作物や作業ごとに見出しを付けると、あとで探しやすくなります。">${escapeHtml(e.body)}</textarea>`;
   return (
     `<h2>${escapeHtml(dateLabel(e.date))}の日記</h2>` +
     (e.note ? `<p class="diary-note">${escapeHtml(e.note)}</p>` : "") +
     `<label>題<input id="diaryTitle" type="text" data-field="title" value="${escapeHtml(e.title)}" placeholder="なくてもかまいません" /></label>` +
     bar +
     content +
-    `<p class="muted">写真は、スマホのカメラのアプリで撮ってから、${compact ? "写真の印のボタン（写真を入れる）" : "「写真を入れる」"}でアルバムから選んでください（ここから直接撮ると、Google フォトに残らないことがあります）。短辺 1080 px に縮めて保存します。</p>`
+    `<p class="muted">写真は、スマホのカメラのアプリで撮ってから、「写真を入れる」でアルバムから選んでください（ここから直接撮ると、Google フォトに残らないことがあります）。短辺 1080 px に縮めて保存します。</p>`
   );
 }
 
@@ -708,6 +727,7 @@ function drawMain() {
   $("diaryView").classList.toggle("is-editing", Boolean(view.editing));
   if (view.editing) {
     draw(main, editorHtml());
+    fitTools();
     if (view.editing.preview) {
       requestUrls(photoNames(view.editing.body));
     }
@@ -929,16 +949,28 @@ async function runSearch() {
 }
 
 // 「Google フォト」のボタン。選んでいるあいだは「選ぶのをやめる」にする。写真を上げているあいだは押せない
+// 印の表示では、雲の印（選んでいるあいだは×の印）
 function googlePhotosButton() {
   const busy = googlePhotosBusy();
-  return `<button type="button" class="chip-btn" data-action="google-photos" title="Google フォトの写真を選んで入れます"${view.uploading ? " disabled" : ""}>${busy ? "選ぶのをやめる" : "Google フォト"}</button>`;
+  const name = busy ? "選ぶのをやめる" : "Google フォト";
+  return (
+    `<button type="button" class="chip-btn diary-google-btn${busy ? " is-busy" : ""}" data-action="google-photos" title="${busy ? name : "Google フォトの写真を選んで入れます"}" aria-label="${name}"${view.uploading ? " disabled" : ""}>` +
+    `${both(name, CLOUD_ICON.replace("tool-short", "tool-short is-idle") + STOP_ICON.replace("tool-short", "tool-short is-stop"))}</button>`
+  );
 }
 
+// 文字と印を、いまの状態に合わせる。文字の長さが変わるので、1 行に収まるかを測り直す
 function updateGooglePhotosButton() {
   const button = document.querySelector('#diaryMain [data-action="google-photos"]');
   if (button) {
-    button.textContent = googlePhotosBusy() ? "選ぶのをやめる" : "Google フォト";
+    const busy = googlePhotosBusy();
+    const name = busy ? "選ぶのをやめる" : "Google フォト";
+    button.querySelector(".tool-full").textContent = name;
+    button.classList.toggle("is-busy", busy);
+    button.title = busy ? name : "Google フォトの写真を選んで入れます";
+    button.setAttribute("aria-label", name);
     button.disabled = Boolean(view.uploading);
+    fitTools();
   }
 }
 
@@ -1008,11 +1040,13 @@ function setUploading(text) {
   view.uploading = text;
   const label = $("diaryPhotoLabel");
   if (label) {
-    label.textContent = photoLabelText(text);
+    label.textContent = text || "写真を入れる";
+    $("diaryPhotoProgress").textContent = shortProgress(text);
     label.parentElement.classList.toggle("is-busy", Boolean(text));
     $("diaryPhotoInput").disabled = Boolean(text);
   }
   updateGooglePhotosButton();
+  fitTools();
 }
 
 // 本文を書き換える。入力欄があれば値を入れ直し、打っている人のカーソルは、ずれた分だけ動かして保つ。
@@ -1388,6 +1422,16 @@ export function initDiary(context) {
       }
     });
   }
+  // 欄の幅が変わったら（画面を回した、窓の幅を変えた）、ボタンが 1 行に収まるかを測り直す。文字の読み込みが終わったときも
+  let lastWidth = 0;
+  new ResizeObserver(([entry]) => {
+    const width = Math.round(entry.contentRect.width);
+    if (width !== lastWidth) {
+      lastWidth = width;
+      fitTools();
+    }
+  }).observe(main);
+  document.fonts?.ready.then(() => fitTools());
   main.addEventListener("change", (event) => {
     if (event.target.id === "diaryPhotoInput") {
       const files = [...event.target.files];

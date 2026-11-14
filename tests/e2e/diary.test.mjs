@@ -519,7 +519,7 @@ test("日記: 小見出しのボタンで ### を付け、小見出しは下げ�
   await page.click('.tab-btn[data-view="diary"]');
   await page.click('#diaryMain [data-action="edit"]');
   // 並びは「見出し」「小見出し」「写真を入れる」「Google フォト」「やめる」「保存」
-  assert.deepEqual(await page.run(`[...document.querySelectorAll("#diaryMain .diary-tools > *")].map((el) => el.textContent.trim())`), ["見出し", "小見出し", "写真を入れる", "Google フォト", "やめる", "保存"]);
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("#diaryMain .diary-tools > *")].map((el) => el.innerText.trim())`), ["見出し", "小見出し", "写真を入れる", "Google フォト", "やめる", "保存"]);
   await page.click("#diaryBody");
   await page.type("島にんじん");
   await page.click('#diaryMain [data-action="heading"]');
@@ -686,31 +686,87 @@ test("日記: Android では「Google フォト」のボタンを出さない（
     assert.equal(await page.run(`navigator.userAgentData.platform`), "Android");
     assert.equal(await page.run(`Boolean(document.querySelector('#diaryMain [data-action="google-photos"]'))`), false);
     assert.equal(await page.run(`Boolean(document.getElementById("diaryPhotoInput"))`), true, "「写真を入れる」は出す");
-    // ボタンは短い表示で、名前は長押しと読み上げで分かる
-    assert.deepEqual(await page.run(`[...document.querySelectorAll("#diaryMain .diary-tools > *")].map((el) => el.textContent.trim() || el.getAttribute("aria-label"))`), ["##", "###", "写真を入れる", "やめる", "保存"]);
-    assert.equal(await page.run(`document.querySelector('#diaryMain [data-action="heading"]').title`), "見出し");
-    assert.equal(await page.run(`Boolean(document.querySelector("#diaryMain .diary-photo-btn .diary-photo-icon"))`), true);
-    // スマホの幅でも、タブとボタンが 1 行に並び、「編集」のタブのすぐ下が入力欄
-    await page.viewport(411);
-    const rows = await page.run(`(() => {
-      const top = (el) => Math.round(el.getBoundingClientRect().bottom);
-      const tab = document.querySelector("#diaryMain .diary-tab.is-on");
-      return { tab: top(tab), save: top(document.querySelector("#diaryMain .diary-save-btn")), body: Math.round(document.getElementById("diaryBody").getBoundingClientRect().top), right: Math.round(document.querySelector("#diaryMain .diary-tools").getBoundingClientRect().right), panel: Math.round(document.getElementById("diaryMain").getBoundingClientRect().right) };
-    })()`);
-    assert.ok(Math.abs(rows.tab - rows.body) <= 1, `タブの下が入力欄 ${JSON.stringify(rows)}`);
-    assert.ok(rows.save <= rows.tab, `保存もタブの行 ${JSON.stringify(rows)}`);
-    assert.ok(rows.right <= rows.panel, `欄からはみ出さない ${JSON.stringify(rows)}`);
-    // 写真を上げているあいだは、印の代わりに「1/1…」
-    await choosePhoto();
-    assert.equal(await page.run(`document.getElementById("diaryPhotoLabel").textContent`), "1/1…");
-    await page.waitFor(`document.getElementById("diaryPhotoLabel").textContent === ""`, "上げ終える");
+    // PC の幅では、文字のボタンで 1 行に収まる
+    assert.equal(await page.run(`document.querySelector("#diaryMain .diary-editor-bar").classList.contains("is-compact")`), false);
   } finally {
-    await page.viewport();
     await as("Windows");
   }
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="diary"]');
   await page.click('#diaryMain [data-action="edit"]');
   assert.equal(await page.run(`Boolean(document.querySelector('#diaryMain [data-action="google-photos"]'))`), true, "PC では出す");
+  assert.deepEqual(page.errors, []);
+});
+
+// タブとボタンが 1 行に並んでいるか（「編集」のタブのすぐ下が入力欄で、ボタンが欄からはみ出さない）
+const toolRow = () =>
+  page.run(`(() => {
+    const box = (el) => el.getBoundingClientRect();
+    const tab = box(document.querySelector("#diaryMain .diary-tab.is-on"));
+    const save = box(document.querySelector("#diaryMain .diary-save-btn"));
+    const tools = box(document.querySelector("#diaryMain .diary-tools"));
+    const body = box(document.getElementById("diaryBody"));
+    const panel = box(document.getElementById("diaryMain"));
+    return {
+      compact: document.querySelector("#diaryMain .diary-editor-bar").classList.contains("is-compact"),
+      oneRow: Math.abs(tab.bottom - body.top) <= 1 && save.bottom <= tab.bottom,
+      inside: tools.right <= panel.right,
+      labels: [...document.querySelectorAll("#diaryMain .diary-tools > *")].map((el) => el.innerText.trim() || el.getAttribute("aria-label")),
+    };
+  })()`);
+
+test("日記: ボタンは、文字でタブと 1 行に収まらない幅になったら印の表示にし、広げると文字に戻す。名前は長押しで分かる", options, async () => {
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="diary"]');
+  await page.click('#diaryMain [data-action="edit"]');
+  let row = await toolRow();
+  assert.equal(row.compact, false, "PC の幅では文字");
+  assert.equal(row.oneRow, true);
+  try {
+    // Pixel 7 の幅
+    await page.viewport(412);
+    await page.waitFor(`document.querySelector("#diaryMain .diary-editor-bar").classList.contains("is-compact")`, "印の表示になる");
+    row = await toolRow();
+    assert.equal(row.inside, true, JSON.stringify(row));
+    assert.deepEqual(row.labels.slice(0, 2), ["##", "###"]);
+    assert.equal(await page.run(`document.querySelector('#diaryMain [data-action="heading"]').title`), "見出し");
+    assert.equal(await page.run(`document.querySelector('#diaryMain [data-action="google-photos"]').getAttribute("aria-label")`), "Google フォト");
+    // 写真を上げているあいだは、印の代わりに「1/1…」
+    await choosePhoto();
+    assert.equal(await page.run(`document.querySelector("#diaryMain .diary-photo-btn").innerText.trim()`), "1/1…");
+    await page.waitFor(`!document.querySelector("#diaryMain .diary-photo-btn").classList.contains("is-busy")`, "上げ終える");
+    assert.equal(await page.run(`Boolean(document.querySelector("#diaryMain .diary-photo-btn .diary-tool-icon").getBoundingClientRect().width)`), true, "印に戻る");
+    // 書いている途中でも、入力欄は作り直さない（日本語の変換が切れない）
+    await page.run(`document.getElementById("diaryBody").marked = true`);
+    await page.viewport();
+    await page.waitFor(`!document.querySelector("#diaryMain .diary-editor-bar").classList.contains("is-compact")`, "広げると文字に戻る");
+    assert.equal(await page.run(`document.getElementById("diaryBody").marked`), true);
+  } finally {
+    await page.viewport();
+  }
+  assert.deepEqual(page.errors, []);
+});
+
+test("日記: Android の Pixel 7 の幅では、「Google フォト」なしの印の表示で、タブと 1 行に並ぶ", options, async () => {
+  const userAgent = await page.run("navigator.userAgent");
+  const as = (platform) =>
+    page.send("Emulation.setUserAgentOverride", {
+      userAgent: platform === "Android" ? "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36" : userAgent,
+      userAgentMetadata: { platform, platformVersion: "", architecture: "", model: "", mobile: platform === "Android" },
+    });
+  try {
+    await as("Android");
+    await page.viewport(412);
+    await page.loadApp(seed());
+    await page.click('.tab-btn[data-view="diary"]');
+    await page.click('#diaryMain [data-action="edit"]');
+    const row = await toolRow();
+    assert.deepEqual(row.labels, ["##", "###", "写真を入れる", "やめる", "保存"]);
+    assert.equal(row.oneRow, true, JSON.stringify(row));
+    assert.equal(row.inside, true, JSON.stringify(row));
+  } finally {
+    await as("Windows");
+    await page.viewport();
+  }
   assert.deepEqual(page.errors, []);
 });
