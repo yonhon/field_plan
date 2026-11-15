@@ -234,8 +234,7 @@ export function renderSchedule() {
   $("blockRecord").hidden = sel.whole;
   if (sel.whole) {
     ctx.renderBlockRecord(null);
-    renderWholeHead();
-    $("blockSummary").hidden = false;
+    ctx.renderWholeHead();
   } else {
     renderStrip();
     ctx.renderBlockRecord(sel.blockId);
@@ -256,17 +255,6 @@ export const currentBlockId = () => sel.blockId;
 
 // 日程の画面の URL。全体なら #schedule/all、区画を選んでいれば #schedule/block/区画の ID
 export const scheduleHash = () => (sel.whole ? "#schedule/all" : sel.blockId ? `#schedule/block/${sel.blockId}` : "#schedule");
-
-// 全体の頭。名前と、入力のボタン（相手を決めずに入力の窓を開く）。表示の切り替えは工程表の欄にある
-function renderWholeHead() {
-  draw(
-    $("blockHead"),
-    '<div class="detail-head whole-head"><div class="detail-side is-prev"></div>' +
-      '<div class="detail-center"><div class="detail-title"><h2>全体</h2></div>' +
-      '<div class="detail-actions"><button type="button" class="primary-btn" data-whole="record">＋ 作業を入力</button></div></div>' +
-      '<div class="detail-side is-next"></div></div>'
-  );
-}
 
 // ---- 区画・畝の欄 ----
 
@@ -831,7 +819,6 @@ function printGantt() {
 }
 
 // 選んでいる区画（全体ならすべての区画）の、品目ごとの苗数と、肥料ごとの量。区画の頭の面積・畝・苗の行を押すと開く（planting-view.js）。
-// 全体ではいつも出す
 function renderSummary() {
   $("summaryTitle").textContent = sel.whole ? "苗と肥料の集計（全体）" : "苗と肥料の集計（この区画）";
   const summary = summarize({ ...state(), beds: sel.whole ? state().beds : blockBeds(sel.blockId), logs: state().logs || [] });

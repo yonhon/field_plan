@@ -47,7 +47,7 @@ import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJo
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { plantingOnDate } from "./logs.js";
 import { initProcessEditor } from "./process-editor.js";
-import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
+import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail, renderWholeHead } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
 import { initNews } from "./news-view.js";
 import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
@@ -4203,6 +4203,7 @@ async function startApp(user = "local") {
     renderWarnings,
     showView,
     renderBlockRecord,
+    renderWholeHead,
     plantingTarget,
     openDetail: (kind, id) => {
       openPlantingDetail(kind, id);

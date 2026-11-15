@@ -50,7 +50,7 @@ const ganttRows = () => page.run(`[...document.querySelectorAll("#gantt .gantt-r
 const shown = (id) => page.run(`document.getElementById(${JSON.stringify(id)}).offsetParent !== null`);
 const DIALOG = "dialog.log-dialog[open]";
 
-test("日程の「全体」: 工程表にすべての区画を描き、苗と肥料の集計を出す。区画と畝の図と区画の計画は出さない。URL で開き直せる", options, async () => {
+test("日程の「全体」: 工程表にすべての区画を描き、頭の面積・畝の行で苗と肥料の集計を出し入れする。区画と畝の図と区画の計画は出さない。URL で開き直せる", options, async () => {
   await page.viewport(1280, 800);
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="map"]');
@@ -64,12 +64,18 @@ test("日程の「全体」: 工程表にすべての区画を描き、苗と肥
   await page.setValue("#schedulePicker", "all");
   await page.waitFor(`location.hash === "#schedule/all"`, "URL が全体になる");
   assert.equal(await ganttRows(), "A/A 畝1/B/B 畝1", "全体では、すべての区画と畝");
-  assert.equal(await shown("blockSummary"), true, "苗と肥料の集計を出す");
+  // 頭の面積・畝の本数（区画 A と B の 18×18 m）。押すと苗と肥料の集計を出し、もう一度押すとしまう
+  assert.equal(await page.run(`document.querySelector('#blockHead [data-act="summary"]').textContent`), "区画 648.0 ㎡・畝 2 本 ▸");
+  assert.equal(await shown("blockSummary"), false, "初めは集計を出さない");
+  await page.click('#blockHead [data-act="summary"]');
+  assert.equal(await shown("blockSummary"), true, "押すと苗と肥料の集計を出す");
   assert.equal(await page.run(`document.getElementById("summaryTitle").textContent`), "苗と肥料の集計（全体）");
   assert.equal(await page.run(`document.querySelector("#cropSummary td:nth-child(2)").textContent`), "2", "2 つの区画の作付を合わせる");
   assert.equal(await shown("stripPanel"), false, "区画と畝の図は出さない");
   assert.equal(await shown("blockRecord"), false, "区画の作業の計画と実績は出さない");
   assert.equal(await page.run(`document.querySelector("#blockHead h2").textContent`), "全体");
+  await page.click('#blockHead [data-act="summary"]');
+  assert.equal(await shown("blockSummary"), false, "もう一度押すとしまう");
 
   // 全体の頭の入力のボタンは、相手を決めずに窓を開く
   await page.click('#blockHead [data-whole="record"]');
@@ -95,7 +101,7 @@ test("日程の「全体」: 工程表にすべての区画を描き、苗と肥
   assert.deepEqual(page.errors, []);
 });
 
-test("圃場図の「＋ 入力する」: 図で選んだ区画・畝を対象に入れ、何も選んでいなければ空で開く", options, async () => {
+test("圃場図: 配置と面積の欄は図と同じ高さ。「＋ 入力する」は図で選んだ区画・畝を対象に入れ、何も選んでいなければ空で開く", options, async () => {
   await page.viewport(1280, 800);
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="map"]');
@@ -111,6 +117,9 @@ test("圃場図の「＋ 入力する」: 図で選んだ区画・畝を対象�
     await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
     return result;
   };
+  // 配置と面積の欄は、中身が少なくても図と同じ高さ
+  const height = (selector) => page.run(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().height`);
+  assert.ok(Math.abs((await height("#appView .area-panel")) - (await height("#appView .map-frame"))) < 1, "欄と図の高さがそろう");
   assert.equal(await targets(), "", "何も選んでいない");
   await page.click('#shapeTree [data-shape="b2"]');
   assert.equal(await targets(), "block:b2", "区画を選んでいる");

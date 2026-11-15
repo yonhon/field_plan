@@ -372,6 +372,20 @@ label.check {
   height: max(360px, calc(100dvh - 190px));
 }
 
+/* 配置と面積の欄は、図と同じ高さにする（中身が少なくても、多くても）。合計は上に残し、木だけを欄の中で送る */
+.area-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.area-panel .shape-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* 木の出し入れはスマホだけ */
 .tree-fold-btn {
   display: none;
@@ -1886,6 +1900,10 @@ body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
     grid-area: tree;
   }
 
+  .area-panel .shape-tree {
+    overflow-y: visible;
+  }
+
   .map-row.is-tree-folded .shape-tree > li:not(.tree-detail, .is-selected) {
     display: none;
   }
@@ -1982,8 +2000,7 @@ body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
 
 /* 右下のボタンに、最後の欄が隠れないようにする */
 #scheduleView,
-#appView,
-#appView .side {
+#appView {
   padding-bottom: 84px;
 }
 

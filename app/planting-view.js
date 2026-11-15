@@ -554,6 +554,30 @@ function blockInfoHtml(c) {
   return `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗と肥料の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>`;
 }
 
+// 日程の画面で「全体」を選んだときの頭。名前と、すべての区画の面積・畝の本数（押すと苗と肥料の集計を出し入れする。区画の頭と同じ）、
+// 入力のボタン（相手を決めずに入力の窓を開く。押したときの処理は schedule-view.js）。表示の切り替えは工程表の欄にある。
+// 面積と本数は、今日ある区画と畝
+export function renderWholeHead() {
+  const today = localToday();
+  const s = state();
+  const blocks = s.blocks.filter((block) => existsOn(block.start_date, block.end_date, today));
+  const live = s.beds.filter((bed) => existsOn(bed.start_date, bed.removed_on, today));
+  const summary = summarize({ ...s, beds: s.beds, logs: s.logs || [] });
+  const text = `区画 ${blocks.reduce((sum, block) => sum + polygonArea(block.shape), 0).toFixed(1)} ㎡・畝 ${live.length} 本`;
+  const info = summary.crops.length
+    ? `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗と肥料の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>`
+    : `<span class="muted detail-info">${escapeHtml(text)}</span>`;
+  draw(
+    $("blockHead"),
+    `<div class="detail-head${stacked.blockHead ? " is-stacked" : ""}"><div class="detail-side is-prev"></div>` +
+      `<div class="detail-center"><div class="detail-title"><h2>全体</h2>${info}</div>` +
+      '<div class="detail-actions"><button type="button" class="primary-btn" data-whole="record">＋ 作業を入力</button></div></div>' +
+      '<div class="detail-side is-next"></div></div>'
+  );
+  $("blockSummary").hidden = !summaryOpen || !summary.crops.length;
+  fitHead("blockHead");
+}
+
 function headHtml(c, active, rootId = "plantingBody") {
   const { prev, next } = neighbours(c);
   let title;
