@@ -2,7 +2,7 @@
 // 計画を変えるたびに、何を変えたかを 1 行ずつ残す。記録はプランから独立していて、番号は全体の通し番号。
 // 画面には、すべての圃場の記録を並べる。日ごとに、なぜそうしたかを書くメモを 1 つ持てる（すべての圃場で共通）。
 // アプリそのものの更新（updates.json）も、同じ日の欄に並べる。こちらの番号は A12 のように A を付ける。
-import { localToday } from "./schedule.js";
+import { addDays, localToday } from "./schedule.js";
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
 
@@ -17,6 +17,20 @@ const unsaved = new Set(); // まだ保存していない記録
 let saveTimer = null;
 let saving = false;
 let held = null; // 図の編集のあいだ溜めておく記録（record の引数）。保存したら記録し、捨てたら捨てる
+
+// 記録は増え続けるので、起動のときは最近の分だけ読み、画面にも最近の日だけ描く。
+// 起動は、この読み込みを待たない（「元に戻す」の用意やアプリの更新の確認を遅らせない）
+const RECENT_DAYS = 14; // 起動のときに読む日数（暦の日）。画面に 1 回に描き足す日数（記録やメモのある日）
+const OLDER_LIMIT = 300; // 「さらに前」で 1 回に読む記録の件数の目安（最後の日は、途中で切れないよう、その日の分をすべて読む）
+let loading = null; // 起動の読み込み（Promise）。失敗したら null に戻し、次に画面を開いたときに読み直す
+let loaded = false;
+let loadError = null;
+let loadedFrom = null; // この日より前の記録は、まだ読んでいない。null は、すべて読んだ
+let loadingOlder = false;
+let updatesLoading = null; // アプリの更新の一覧（updates.json）。履歴の画面を初めて開いたときに読む
+let updatesReady = false;
+let shownDays = RECENT_DAYS; // 画面に描く日の数
+let planLast = new Map(); // プランごとの最後の変更の時刻（DB の field.plan_last_changes。読んでいない古い記録の分も入る）
 
 // 図の編集を始めるときに呼ぶ。それからの記録は、releaseRecords まで溜めておく
 export function holdRecords() {
@@ -88,12 +102,14 @@ export function record({ kind, target = [], text, before = null, after = null, p
   queue(entry);
 }
 
-// そのプランの、最後の変更の時刻（ISO の文字）。記録がなければ空
+// そのプランの、最後の変更の時刻（ISO の文字）。記録がなければ空。
+// 起動のときに読んだ DB の値と、読んだあとに記録した分の、新しい方
 export function lastChangeAt(planId) {
   if (!ctx?.state.changes) {
     return "";
   }
-  return ctx.state.changes.filter((entry) => entry.plan_id === planId).reduce((last, entry) => (entry.last_at > last ? entry.last_at : last), "");
+  const times = [planLast.get(planId), ...ctx.state.changes.filter((entry) => entry.plan_id === planId).map((entry) => entry.last_at)].filter(Boolean);
+  return times.reduce((last, time) => (!last || Date.parse(time) > Date.parse(last) ? time : last), "");
 }
 
 function queue(entry) {
@@ -163,17 +179,61 @@ const references = (body) => [
   ...new Set([...body.matchAll(/[#＃](\d+)|(?<![A-Za-z])[AＡ](\d+)/g)].map((match) => (match[1] ? match[1] : `A${match[2]}`))),
 ];
 
-export function renderJournal() {
-  if (!ctx) {
-    return;
-  }
+const visible = () => !$("journalView").hidden;
+
+// 読んだ古い記録を、並びの後ろに足す。もう持っている記録は足さない
+function addOlder(rows) {
+  const known = new Set(ctx.state.changes.map((entry) => entry.id));
+  ctx.state.changes.push(...rows.filter((entry) => !known.has(entry.id)));
+}
+
+// 起動の読み込み。最近 RECENT_DAYS 日の記録、メモ、プランごとの最後の変更
+function startLoading() {
   const { state } = ctx;
-  const notes = new Map(state.notes.map((note) => [note.day, note.body]));
-  // 圃場が 2 つ以上あるときは、どの圃場の記録かも出す
-  const fieldName = (entry) => state.fields.find((field) => field.id === entry.field_id)?.name || "（もうない圃場）";
-  const where = (entry) => `${state.fields.length > 1 ? `${fieldName(entry)} / ` : ""}${entry.plan_name || "共通"}`;
-  // 今日は、変更がなくてもメモを書けるように必ず出す
-  const days = [
+  const fromDay = addDays(localToday(), -(RECENT_DAYS - 1));
+  loading = Promise.all([state.store.listChanges({ fromDay }), state.store.listNotes(), state.store.planLastChanges().catch(() => [])])
+    .then(([changes, notes, lasts]) => {
+      // 読んでいるあいだに記録した分（読んだものより新しい）は、前に残す
+      const kept = new Set(state.changes.map((entry) => entry.id));
+      state.changes = [...state.changes, ...changes.filter((entry) => !kept.has(entry.id))];
+      state.notes = notes;
+      planLast = new Map(lasts.map((row) => [row.plan_id, row.last_at]));
+      loadedFrom = fromDay;
+      loaded = true;
+      loadError = null;
+    })
+    .catch((error) => {
+      loading = null;
+      loadError = error;
+      ctx.setStatus(`変更の履歴を読み込めませんでした: ${error.message}`);
+    })
+    .finally(() => {
+      if (visible()) {
+        renderJournal();
+      }
+    });
+  return loading;
+}
+
+// アプリの更新の一覧。読めなくても画面は使える
+function loadUpdates() {
+  updatesLoading ||= fetch("./updates.json", { cache: "no-cache" })
+    .then((response) => (response.ok ? response.json() : []))
+    .catch(() => [])
+    .then((list) => {
+      updates = list;
+      updatesReady = true;
+      if (visible()) {
+        renderJournal();
+      }
+    });
+}
+
+// 画面に出せる日（新しい順）。今日は、変更がなくてもメモを書けるように必ず出す。
+// まだ記録を読んでいない日は出さない（メモやアプリの更新だけがあっても、その日の記録が抜けて見える）
+function journalDays() {
+  const { state } = ctx;
+  return [
     ...new Set([
       localToday(),
       ...state.changes.map((entry) => entry.day),
@@ -181,9 +241,110 @@ export function renderJournal() {
       ...updates.map((update) => update.date),
     ]),
   ]
+    .filter((day) => loadedFrom === null || day >= loadedFrom)
     .sort()
     .reverse();
+}
+
+// 記録を、day の日の分まで読み足す（day から、読んだいちばん古い日の前まで）
+async function loadUntil(day) {
+  if (loadedFrom === null || day >= loadedFrom) {
+    return;
+  }
+  addOlder(await ctx.state.store.listChanges({ fromDay: day, beforeDay: loadedFrom }));
+  loadedFrom = day;
+}
+
+// 「さらに前を見る」。描いていない日があれば描き足す。なければ、前の記録を読み足してから描き足す
+async function showOlder() {
+  if (loadingOlder) {
+    return;
+  }
+  loadingOlder = true;
+  renderJournal();
+  try {
+    if (journalDays().length <= shownDays && loadedFrom !== null) {
+      const rows = await ctx.state.store.listChanges({ beforeDay: loadedFrom, limit: OLDER_LIMIT });
+      if (rows.length < OLDER_LIMIT) {
+        addOlder(rows);
+        loadedFrom = null;
+      } else {
+        // 件数で切ったので、いちばん古い日は途中までかもしれない。その日の分をすべて読む
+        await loadUntil(rows.at(-1).day);
+      }
+    }
+    shownDays += RECENT_DAYS;
+  } catch (error) {
+    ctx.setStatus(`前の記録を読み込めませんでした: ${error.message}`);
+  } finally {
+    loadingOlder = false;
+    renderJournal();
+  }
+}
+
+// メモが触れている番号の行へ動かして、少しのあいだ色を付ける。まだ読んでいない・描いていない日の行なら、その日まで読んで描く
+async function jumpTo(ref) {
+  const { state } = ctx;
+  let line = document.getElementById(`change-${ref}`);
+  if (!line) {
+    try {
+      const day = ref.startsWith("A")
+        ? updates.find((update) => `A${update.no}` === ref)?.date
+        : state.changes.find((entry) => String(entry.no) === ref)?.day ?? (await state.store.changeDay(Number(ref)));
+      if (!day) {
+        ctx.setStatus(`${ref.startsWith("A") ? ref : `#${ref}`} の記録は見つかりません`);
+        return;
+      }
+      await loadUntil(day);
+      shownDays = Math.max(shownDays, journalDays().indexOf(day) + 1);
+      renderJournal();
+    } catch (error) {
+      ctx.setStatus(`記録を読み込めませんでした: ${error.message}`);
+      return;
+    }
+    line = document.getElementById(`change-${ref}`);
+    if (!line) {
+      return;
+    }
+  }
+  // 画面の外の日は高さを見積もりで置いているので、飛ぶあいだは、描いた日をすべて配置して位置を正しくする
+  $("journalDays").classList.add("is-jumping");
+  line.scrollIntoView({ block: "center", behavior: "smooth" });
+  line.classList.add("is-marked");
+  setTimeout(() => {
+    line.classList.remove("is-marked");
+    $("journalDays").classList.remove("is-jumping");
+  }, 2500);
+}
+
+// 履歴の画面を描く。隠れているあいだは描かない（開いたときに showView から呼ばれる）
+export function renderJournal() {
+  if (!ctx || !visible()) {
+    return;
+  }
+  loadUpdates();
+  if (!loaded || !updatesReady) {
+    if (!loaded && !loading) {
+      startLoading(); // 前に失敗していたら、読み直す
+    }
+    const text = loadError && !loading ? "変更の履歴を読み込めませんでした。" : "変更の履歴を読み込んでいます…";
+    draw($("journalDays"), `<p class="muted journal-loading">${text}</p>`);
+    return;
+  }
+  const { state } = ctx;
+  const notes = new Map(state.notes.map((note) => [note.day, note.body]));
+  // 圃場が 2 つ以上あるときは、どの圃場の記録かも出す
+  const fieldName = (entry) => state.fields.find((field) => field.id === entry.field_id)?.name || "（もうない圃場）";
+  const where = (entry) => `${state.fields.length > 1 ? `${fieldName(entry)} / ` : ""}${entry.plan_name || "共通"}`;
+  const all = journalDays();
+  const days = all.slice(0, shownDays);
   const numbers = new Set([...state.changes.map((entry) => String(entry.no)), ...updates.map((update) => `A${update.no}`)]);
+  // まだ読んでいない古い記録の番号かもしれないので、読み終えるまでは、知らない #番号も押せるようにする
+  const known = (no) => numbers.has(no) || (!no.startsWith("A") && loadedFrom !== null);
+  const more =
+    all.length > shownDays || loadedFrom !== null
+      ? `<div class="journal-more"><button class="chip-btn" data-act="older"${loadingOlder ? " disabled" : ""}>${loadingOlder ? "読み込んでいます…" : `さらに前の ${RECENT_DAYS} 日を見る`}</button></div>`
+      : '<p class="muted journal-more">これより前の記録はありません。</p>';
   draw(
     $("journalDays"),
     days
@@ -191,7 +352,7 @@ export function renderJournal() {
         const entries = state.changes.filter((entry) => entry.day === day);
         const body = notes.get(day) || "";
         const links = references(body)
-          .map((no) => `<button class="chip-btn ref-btn" data-ref="${no}"${numbers.has(no) ? "" : " disabled"}>${no.startsWith("A") ? no : `#${no}`}</button>`)
+          .map((no) => `<button class="chip-btn ref-btn" data-ref="${no}"${known(no) ? "" : " disabled"}>${no.startsWith("A") ? no : `#${no}`}</button>`)
           .join("");
         const rows = entries.length
           ? entries
@@ -226,21 +387,17 @@ export function renderJournal() {
           `${released ? `<h3>アプリの更新</h3><ul class="change-list">${released}</ul>` : ""}</section>`
         );
       })
-      .join("")
+      .join("") + more
   );
 }
 
-export async function initJournal(context) {
+// 起動のときに呼ぶ。記録の入れ物を先に空で用意して、読み込みは裏で行う（呼んだ側は待たない）。
+// 読んでいるあいだに記録した分は、読み終えたときに合わせる
+export function initJournal(context) {
   ctx = context;
   const { state } = ctx;
-  [state.changes, state.notes, updates] = await Promise.all([
-    state.store.listChanges(),
-    state.store.listNotes(),
-    // アプリの更新の一覧は、読めなくても画面は使える
-    fetch("./updates.json", { cache: "no-cache" })
-      .then((response) => (response.ok ? response.json() : []))
-      .catch(() => []),
-  ]);
+  state.changes = [];
+  state.notes = [];
 
   $("journalDays").addEventListener("change", (event) => {
     const day = event.target.dataset.note;
@@ -264,17 +421,10 @@ export async function initJournal(context) {
   $("journalDays").addEventListener("click", (event) => {
     const reference = event.target.closest("[data-ref]");
     const row = event.target.closest("li[data-id]");
-    if (reference) {
-      // メモが触れている記録の行へ動かして、少しのあいだ色を付ける
-      // 画面の外の日は高さを見積もりで置いているので、飛ぶあいだは、すべての日を描いて位置を正しくする
-      const line = document.getElementById(`change-${reference.dataset.ref}`);
-      $("journalDays").classList.add("is-jumping");
-      line.scrollIntoView({ block: "center", behavior: "smooth" });
-      line.classList.add("is-marked");
-      setTimeout(() => {
-        line.classList.remove("is-marked");
-        $("journalDays").classList.remove("is-jumping");
-      }, 2500);
+    if (event.target.closest('[data-act="older"]')) {
+      showOlder();
+    } else if (reference) {
+      jumpTo(reference.dataset.ref);
     } else if (row) {
       ctx.openTarget(state.changes.find((entry) => entry.id === row.dataset.id));
     }
@@ -286,4 +436,5 @@ export async function initJournal(context) {
       flush();
     }
   });
+  return startLoading();
 }

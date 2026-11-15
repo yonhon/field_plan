@@ -443,6 +443,13 @@ h3 {
   content-visibility: visible;
 }
 
+/* 履歴の画面の下の「さらに前の 14 日を見る」と、読み込み中の文 */
+.journal-more,
+.journal-loading {
+  margin: 12px 0 24px;
+  text-align: center;
+}
+
 .journal-day textarea {
   width: 100%;
   padding: 6px 8px;

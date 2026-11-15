@@ -431,6 +431,13 @@ alter table field.changes add constraint changes_field_id_fkey
 
 create index if not exists changes_day_idx on field.changes (field_id, day);
 
+-- プランごとの、最後の変更の時刻。画面は起動のとき最近の記録しか読まないので、「圃場とプラン」の窓の「最後の変更」はここから出す
+create or replace function field.plan_last_changes() returns table (plan_id uuid, last_at timestamptz)
+language sql stable set search_path = ''
+as $$
+  select c.plan_id, max(c.last_at) from field.changes c where c.plan_id is not null group by c.plan_id;
+$$;
+
 -- 開発日誌のメモ。日ごとに 1 つ、なぜそうしたかを手で書く。アプリの開発日誌なので、すべての圃場で共通
 create table if not exists field.dev_notes (
   day date primary key,
@@ -817,6 +824,8 @@ revoke all on function field.copy_plan(uuid, text) from public, anon;
 grant execute on function field.copy_plan(uuid, text) to authenticated;
 revoke all on function field.save_work_log(jsonb, jsonb, jsonb) from public, anon;
 grant execute on function field.save_work_log(jsonb, jsonb, jsonb) to authenticated;
+revoke all on function field.plan_last_changes() from public, anon;
+grant execute on function field.plan_last_changes() to authenticated;
 revoke all on field.importers from authenticated;
 alter table field.importers enable row level security;
 revoke all on function field.is_importer() from public, anon;

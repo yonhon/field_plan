@@ -202,8 +202,28 @@ export function createSupabaseStore(client, options) {
       return check(await client.from("app_compat").select("min_version").maybeSingle())?.min_version ?? 0;
     },
     // 変更の記録。開発日誌なので、すべての圃場の分を、新しい順に最近の 1,000 件
-    async listChanges() {
-      return check(await client.from("changes").select("*").order("no", { ascending: false }).limit(1000));
+    // 変更の記録を、新しい順に。fromDay 以降、beforeDay より前に絞れる（どちらも YYYY-MM-DD）。
+    // limit を渡すと、その件数まで（日の新しい順）。渡さなければ、当てはまるものをすべて
+    async listChanges({ fromDay = null, beforeDay = null, limit = null } = {}) {
+      const build = () => {
+        let query = client.from("changes").select("*");
+        if (fromDay) {
+          query = query.gte("day", fromDay);
+        }
+        if (beforeDay) {
+          query = query.lt("day", beforeDay);
+        }
+        return query.order("day", { ascending: false }).order("no", { ascending: false });
+      };
+      return limit ? check(await build().limit(limit)) : allRows(build);
+    },
+    // 番号の記録の日。なければ null
+    async changeDay(no) {
+      return check(await client.from("changes").select("day").eq("no", no).maybeSingle())?.day ?? null;
+    },
+    // プランごとの最後の変更の時刻 [{ plan_id, last_at }]
+    async planLastChanges() {
+      return check(await client.rpc("plan_last_changes"));
     },
     // 記録を足す。番号は DB が振るので、それを返す
     async addChange(entry) {
@@ -668,8 +688,23 @@ export function createLocalStore({ strict = false } = {}) {
         (a, b) => a.sort - b.sort
       );
     },
-    async listChanges() {
-      return (read().changes || []).sort((a, b) => b.no - a.no);
+    async listChanges({ fromDay = null, beforeDay = null, limit = null } = {}) {
+      const rows = (read().changes || [])
+        .filter((item) => (!fromDay || item.day >= fromDay) && (!beforeDay || item.day < beforeDay))
+        .sort((a, b) => b.day.localeCompare(a.day) || b.no - a.no);
+      return limit ? rows.slice(0, limit) : rows;
+    },
+    async changeDay(no) {
+      return (read().changes || []).find((item) => item.no === no)?.day ?? null;
+    },
+    async planLastChanges() {
+      const last = new Map();
+      for (const item of read().changes || []) {
+        if (item.plan_id && (!last.has(item.plan_id) || item.last_at > last.get(item.plan_id))) {
+          last.set(item.plan_id, item.last_at);
+        }
+      }
+      return [...last].map(([plan_id, last_at]) => ({ plan_id, last_at }));
     },
     async addChange(entry) {
       let no = 0;
@@ -976,8 +1011,10 @@ export function createLocalStore({ strict = false } = {}) {
 }
 
 // 通しテストで、ローカルの保存の書き込みを遅らせたり、失敗させたりする（回線の遅さや、保存の失敗を確かめる）。
-// ブラウザーの保存の LOCAL_TEST_KEY に { "delay": ミリ秒, "fail": true } を入れる。書き込みのたびに読むので、起動のあとで切り替えられる
+// ブラウザーの保存の LOCAL_TEST_KEY に { "delay": ミリ秒, "fail": true } を入れる。書き込みのたびに読むので、起動のあとで切り替えられる。
+// "readDelay": ミリ秒 は、変更の履歴の読み込み（SLOW_READS）を遅らせる（起動がそれを待たないことを確かめる）
 const LOCAL_TEST_KEY = "field_plan_local_test";
+const SLOW_READS = ["listChanges", "listNotes", "planLastChanges"];
 
 function withTestControl(store) {
   const control = () => {
@@ -1001,5 +1038,15 @@ function withTestControl(store) {
       return write(...args);
     },
   ]);
-  return Object.defineProperties(store, Object.fromEntries(writes.map(([name, wrapped]) => [name, { value: wrapped, enumerable: true }])));
+  const reads = SLOW_READS.filter((name) => store[name]).map((name) => [name, store[name]]).map(([name, read]) => [
+    name,
+    async (...args) => {
+      const { readDelay = 0 } = control();
+      if (readDelay) {
+        await new Promise((resolve) => setTimeout(resolve, readDelay));
+      }
+      return read(...args);
+    },
+  ]);
+  return Object.defineProperties(store, Object.fromEntries([...writes, ...reads].map(([name, wrapped]) => [name, { value: wrapped, enumerable: true }])));
 }

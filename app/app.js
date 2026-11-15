@@ -4152,7 +4152,7 @@ async function startApp() {
   syncWeather();
   initNews({ state, setStatus });
   // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホも PC も圃場図（今週やることが図の上にある）。
-  // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）。履歴の画面は、読み込んでから開く
+  // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）。履歴の画面は、履歴の用意（initJournal）のあとで開く
   const route = routeFromHash();
   if (route && route.view !== "journal") {
     openRoute(route, "replace");
@@ -4161,11 +4161,8 @@ async function startApp() {
   }
   initCrops({ state, setStatus, showView });
   initDiary({ state, setStatus });
-  try {
-    await initJournal({ state, openTarget, setStatus });
-  } catch (error) {
-    $("saveStatus").textContent = `変更の履歴を読み込めませんでした: ${error.message}`;
-  }
+  // 変更の履歴は裏で読む。起動（元に戻すの用意、アプリの更新の確認）は、これを待たない
+  initJournal({ state, openTarget, setStatus });
   if (route?.view === "journal") {
     openRoute(route, "replace");
   }
