@@ -809,31 +809,25 @@ body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
   overflow-y: auto;
 }
 
-.figures {
-  margin: 0;
+/* 区域と区画の木の上の合計。2 列に並べる */
+.tree-totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
 }
 
-.figures div {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 0;
-}
-
-.figures dt {
+.tree-totals dt {
   color: var(--muted);
+  font-size: 12px;
 }
 
-.figures dd {
+.tree-totals dd {
   margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.figures .total {
   font-weight: 700;
-}
-
-.figures .total dt {
-  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 .edges {
@@ -931,6 +925,19 @@ body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
 .zone-list .empty {
   color: var(--muted);
   cursor: default;
+}
+
+/* 外形の部分のうち、どの区域でもない面積の行。選べない */
+.zone-list li.tree-rest {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: default;
+}
+
+.tree-rest .swatch {
+  box-sizing: border-box;
+  border: 1px dashed var(--muted);
+  background: none;
 }
 
 .swatch {

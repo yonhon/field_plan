@@ -241,7 +241,14 @@
 
       <aside class="side">
         <section class="panel">
-          <h2>区域と区画</h2>
+          <h2>配置と面積</h2>
+          <!-- 木の行の合計。1 件ずつの面積は木の行に出す -->
+          <dl class="tree-totals">
+            <div><dt>圃場</dt><dd id="areaField">-</dd></div>
+            <div><dt>有効圃場</dt><dd id="areaTillable">-</dd></div>
+            <div><dt>区画（表示日）</dt><dd id="areaBlocks">-</dd></div>
+            <div><dt>畝（表示日）</dt><dd id="areaBeds">-</dd></div>
+          </dl>
           <ul id="shapeTree" class="zone-list shape-tree">
             <li id="selectionPanel" class="tree-detail" hidden>
           <h2 id="selectionTitle" hidden>選択中</h2>
@@ -287,18 +294,6 @@
           </div>
         </li>
           </ul>
-        </section>
-
-        <section class="panel">
-          <h2>圃場の面積</h2>
-          <dl class="figures">
-            <div><dt>圃場の面積</dt><dd id="areaField">-</dd></div>
-            <div class="total"><dt>有効圃場</dt><dd id="areaTillable">-</dd></div>
-            <div><dt>物置・井戸・通路・残渣処理場など</dt><dd id="areaZones">-</dd></div>
-            <div><dt>どの区域でもない部分</dt><dd id="areaRest">-</dd></div>
-            <div class="total"><dt>耕起対象区画（表示日）</dt><dd id="areaBlocks">-</dd></div>
-            <div><dt>畝（表示日）</dt><dd id="areaBeds">-</dd></div>
-          </dl>
         </section>
       </aside>
     </main>

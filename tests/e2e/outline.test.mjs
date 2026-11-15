@@ -76,6 +76,10 @@ test("外形: 離れた部分を描き足すと、面積は合計になり、区
   assert.equal(outline[1].length, 4);
 
   assert.equal(await text("areaField"), "1,280 ㎡（12.8 a）"); // 800 + 480
+  assert.equal(await text("areaTillable"), "896 ㎡（9.0 a）"); // 576 + 320
+  // 部分ごとに、どの区域でもない面積を、選べない行で出す
+  const rests = await page.run(`[...document.querySelectorAll("#shapeTree > li.tree-rest")].map((li) => li.dataset.key + ":" + li.textContent)`);
+  assert.deepEqual(rests, ["rest:0:区域でない部分224.0 ㎡", "rest:1:区域でない部分160.0 ㎡"]);
   // 一覧では、区域は入っている部分の下に、1 段下げて並ぶ
   const tree = await page.run(`[...document.querySelectorAll("#shapeTree > li[data-shape]")].map((li) => li.dataset.shape + ":" + li.className.match(/depth-\\d/)[0])`);
   assert.deepEqual(tree, ["outline:0:depth-0", "z1:depth-1", "outline:1:depth-0", "z2:depth-1"]);

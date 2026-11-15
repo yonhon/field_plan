@@ -864,8 +864,20 @@ function treeRows(outside, beds) {
   const parts = state.field.outline;
   const partOf = new Map(state.zones.map((zone) => [zone.id, zonePart(zone)]));
   parts.forEach((points, index) => {
-    add(outlineKey(index), 0, OUTLINE_COLOR, outlineLabel(index), `${polygonArea(points).toFixed(1)} ㎡`);
-    state.zones.filter((zone) => partOf.get(zone.id) === index).forEach((zone) => addZone(zone, 1));
+    const area = polygonArea(points);
+    add(outlineKey(index), 0, OUTLINE_COLOR, outlineLabel(index), `${area.toFixed(1)} ㎡`);
+    const zones = state.zones.filter((zone) => partOf.get(zone.id) === index);
+    zones.forEach((zone) => addZone(zone, 1));
+    // その部分のうち、どの区域でもない面積。選べない薄い行で、最後に置く（描き残しに気づけるように）
+    const rest = area - zones.reduce((sum, zone) => sum + polygonArea(zone.shape), 0);
+    if (rest >= 0.1) {
+      rows.push({
+        id: `rest:${index}`,
+        plain: true,
+        className: "depth-1 tree-rest",
+        html: `<span><span class="tree-slot"></span><span class="swatch"></span>区域でない部分</span><span>${rest.toFixed(1)} ㎡</span>`,
+      });
+    }
   });
   state.zones.filter((zone) => partOf.get(zone.id) < 0).forEach((zone) => addZone(zone, 0));
   if (!rows.length) {
@@ -930,13 +942,11 @@ function renderPanel() {
   const fieldArea = outlineArea(state.field.outline); // 離れた部分の合計
   const sumArea = (items) => items.reduce((sum, item) => sum + polygonArea(item.shape), 0);
   const tillable = state.zones.filter((zone) => zone.kind === "tillable");
-  const others = state.zones.filter((zone) => zone.kind !== "tillable");
   const blocks = visibleBlocks();
   const beds = visibleBeds();
+  // 配置と面積の木の上の合計。物置などの区域と、どの区域でもない部分は、木の行で 1 件ずつ見る
   $("areaField").textContent = fieldArea ? formatArea(fieldArea) : "-";
   $("areaTillable").textContent = tillable.length ? formatArea(sumArea(tillable)) : "-";
-  $("areaZones").textContent = others.length ? formatArea(sumArea(others)) : "-";
-  $("areaRest").textContent = fieldArea ? formatArea(Math.max(fieldArea - sumArea(state.zones), 0)) : "-";
   $("areaBlocks").textContent = blocks.length ? formatArea(sumArea(blocks)) : "-";
   $("areaBeds").textContent = beds.length ? `${formatArea(sumArea(beds))} / ${beds.length} 本` : "-";
 
