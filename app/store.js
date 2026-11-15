@@ -78,6 +78,12 @@ export function createSupabaseStore(client, options) {
   // Supabase は 1 回に 1,000 行までしか返さないので、それより多くなりうる表は分けて読む。
   // build は、毎回新しい問い合わせを作る関数（並びは、行が一意に決まるようにしておく）
   const PAGE = 1000;
+  // 作業の記録を、読んだときも保存したときも同じ形にそろえる（キーは名前の順、資材は seq の順）。
+  // 保存したときは DB の関数が返した 1 件を画面の記録と差し替えるので、読み直した記録と形が違うと、
+  // 「元に戻す」や戻ってきたときの読み直しが、変わっていない記録を変わったとみなす
+  const sortKeys = (row) => Object.fromEntries(Object.keys(row).sort().map((key) => [key, row[key]]));
+  const logShape = (row) =>
+    sortKeys({ ...row, targets: row.targets.map(sortKeys), inputs: [...row.inputs].sort((a, b) => a.seq - b.seq).map(sortKeys) });
   const allRows = async (build) => {
     const rows = [];
     for (let from = 0; ; from += PAGE) {
@@ -232,12 +238,13 @@ export function createSupabaseStore(client, options) {
           .order("created_at", { ascending: false })
           .order("id")
       );
-      rows.forEach((row) => row.inputs.sort((a, b) => a.seq - b.seq));
-      return rows;
+      return rows.map(logShape);
     },
-    // 記録を 1 件、対象と資材ごと保存する（DB の関数が 1 つのトランザクションで置き換える）
+    // 記録を 1 件、対象と資材ごと保存する（DB の関数が 1 つのトランザクションで置き換える）。
+    // 保存した記録を、loadLogs の 1 件と同じ形で返す（DB の関数が古く、ID だけを返したときは ID）
     async saveLog({ targets, inputs, ...log }) {
-      return check(await client.rpc("save_work_log", { log, targets, inputs }));
+      const saved = check(await client.rpc("save_work_log", { log, targets, inputs }));
+      return saved && typeof saved === "object" ? logShape(saved) : saved;
     },
     async deleteLog(id) {
       check(await client.from("work_logs").delete().eq("id", id));
@@ -703,8 +710,10 @@ export function createLocalStore({ strict = false } = {}) {
         .filter((log) => log.field_id === fieldId)
         .sort((a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at));
     },
+    // 保存した記録を、loadLogs の 1 件と同じ形で返す
     async saveLog({ targets, inputs, ...log }) {
       const id = log.id || crypto.randomUUID();
+      let result;
       update((data) => {
         const old = (data.workLogs || []).find((item) => item.id === id);
         const saved = {
@@ -715,8 +724,9 @@ export function createLocalStore({ strict = false } = {}) {
           inputs: inputs.map((input) => ({ ...input, id: input.id || crypto.randomUUID(), log_id: id })),
         };
         data.workLogs = [...(data.workLogs || []).filter((item) => item.id !== id), saved];
+        result = structuredClone(saved);
       });
-      return id;
+      return result;
     },
     async deleteLog(id) {
       update((data) => {

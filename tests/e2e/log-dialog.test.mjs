@@ -348,3 +348,38 @@ test("入力の窓: 実績と管理作業の計画は、入れた内容のまま
   await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
   assert.deepEqual(page.errors, []);
 });
+
+test("実績の保存・削除のあとは、記録を全件読み直さず、その 1 件だけを差し替える", options, async () => {
+  await page.loadApp(seed());
+  // ほかの画面で入れた記録のつもりで、ブラウザーの保存にだけ 1 件足す。読み直すと、一覧に出てしまう
+  await page.run(`(() => {
+    const key = "field_plan_local";
+    const data = JSON.parse(localStorage.getItem(key));
+    data.workLogs = [{ id: "other", field_id: "f1", date: "2026-01-02", end_date: null, work_type: "water", finishes: false, spec: {}, note: "ほかの画面",
+      created_at: "${AT}", targets: [{ id: "t-other", log_id: "other", planting_id: null, bed_id: null, block_id: "b1", work_id: null, label: "A", crop_name: "", area_m2: null, spray_l: null }], inputs: [] }];
+    localStorage.setItem(key, JSON.stringify(data));
+  })()`);
+  const listed = () => page.run('[...document.querySelectorAll("#logList li[data-log]")].map((li) => li.dataset.log)');
+
+  await page.click("#logAddBtn");
+  await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
+  await page.click('dialog.log-dialog [data-act="type"][data-code="weed"]');
+  await page.click('dialog.log-dialog [data-act="group"]');
+  await page.click('dialog.log-dialog [data-act="save"]');
+  await page.waitFor(`!document.querySelector("dialog.log-dialog[open]")`, "窓が閉じる");
+  const saved = (await page.saved()).workLogs.find((log) => log.id !== "other");
+  assert.ok(saved, "保存した");
+  assert.deepEqual(await listed(), [saved.id], "保存した 1 件だけが一覧に出る（全件は読み直していない）");
+  await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
+
+  // 開き直して削除しても、読み直さない
+  await page.click('.wt-tab[data-wtab="log"]');
+  await page.click(`#logList li[data-log="${saved.id}"]`);
+  await page.waitFor(`Boolean(document.querySelector('dialog.log-dialog[open] [data-act="delete"]'))`, "保存した実績を開く");
+  await page.click('dialog.log-dialog [data-act="delete"]');
+  await page.click('dialog.notice [data-action="delete"]');
+  await page.waitFor(`!document.querySelector("dialog.log-dialog[open]")`, "削除して窓が閉じる");
+  assert.deepEqual(await listed(), []);
+  assert.deepEqual((await page.saved()).workLogs.map((log) => log.id), ["other"]);
+  assert.deepEqual(page.errors, []);
+});

@@ -171,3 +171,38 @@ test("strict でも、親を指さない行は入る", async () => {
   await store.upsert("works", [{ id: "w1", plan_id: "p1", block_id: "b1", planting_id: null, seq: 1 }]);
   assert.equal((await store.list("works", "p1")).length, 1);
 });
+
+// DB の関数と PostgREST は、同じ記録をキーの順番を変えて返すことがある。どちらもそろえた形にする
+function logStore(rpcResult) {
+  const row = {
+    id: "l1", note: "", field_id: "f1", date: "2026-01-02", created_at: "2026-01-02T00:00:00+00:00",
+    targets: [{ label: "A", id: "t1", log_id: "l1" }, { id: "t2", label: "B", log_id: "l1" }],
+    inputs: [{ seq: 2, id: "i2", name: "乙" }, { name: "甲", id: "i1", seq: 1 }],
+  };
+  const query = {
+    select: () => query,
+    eq: () => query,
+    order: () => query,
+    range: async () => ({ data: [structuredClone(row)], error: null }),
+  };
+  const client = {
+    from: () => query,
+    rpc: async () => ({ data: rpcResult(row), error: null }),
+  };
+  return createSupabaseStore(client, {});
+}
+
+test("保存した記録は、読み込んだ記録と同じ形（キーの順、資材の並び）で返る", async () => {
+  const reversed = (object) => Object.fromEntries(Object.entries(object).reverse());
+  const store = logStore((row) => ({ ...reversed(row), targets: row.targets.map(reversed), inputs: row.inputs.map(reversed) }));
+  const [loaded] = await store.loadLogs("f1");
+  const saved = await store.saveLog({ id: "l1", targets: [], inputs: [] });
+  assert.equal(JSON.stringify(saved), JSON.stringify(loaded));
+  assert.deepEqual(loaded.inputs.map((input) => input.id), ["i1", "i2"]);
+  assert.deepEqual(loaded.targets.map((target) => target.id), ["t1", "t2"]);
+});
+
+test("DB の関数が ID だけを返したときは、ID をそのまま返す", async () => {
+  const store = logStore(() => "l1");
+  assert.equal(await store.saveLog({ id: "l1", targets: [], inputs: [] }), "l1");
+});

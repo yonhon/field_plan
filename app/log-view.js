@@ -213,8 +213,7 @@ export async function completeWorks(works) {
   ctx.setStatus("実績を入力しています…");
   try {
     // 何日かかかった作業も、記録は 1 件（開始日と終えた日）
-    await state().store.saveLog({ ...base, date: start, end_date: start < end ? end : null, finishes: true, targets });
-    await reload();
+    await showSaved([await state().store.saveLog({ ...base, date: start, end_date: start < end ? end : null, finishes: true, targets })]);
     ctx.setStatus(`${typeLabel(works[0].work_type)}を、計画どおり（${start === end ? formatDay(end) : `${formatDay(start)}〜${formatDay(end)}`}）に完了にしました`);
   } catch (error) {
     ctx.setStatus("");
@@ -268,21 +267,23 @@ export async function moveLogs(logIds, days, matches, rowName) {
   const strip = ({ id, log_id, ...rest }) => rest;
   ctx.setStatus("実績の日付を動かしています…");
   try {
+    const saved = [];
     for (const log of logs) {
       const date = addDays(log.date, days);
       const end_date = log.end_date ? addDays(log.end_date, days) : null;
       const mine = log.targets.filter(matches);
       const rest = log.targets.filter((target) => !matches(target));
       if (scope === "all" || !rest.length) {
-        await state().store.saveLog({ ...fields(log), date, end_date, targets: log.targets, inputs: log.inputs || [] });
+        saved.push(await state().store.saveLog({ ...fields(log), date, end_date, targets: log.targets, inputs: log.inputs || [] }));
       } else {
         // 残す畝の記録と、動かす畝の記録に分ける
-        await state().store.saveLog({ ...fields(log), targets: rest, inputs: log.inputs || [] });
+        saved.push(await state().store.saveLog({ ...fields(log), targets: rest, inputs: log.inputs || [] }));
         const { id, ...copy } = fields(log);
-        await state().store.saveLog({ ...copy, date, end_date, targets: mine.map(strip), inputs: (log.inputs || []).map(strip) });
+        saved.push(await state().store.saveLog({ ...copy, date, end_date, targets: mine.map(strip), inputs: (log.inputs || []).map(strip) }));
       }
     }
-    await reload();
+    // 途中で失敗したときは、どこまで保存できたか分からないので、下で全件を読み直す
+    await showSaved(saved);
     const way = `${Math.abs(days)} 日${days > 0 ? "後ろ" : "前"}へ動かし`;
     record({ kind: "log.move", target: ["work", null], plan: activePlan(), text: `${rowName}の実績（${typeLabel(logs[0].work_type)}）の日付を、${way}た` });
     ctx.setStatus(`実績の日付を ${way}ました`);
@@ -1559,8 +1560,7 @@ async function save() {
   button.disabled = true;
   ctx.setStatus("実績を入力しています…");
   try {
-    await state().store.saveLog({ ...log, targets, inputs });
-    await reload();
+    await showSaved([await state().store.saveLog({ ...log, targets, inputs })]);
     dialog.close();
     ctx.setStatus("実績を入力しました");
   } catch (error) {
@@ -1775,7 +1775,8 @@ async function remove() {
   }
   try {
     await state().store.deleteLog(log.id);
-    await reload();
+    state().logs = (state().logs || []).filter((item) => item.id !== log.id);
+    logsChanged();
     dialog.close();
     ctx.setStatus("実績を削除しました");
   } catch (error) {
@@ -1785,9 +1786,29 @@ async function remove() {
 
 async function reload() {
   state().logs = await state().store.loadLogs(state().field.id);
+  logsChanged();
+}
+
+function logsChanged() {
   renderLogs();
   ctx.onLogsChanged?.();
   noteChange();
+}
+
+// 記録の並び。DB から読むとき（store の loadLogs）と同じく、日付の新しい順、作った日時の新しい順、ID の順
+const newestFirst = (a, b) =>
+  b.date.localeCompare(a.date) || String(b.created_at || "").localeCompare(String(a.created_at || "")) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+// 保存した記録（saveLog が返したもの）を、画面の記録と差し替えて描き直す。全件は読み直さない。
+// 記録が返ってこなかったとき（DB の関数が古い、図の編集中で書き込みを溜めている）は、全件を読み直す
+async function showSaved(saved) {
+  if (!saved.every((log) => log && typeof log === "object")) {
+    await reload();
+    return;
+  }
+  const ids = new Set(saved.map((log) => log.id));
+  state().logs = [...(state().logs || []).filter((log) => !ids.has(log.id)), ...saved].sort(newestFirst);
+  logsChanged();
 }
 
 export function initLogs(context) {

@@ -347,7 +347,20 @@ begin
 end;
 $$;
 
-create or replace function field.save_work_log(log jsonb, targets jsonb, inputs jsonb) returns uuid
+-- 記録を 1 件、対象と資材ごと置き換え、保存した記録を返す。返す形は、画面が記録を読むとき（app/store.js の loadLogs）の
+-- 1 件と同じ（列の順、対象と資材の並び）。画面は、保存のあとに全件を読み直さず、この 1 件を差し替える。
+-- 前は ID だけを返していた。戻り値の型は create or replace では変えられないので、古い形のときだけ消して作り直す
+do $$
+begin
+  if exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'field' and p.proname = 'save_work_log' and p.prorettype = 'uuid'::regtype
+  ) then
+    drop function field.save_work_log(jsonb, jsonb, jsonb);
+  end if;
+end $$;
+
+create or replace function field.save_work_log(log jsonb, targets jsonb, inputs jsonb) returns json
 language plpgsql set search_path = ''
 as $$
 declare
@@ -379,7 +392,15 @@ begin
     (i ->> 'per_hole')::numeric
   from jsonb_array_elements(coalesce(inputs, '[]'::jsonb)) as i;
 
-  return new_id;
+  -- 読むときと同じく、対象と資材は並べ替えずに集める（資材は画面が seq で並べる）
+  return (
+    select row_to_json(saved) from (
+      select l.*,
+        coalesce((select json_agg(t) from field.work_log_targets t where t.log_id = l.id), '[]'::json) as targets,
+        coalesce((select json_agg(i) from field.work_log_inputs i where i.log_id = l.id), '[]'::json) as inputs
+      from field.work_logs l where l.id = new_id
+    ) saved
+  );
 end;
 $$;
 
