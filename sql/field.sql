@@ -923,7 +923,8 @@ create policy field_plan_owner_all on storage.objects for all to authenticated
   using (bucket_id = 'field-plan' and field.is_owner())
   with check (bucket_id = 'field-plan' and field.is_owner());
 
--- 確かめ。RLS のない表と、方針の一覧に足し忘れた表（RLS はあるが方針がない表）があれば、失敗させる。
+-- 確かめ。RLS のない表と、方針の一覧に足し忘れた表（RLS はあるが方針がない表）、
+-- 操作の記録（audit_log）の対象かを決めていない表があれば、失敗させる。
 -- 方針がなくてよいのは、画面から読み書きしない 4 つの表だけ
 do $$
 declare
@@ -942,5 +943,23 @@ begin
     and not exists (select 1 from pg_policy p where p.polrelid = c.oid);
   if missing is not null then
     raise exception '方針（policy）のない表があります。方針の一覧に足してください: %', missing;
+  end if;
+  -- 操作の記録（audit_log）のトリガーのない表。画面は、戻ってきたときに audit_log の最後の番号（field.audit_last）が
+  -- 前と同じなら読み直さないので、トリガーのない表の変更は、ほかの端末で変えても拾えない。
+  -- 表を足したら、トリガーの一覧（write_audit_log を付ける do の配列）か、下の「対象にしない表」のどちらかに足す。
+  -- 対象にしない表: 管理用（app_compat、audit_log、importers、mcp_access_log、owners）、
+  -- 履歴の画面が別に読むもの（changes、dev_notes）、外から取り込むもの（famic_*、rac_*、news、weather_daily）
+  select string_agg(c.relname, ', ' order by c.relname) into missing
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'field' and c.relkind in ('r', 'p')
+    and c.relname not in (
+      'app_compat', 'audit_log', 'importers', 'mcp_access_log', 'owners',
+      'changes', 'dev_notes',
+      'famic_imports', 'famic_products', 'famic_products_next', 'famic_uses', 'famic_uses_next',
+      'rac_codes', 'rac_imports', 'news', 'weather_daily'
+    )
+    and not exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'write_audit_log');
+  if missing is not null then
+    raise exception '操作の記録（audit_log）のトリガーのない表があります。トリガーの一覧か、対象にしない表の一覧に足してください: %', missing;
   end if;
 end $$;
