@@ -367,7 +367,8 @@ label.check {
    右の欄は図と同じ高さにし、はみ出す分は欄の中で送る */
 .map-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  /* 図と右の欄は 3 : 2。狭い PC でも、畝の行（畝の番号、10 文字ほどの品目、幅 × 長さ）が 1 行に収まる幅は残す */
+  grid-template-columns: minmax(0, 3fr) minmax(440px, 2fr);
   gap: 12px;
   height: max(360px, calc(100dvh - 190px));
 }
@@ -384,6 +385,11 @@ label.check {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* 木の行の右（面積、畝の幅 × 長さ）は、途中で折り返さない */
+.shape-tree > li > span:last-child {
+  white-space: nowrap;
 }
 
 /* 木の出し入れはスマホだけ */
