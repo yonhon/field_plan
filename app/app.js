@@ -38,6 +38,7 @@ import {
 import { MASTER_TABS, currentMasterTab, initCrops, renderCrops, setMasterTab } from "./crops-view.js";
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
 import { setPlace, setPlaceActions, setUserMenu } from "./user-menu.js";
+import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.js";
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
@@ -1233,7 +1234,9 @@ async function fetchCurrent(since = null) {
   }
   // プランが消えていれば、別のプランの中身が返る。使わない（applyCurrent が起動からやり直す）
   const tables = loaded.planId === state.plan.id ? loaded.tables : Object.fromEntries(PLAN_TABLES.map((table) => [table, []]));
-  return { fields, plans, allWorkTypes, crops, fertilizers, logs, tables, mark };
+  // 端末に取っておく分（DB から読んだそのままの中身）。画面に入れると中身が書き換わるので、いま写しを取る（field-cache.js）
+  const copy = structuredClone(loaded);
+  return { fields, plans, allWorkTypes, crops, fertilizers, logs, tables, mark, keep: () => writeFieldCache({ user: cacheUser, version: APP_VERSION, loaded: copy }) };
 }
 
 // 読み直した内容を入れる。開いていた圃場かプランが DB にないとき（ほかの端末で消した）は、起動からやり直す
@@ -1244,7 +1247,7 @@ function applyCurrent(data) {
     location.reload();
     return false;
   }
-  const { tables, mark, ...rest } = data;
+  const { tables, mark, keep, ...rest } = data;
   Object.assign(state, rest, { field, workTypes: data.allWorkTypes.filter(isPlannable) });
   setPlanData(plan, tables);
   return true;
@@ -1453,7 +1456,9 @@ async function reloadIfChanged() {
     reloadDue = false;
     syncedMark = data.mark ?? null;
     syncedFailures = failures;
-    if (sameContent(JSON.parse(before), comparable({ ...data, mark: undefined }))) {
+    // 比べ終えた DB の中身と印を、次の起動のために取っておく
+    data.keep();
+    if (sameContent(JSON.parse(before), comparable({ ...data, mark: undefined, keep: undefined }))) {
       return;
     }
     if (applyCurrent(data)) {
@@ -2378,7 +2383,10 @@ function renderPlace() {
 // 開くのは、前にその圃場で開いていたプラン。覚えていなければ先頭のプラン。
 // DB の往復を待つ回数を減らすため、すべて並べて読む。開くプランを覚えていれば、プランの一覧を待たずに、その中身も読み始める
 async function fetchFieldData(fieldId) {
-  return fieldDataOf(await state.store.loadField({ fieldId, planId: loadPref(fieldId, "plan", CURRENT_PLAN_KEY) }));
+  const loaded = await state.store.loadField({ fieldId, planId: loadPref(fieldId, "plan", CURRENT_PLAN_KEY) });
+  // 開いた圃場の中身を、次の起動のために取っておく（写しは、呼んだ時点で取る）
+  writeFieldCache({ user: cacheUser, version: APP_VERSION, loaded });
+  return fieldDataOf(loaded);
 }
 
 // store.loadField の返事から、圃場の中身（loadFieldData が使う形）を作る。下絵の画像の URL は、ここで発行する（ふだんは覚えた URL を使う）
@@ -4064,7 +4072,12 @@ function describeLoadError(error) {
   return `データを読み込めませんでした: ${error.message}`;
 }
 
-async function startApp() {
+// 端末に取っておく中身の持ち主（ログインした利用者の ID。?local=1 は "local"）。startApp が決める
+let cacheUser = "local";
+
+// user は、ログインを確かめた利用者の ID（?local=1 では "local"）
+async function startApp(user = "local") {
+  cacheUser = user;
   $("loginView").hidden = true;
   try {
     let fieldId = null;
@@ -4074,8 +4087,23 @@ async function startApp() {
       // 読めなければ先頭の圃場を開く
     }
     // 圃場の一覧、品目など、前に開いていた圃場とプランの中身を、1 回の要求で、同じ時点の DB から読む（store.loadField）。
-    // 圃場やプランが消えていれば、先頭のものが返る
-    const loaded = await state.store.loadField({ fieldId, planId: fieldId ? loadPref(fieldId, "plan", CURRENT_PLAN_KEY) : null });
+    // 圃場やプランが消えていれば、先頭のものが返る。
+    // 前回の中身を端末に取ってあれば、そのときの DB の変更の印を渡す。DB がそれから変わっていなければ、中身は返らないので、
+    // 取っておいた中身を使う（ログインと DB の確かめは済んでいる。field-cache.js）
+    // 開く圃場とプランを覚えていなければ（切り替えたことがない）、取っておいた中身の圃場とプランを開く。
+    // 覚えていれば、取っておいた中身がそれと同じ圃場とプランのときだけ使う
+    const cached = await readFieldCache({ user, version: APP_VERSION });
+    let planId = fieldId ? loadPref(fieldId, "plan", CURRENT_PLAN_KEY) : null;
+    const usable = cached && (!fieldId || (cached.fieldId === fieldId && (!planId || cached.planId === planId))) ? cached : null;
+    if (usable) {
+      fieldId = usable.fieldId;
+      planId = usable.planId;
+    }
+    const answer = await state.store.loadField({ fieldId, planId, since: usable ? usable.mark : null });
+    const loaded = answer.unchanged ? { ...usable, minVersion: answer.minVersion } : answer;
+    if (!answer.unchanged) {
+      writeFieldCache({ user, version: APP_VERSION, loaded });
+    }
     const { fields, workTypes: allWorkTypes, crops, fertilizers, minVersion } = loaded;
     // DB の形が、この版の画面では正しく書けない形に変わっている。書く前に止め、新しい版を読み込み直す（index.html が受ける）
     if (APP_VERSION < minVersion) {
@@ -4197,6 +4225,8 @@ async function logout() {
     return;
   }
   clearDiaryDrafts();
+  // 端末に取っておいた圃場の中身も消す
+  await clearFieldCache();
   loggingOut = true;
   // この端末のログインだけを取り消す。既定（global）は、すべての端末のログインを取り消すので、
   // スマホでログアウトすると、PC のログインも 1 時間以内に切れる
@@ -4297,14 +4327,14 @@ async function main() {
     }
     userEmail = signedIn.user?.email || "";
     setUserMenu({ email: userEmail, logout });
-    await startApp();
+    await startApp(signedIn.user.id);
   });
 
   const { data } = await state.client.auth.getSession();
   if (data.session) {
     userEmail = data.session.user?.email || "";
     setUserMenu({ email: userEmail, logout });
-    await startApp();
+    await startApp(data.session.user.id);
   } else {
     $("loginView").hidden = false;
   }

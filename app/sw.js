@@ -20,6 +20,7 @@ const FILES = [
   "dialog.js",
   "draw.js",
   "journal.js",
+  "field-cache.js",
   "history.js",
   "print.js",
   "logs.js",

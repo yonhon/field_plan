@@ -774,9 +774,11 @@ function createLocalTables({ strict = false } = {}) {
     async changeDay(no) {
       return (read().changes || []).find((item) => item.no === no)?.day ?? null;
     },
-    // DB の変更の印の代わり。ブラウザーの保存の中身から作る（中身が変われば、印も変わる）
+    // DB の変更の印の代わり。ブラウザーの保存のうち、DB で操作の記録（audit_log）の対象になる表の中身から作る
+    // （中身が変われば、印も変わる。変更の履歴やニュースなど、対象でない表の書き込みでは変わらない。本番と同じ）
     async changeMark() {
-      const text = localStorage.getItem(LOCAL_KEY) || "";
+      const data = read();
+      const text = JSON.stringify(AUDITED_LOCAL.map((key) => data[key] ?? null));
       let hash = 2166136261;
       for (let index = 0; index < text.length; index += 1) {
         hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
@@ -1095,6 +1097,9 @@ function createLocalTables({ strict = false } = {}) {
     },
   });
 }
+
+// ローカルの保存のうち、DB で操作の記録（audit_log）の対象になる表に当たるもの（changeMark が見る）
+const AUDITED_LOCAL = ["fields", "backdrops", "plans", "zones", "blocks", "beds", "plantings", "works", "crops", "fertilizers", "workTypes", "workLogs"];
 
 // 通しテストで、ローカルの保存の書き込みを遅らせたり、失敗させたりする（回線の遅さや、保存の失敗を確かめる）。
 // ブラウザーの保存の LOCAL_TEST_KEY に { "delay": ミリ秒, "fail": true } を入れる。書き込みのたびに読むので、起動のあとで切り替えられる。
