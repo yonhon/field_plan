@@ -10,8 +10,26 @@ let touched = null; // 最後に押した、または入った要素
 // 移る先の欄が決まったあと、カーソルが入る前に作り直すことがある。そのときは移る先の欄が消え、カーソルはどこにも入らない
 let tabbing = null;
 
+// スクロールしている要素。作り直すと 0 に戻るので、作り直す前の位置を覚えて戻す。
+// 描くたびにすべての要素の位置を読むと、そのたびにブラウザーがページ全体の配置を計算し直して重い
+// （工程表の中は数千の要素がある）。そこで、スクロールが起きたときに、その要素を覚えておく。
+// スクロールの知らせは少し遅れて届くので、JS でスクロールの位置を変えたら、noteScroll を呼んで、その場で覚えさせる
+const scrolled = new Set();
+
+export function noteScroll(el) {
+  if (!el) {
+    return;
+  }
+  if (el.scrollTop || el.scrollLeft) {
+    scrolled.add(el);
+  } else {
+    scrolled.delete(el);
+  }
+}
+
 // 押したときと、入力欄に入ったとき（Tab で移ったときも）に覚える。どの入れ物の中かは、描くときに確かめる
 if (typeof document !== "undefined") {
+  document.addEventListener("scroll", (event) => event.target instanceof Element && noteScroll(event.target), true);
   document.addEventListener("pointerdown", (event) => (touched = event.target), true);
   document.addEventListener("focusin", (event) => (touched = event.target), true);
   document.addEventListener(
@@ -95,8 +113,10 @@ function keep(root) {
   // 中でスクロールしている要素の位置（窓の中など。作り直すと 0 に戻る）
   const scrolls = [];
   if (!(root instanceof SVGElement)) {
-    for (const el of root.querySelectorAll("*")) {
-      if (el.scrollTop || el.scrollLeft) {
+    for (const el of scrolled) {
+      if (!el.isConnected) {
+        scrolled.delete(el);
+      } else if (el !== root && root.contains(el) && (el.scrollTop || el.scrollLeft)) {
         scrolls.push({ key: keyOf(el, root), top: el.scrollTop, left: el.scrollLeft });
       }
     }
@@ -120,6 +140,7 @@ function keep(root) {
       if (el) {
         el.scrollTop = scroll.top;
         el.scrollLeft = scroll.left;
+        noteScroll(el);
       }
     }
     for (const anchor of anchors) {

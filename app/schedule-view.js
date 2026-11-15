@@ -26,7 +26,7 @@ import { isBlockTarget, lateWorks, layoutBars, logEnd, plantingOnDate, withActua
 import { loadPref, savePref } from "./prefs.js";
 import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
-import { draw } from "./draw.js";
+import { draw, noteScroll } from "./draw.js";
 import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
@@ -779,6 +779,7 @@ function renderGantt(fit = null) {
     `</div></div><div class="gantt-legend">${legend}${overlay}<span><span class="swatch is-flagged"></span>白い対角線: 確認が必要</span></div>`
   );
   $("gantt").querySelector(".gantt-scroll").scrollLeft = keep ?? Math.max(x(view.from), 0);
+  noteScroll($("gantt").querySelector(".gantt-scroll"));
   $("gantt").dataset.dayPx = dayPx; // 1 日の幅（確かめるときに読む）
   renderPickTools();
 }

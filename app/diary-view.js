@@ -2,7 +2,7 @@
 // 日記は圃場ごとではなく共通。画面の状態は view に持ち、描くときは view から HTML を作る（docs/implementation-rules.md）。
 // 書いている本文は、打つたびに view と端末の中（書きかけ）に入れるだけで、入れ物は描き直さない（日本語の変換が切れるため）。
 import { confirmAction, notify, notifySaveFailed } from "./dialog.js";
-import { draw } from "./draw.js";
+import { draw, noteScroll } from "./draw.js";
 import {
   PHOTO_PLACEHOLDER,
   PHOTO_TAG_KINDS,
@@ -600,6 +600,7 @@ async function loadTagView({ more = false, keep = false } = {}) {
 function restoreTagScroll(t) {
   if (t.scroll) {
     $("diaryMain").scrollTop = t.scroll.main;
+    noteScroll($("diaryMain"));
     window.scrollTo(0, t.scroll.page);
   }
 }
@@ -743,6 +744,7 @@ function drawMain() {
   // 描き直したあとに戻す（draw は、押したボタンの位置を保とうとしてスクロールを動かすことがある）
   if (moved) {
     main.scrollTop = 0;
+    noteScroll(main);
     // スマホはページごとスクロールするので、日記の枠の頭が画面の上に隠れていたら、見える所まで戻す
     if (main.getBoundingClientRect().top < 0) {
       main.scrollIntoView({ block: "start" });
@@ -841,6 +843,7 @@ function openEditor(date, key = "") {
     area.setSelectionRange(at.pos, at.pos);
     const lineHeight = parseFloat(getComputedStyle(area).lineHeight) || 20;
     area.scrollTop = Math.max(0, (at.line - 1) * lineHeight);
+    noteScroll(area);
   }
 }
 
@@ -1072,6 +1075,8 @@ function replaceInArea(area, start, end, text, caret) {
   area.setSelectionRange(caret, caret);
   area.scrollTop = top;
   $("diaryMain").scrollTop = outer;
+  noteScroll(area);
+  noteScroll($("diaryMain"));
   window.scrollTo(window.scrollX, page);
 }
 
@@ -1092,6 +1097,7 @@ function changeBody(e, change) {
     area.value = e.body;
     area.setSelectionRange(start, end);
     area.scrollTop = top;
+    noteScroll(area);
   } else if (e.preview) {
     drawMain();
   }
