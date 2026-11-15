@@ -1021,4 +1021,12 @@ export function initPlantingView(context) {
       }
     }).observe($(rootId));
   }
+  // 書体を読み終えたとき（文字の幅が変わる。boot.js）も、出ている頭を測り直す。隠れている頭は測れない（出たときに上で測る）
+  document.fonts?.addEventListener("loadingdone", () => {
+    for (const rootId of ["plantingBody", "blockHead"]) {
+      if ($(rootId).offsetParent) {
+        fitHead(rootId);
+      }
+    }
+  });
 }

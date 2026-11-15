@@ -61,3 +61,18 @@ test("利用者のメニュー: ロゴで開き、もう一度押す・Esc・外
   assert.equal(await page.run(`document.getElementById("brandMenu").getAttribute("aria-expanded")`), "false");
   assert.deepEqual(page.errors, []);
 });
+
+test("書体: CSS は表示を止めない形で読み、読み終えたらヘッダーの名前の幅を測り直す", options, async () => {
+  await page.loadApp(seed());
+  const link = await page.run(`(() => { const link = document.querySelector('link[href^="https://fonts.googleapis.com/"]'); return link && { priority: link.fetchPriority, inHead: link.parentElement === document.head }; })()`);
+  assert.deepEqual(link, { priority: "low", inHead: true });
+  const width = () => page.run('parseFloat(document.getElementById("brandName").style.width)');
+  const before = await width();
+  assert.ok(before > 0, "名前の欄の幅を決めている");
+  // 書体が替わって文字が細くなったつもりで、名前の文字を小さくする。知らせが届くまでは、幅は前のまま
+  await page.run(`document.head.append(Object.assign(document.createElement("style"), { textContent: ".brand-name * { font-size: 8px !important; }" }))`);
+  assert.equal(await width(), before);
+  await page.run(`document.fonts.dispatchEvent(new Event("loadingdone"))`);
+  assert.ok((await width()) < before, `書体を読み終えたら、幅を測り直す（${before} → ${await width()}）`);
+  assert.deepEqual(page.errors, []);
+});

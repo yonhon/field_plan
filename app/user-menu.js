@@ -149,6 +149,7 @@ if (typeof document !== "undefined" && $("brandMenu")) {
       $("brandMenu").focus();
     }
   });
-  // 画面の幅が変わったら、名前の欄の幅を決め直す
+  // 画面の幅が変わったら、名前の欄の幅を決め直す。書体を読み終えたときも（文字の幅が変わる。boot.js）
   window.addEventListener("resize", fitBrand);
+  document.fonts?.addEventListener("loadingdone", () => fitBrand());
 }

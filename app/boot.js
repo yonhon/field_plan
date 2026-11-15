@@ -1,4 +1,14 @@
 // 起動。index.html が読む。Content-Security-Policy で、HTML の中に書いたスクリプトは動かさないので、ファイルに分けている
+
+// 書体（Google Fonts）の CSS を、表示を止めない形で読む。index.html の head で読むと、読み終えるまで画面も JS も止まる。
+// 読み終えるまでは端末の書体で出し（display=swap）、読み終えたら替わる。替わると文字の幅が変わるので、
+// 幅を測って配置を決める所は、document.fonts の loadingdone で測り直す（user-menu.js、planting-view.js、diary-view.js）。
+// 優先度は低くし、起動の DB の読み込みと回線を取り合いにくくする
+const FONTS_URL =
+  "https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Maru+Gothic:wght@500;700&display=swap";
+const fontLink = Object.assign(document.createElement("link"), { rel: "stylesheet", href: FONTS_URL });
+fontLink.fetchPriority = "low";
+document.head.append(fontLink);
 // JS の部品は互いに呼び合うので、ブラウザーに残った古い版と新しい版が混ざると、画面が出なくなる。
 // Service Worker（sw.js）が一式をそろえて出しているときは、そのまま読む。
 // そうでないとき（初めて開いたとき、?local=1）は、読み込む前に、部品ごとにサーバーへ更新を確かめて、手元の控えを新しくしておく

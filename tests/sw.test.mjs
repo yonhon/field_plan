@@ -34,6 +34,27 @@ test("index.html は、HTML の中に書いたスクリプトを持たず、Cont
   assert.doesNotMatch(html, /\son[a-z]+\s*=\s*["']/i, "onclick などの属性がある");
 });
 
+test("書体の CSS は index.html では読まず、boot.js が表示を止めない形で読む。使っていない書体は読まない", () => {
+  const html = readFileSync(join(APP, "index.html"), "utf8");
+  // head の <link rel="stylesheet"> で外の CSS を読むと、読み終えるまで画面も JS も止まる
+  for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) {
+    if (/rel="stylesheet"/.test(tag)) {
+      assert.doesNotMatch(tag, /href="https?:/, `外の CSS を読んでいる: ${tag}`);
+    }
+  }
+  const boot = readFileSync(join(APP, "boot.js"), "utf8");
+  const url = boot.match(/const FONTS_URL =\s*"([^"]+)"/)?.[1] ?? "";
+  assert.match(url, /^https:\/\/fonts\.googleapis\.com\/css2\?/);
+  assert.match(url, /display=swap/);
+  assert.match(boot, /fetchPriority = "low"/);
+  // styles.css が名前を出している書体だけを読む
+  const css = readFileSync(join(APP, "styles.css"), "utf8");
+  for (const [, name] of url.matchAll(/family=([^:&]+)/g)) {
+    const family = decodeURIComponent(name.replace(/\+/g, " "));
+    assert.ok(css.includes(`"${family}"`), `styles.css が使っていない書体を読んでいる: ${family}`);
+  }
+});
+
 test("一式に、app.js からたどれる部品と、index.html が読むファイルがすべて入っている", () => {
   const html = readFileSync(join(APP, "index.html"), "utf8");
   const parts = JSON.parse(readFileSync(join(APP, "boot.js"), "utf8").match(/const parts = (\[[^\]]*\]);/)[1]);

@@ -1431,7 +1431,8 @@ export function initDiary(context) {
       fitTools();
     }
   }).observe(main);
-  document.fonts?.ready.then(() => fitTools());
+  // 書体の CSS はあとから読む（boot.js）ので、document.fonts.ready はそれより前に済むことがある。読み終えるたびに測り直す
+  document.fonts?.addEventListener("loadingdone", () => fitTools());
   main.addEventListener("change", (event) => {
     if (event.target.id === "diaryPhotoInput") {
       const files = [...event.target.files];
