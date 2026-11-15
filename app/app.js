@@ -440,8 +440,10 @@ function cropColor(name) {
   return `hsl(${hash} 55% 42%)`;
 }
 
+// 括弧の中は坪。1 坪 = 400/121 ㎡（約 3.306 ㎡）
 function formatArea(sqm) {
-  return `${sqm.toLocaleString("ja-JP", { maximumFractionDigits: 0 })} ㎡（${(sqm / 100).toFixed(1)} a）`;
+  const tsubo = (sqm * 121) / 400;
+  return `${sqm.toLocaleString("ja-JP", { maximumFractionDigits: 0 })} ㎡（${tsubo.toLocaleString("ja-JP", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} 坪）`;
 }
 
 function formatLength(m) {

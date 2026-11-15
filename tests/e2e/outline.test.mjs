@@ -75,8 +75,8 @@ test("外形: 離れた部分を描き足すと、面積は合計になり、区
   assert.deepEqual(outline[0], rect(0, 0, 40, 20));
   assert.equal(outline[1].length, 4);
 
-  assert.equal(await text("areaField"), "1,280 ㎡（12.8 a）"); // 800 + 480
-  assert.equal(await text("areaTillable"), "896 ㎡（9.0 a）"); // 576 + 320
+  assert.equal(await text("areaField"), "1,280 ㎡（387.2 坪）"); // 800 + 480
+  assert.equal(await text("areaTillable"), "896 ㎡（271.0 坪）"); // 576 + 320
   // 部分ごとに、どの区域でもない面積を、選べない行で出す
   const rests = await page.run(`[...document.querySelectorAll("#shapeTree > li.tree-rest")].map((li) => li.dataset.key + ":" + li.textContent)`);
   assert.deepEqual(rests, ["rest:0:区域でない部分224.0 ㎡", "rest:1:区域でない部分160.0 ㎡"]);
@@ -116,7 +116,7 @@ test("外形の角は、図の編集のあいだだけ動かせる。保存し�
   await page.waitFor(`document.querySelectorAll("#map .handle").length > 0`, "外形の角の丸");
   await page.dragMap([40, 0], 40);
   await page.waitFor(`document.getElementById("mapEditSave").disabled === false`, "書きかけ");
-  assert.notEqual(await text("areaField"), "800 ㎡（8.0 a）");
+  assert.notEqual(await text("areaField"), "800 ㎡（242.0 坪）");
   assert.deepEqual(await savedOutline(), [rect(0, 0, 40, 20)], "保存するまでは DB は変わらない");
 
   // 外形を描き足して選んだまま、保存しないで閉じる: 描いた外形も、動かした角も元に戻る
@@ -130,7 +130,7 @@ test("外形の角は、図の編集のあいだだけ動かせる。保存し�
   await page.click(CONFIRM);
   await page.waitFor(`document.getElementById("mapBand").hidden`, "捨てて閉じる");
   assert.equal(await page.run(`document.querySelectorAll('#shapeTree li[data-shape^="outline:"]').length`), 1);
-  assert.equal(await text("areaField"), "800 ㎡（8.0 a）");
+  assert.equal(await text("areaField"), "800 ㎡（242.0 坪）");
   assert.deepEqual(await savedOutline(), [rect(0, 0, 40, 20)]);
   // 圃場の設定の窓には、外形のタブはない
   assert.equal(await page.run(`Boolean(document.querySelector('[data-fstab="outline"]'))`), false);
