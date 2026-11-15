@@ -67,6 +67,38 @@ const STRICT_TABLES = {
   works: { delay: 0, parents: [["blocks", "block_id"], ["plantings", "planting_id"]] },
 };
 
+// 起動、戻ってきたときの読み直し、圃場の切り替えで読む中身を、表ごとの読み込みを組み合わせて返す。
+// DB の関数 field.load_field（sql/field.sql）と同じ形を返す。?local=1 の店と、DB の関数がないときに使う。
+// 読む表、読む行の絞り方、並び順を変えるときは、load_field と両方を直す（tests/load-field.test.mjs が表の食い違いを確かめる）。
+// 返すのは { unchanged, mark, minVersion, fieldId, planId, fields, workTypes, crops, fertilizers, plans, tables, logs, backdrop }。
+// since が DB の変更の印（changeMark）と同じなら、{ unchanged: true, mark, minVersion } だけを返す
+export function composeLoadField(store) {
+  return async ({ fieldId = null, planId = null, since = null } = {}) => {
+    // 印は中身より先に読む（読んでいるあいだに入った変更は、印が変わるので次に拾える）
+    const mark = store.changeMark ? await store.changeMark().catch(() => null) : null;
+    const minVersion = await store.minAppVersion();
+    if (since !== null && mark !== null && mark === since) {
+      return { unchanged: true, mark, minVersion };
+    }
+    const [fields, workTypes, crops, fertilizers] = await Promise.all([
+      store.loadFields(),
+      store.loadWorkTypes(),
+      store.listAll("crops"),
+      store.listAll("fertilizers"),
+    ]);
+    const field = fields.find((item) => item.id === fieldId) || fields[0] || null;
+    const plans = field ? await store.loadPlans(field.id) : [];
+    const plan = plans.find((item) => item.id === planId) || plans[0] || null;
+    const names = Object.keys(PLAN_TABLES);
+    const [tables, logs, backdrop] = await Promise.all([
+      plan ? Promise.all(names.map((table) => store.list(table, plan.id))).then((rows) => Object.fromEntries(names.map((table, index) => [table, rows[index]]))) : null,
+      field ? store.loadLogs(field.id) : [],
+      field ? store.loadBackdrop(field.id) : null,
+    ]);
+    return { unchanged: false, mark, minVersion, fieldId: field?.id ?? null, planId: plan?.id ?? null, fields, workTypes, crops, fertilizers, plans, tables, logs, backdrop };
+  };
+}
+
 // options: { url, anonKey }。画像を、進み具合を知らせながら上げるのに使う
 export function createSupabaseStore(client, options) {
   const check = ({ data, error }) => {
@@ -95,7 +127,7 @@ export function createSupabaseStore(client, options) {
     }
   };
 
-  return {
+  const store = {
     async loadFields() {
       return check(await client.from("fields").select("*").order("created_at"));
     },
@@ -447,6 +479,37 @@ export function createSupabaseStore(client, options) {
       return urls;
     },
   };
+  // 起動、戻ってきたときの読み直し、圃場の切り替えで読む中身を、1 回の要求で読む（DB の関数 field.load_field）。
+  // 形は composeLoadField と同じ。DB の関数がないとき（古い DB）は、表ごとに読む
+  const composed = composeLoadField(store);
+  store.loadField = async ({ fieldId = null, planId = null, since = null } = {}) => {
+    const { data, error } = await client.rpc("load_field", { p_field_id: fieldId, p_plan_id: planId, p_since: since });
+    if (error) {
+      if (error.code === "PGRST202" || error.code === "42883") {
+        return composed({ fieldId, planId, since });
+      }
+      throw error;
+    }
+    if (data.unchanged) {
+      return { unchanged: true, mark: data.mark, minVersion: data.min_version };
+    }
+    return {
+      unchanged: false,
+      mark: data.mark,
+      minVersion: data.min_version,
+      fieldId: data.field_id,
+      planId: data.plan_id,
+      fields: data.fields,
+      workTypes: data.work_types,
+      crops: data.crops,
+      fertilizers: data.fertilizers,
+      plans: data.plans,
+      tables: data.tables,
+      logs: data.logs.map(logShape),
+      backdrop: data.backdrop,
+    };
+  };
+  return store;
 }
 
 // 利用者の 1 回の操作の ID。書き込みに付けて送り、DB の変更の記録（field.audit_log の op_id）に残す。
@@ -516,6 +579,12 @@ export function inOrder(store) {
 }
 
 export function createLocalStore({ strict = false } = {}) {
+  const store = createLocalTables({ strict });
+  store.loadField = composeLoadField(store);
+  return store;
+}
+
+function createLocalTables({ strict = false } = {}) {
   const read = () => JSON.parse(localStorage.getItem(LOCAL_KEY) || "{}");
   const write = (data) => localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
   const update = (change) => {

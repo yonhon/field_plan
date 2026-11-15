@@ -315,16 +315,16 @@ test("元に戻すのに途中で失敗したら、DB から読み直して画�
 // 起動と、戻ってきたときの読み直しで、圃場を読んだ回数（ローカルの保存が数える）
 const reads = () => page.run('Number(localStorage.getItem("field_plan_local_reads") || 0)');
 
-test("前に DB と比べたときから、どこでも何も変わっていなければ、戻っても読み直さない", options, async () => {
+test("起動のときから、どこでも何も変わっていなければ、戻っても読み直さない（起動のあと最初に戻ったときも）", options, async () => {
   await openStrip(2);
-  // 起動のあと最初に戻ったときは、DB と比べる
+  // 起動のときに、読んだ中身と同じ時点の DB の変更の印を覚えている
   const first = await reads();
   await awayFor(61);
-  await page.waitFor(`Number(localStorage.getItem("field_plan_local_reads") || 0) === ${first + 1}`, "最初に戻ったときは読み直す");
   await settle();
+  assert.equal(await reads(), first, "起動のあと最初に戻ったときも、変わっていなければ読み直さない");
   await awayFor(61);
   await settle();
-  assert.equal(await reads(), first + 1, "何も変わっていないので、読み直さない");
+  assert.equal(await reads(), first, "何も変わっていないので、読み直さない");
   assert.equal(await shownBeds(), "bed1,bed2");
   assert.deepEqual(page.errors, []);
 });

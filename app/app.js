@@ -1218,22 +1218,22 @@ const currentData = () => ({
   tables: Object.fromEntries(PLAN_TABLES.map((table) => [table, state[table]])),
 });
 
-// DB から読む。state はまだ変えない
-async function fetchCurrent() {
-  const [fields, allWorkTypes, crops, fertilizers, plans, tables, logs] = await Promise.all([
-    state.store.loadFields(),
-    state.store.loadWorkTypes(),
-    state.store.listAll("crops"),
-    state.store.listAll("fertilizers"),
-    state.store.loadPlans(state.field.id),
-    loadTables(PLAN_TABLES, state.plan.id),
-    state.store.loadLogs(state.field.id),
-  ]);
+// DB から読む。state はまだ変えない。読むのは store.loadField（DB の関数 field.load_field。1 回の要求で、同じ時点の DB を読む）。
+// since を渡し、DB の変更の印がそれと同じなら、null を返す（どこも変わっていない）。
+// 開いている圃場かプランが消えていたら、返す fields か plans にそれがない（applyCurrent が起動からやり直す）
+async function fetchCurrent(since = null) {
+  const loaded = await state.store.loadField({ fieldId: state.field.id, planId: state.plan.id, since });
+  if (loaded.unchanged) {
+    return null;
+  }
+  const { fields, plans, workTypes: allWorkTypes, crops, fertilizers, logs, mark } = loaded;
   const field = fields.find((item) => item.id === state.field.id);
   if (field) {
     field.outline = outlineParts(field.outline);
   }
-  return { fields, plans, allWorkTypes, crops, fertilizers, logs, tables };
+  // プランが消えていれば、別のプランの中身が返る。使わない（applyCurrent が起動からやり直す）
+  const tables = loaded.planId === state.plan.id ? loaded.tables : Object.fromEntries(PLAN_TABLES.map((table) => [table, []]));
+  return { fields, plans, allWorkTypes, crops, fertilizers, logs, tables, mark };
 }
 
 // 読み直した内容を入れる。開いていた圃場かプランが DB にないとき（ほかの端末で消した）は、起動からやり直す
@@ -1244,7 +1244,7 @@ function applyCurrent(data) {
     location.reload();
     return false;
   }
-  const { tables, ...rest } = data;
+  const { tables, mark, ...rest } = data;
   Object.assign(state, rest, { field, workTypes: data.allWorkTypes.filter(isPlannable) });
   setPlanData(plan, tables);
   return true;
@@ -1438,22 +1438,22 @@ async function reloadIfChanged() {
   let wait = RELOAD_WAIT_EDIT_MS;
   try {
     const failures = state.store.failures?.() ?? 0;
-    // 印を読めなければ（DB の関数がない、など）、いままでどおり読み直す
-    const mark = await (state.store.changeMark?.() ?? Promise.resolve(null)).catch(() => null);
-    if (mark !== null && mark === syncedMark && failures === syncedFailures) {
+    const before = JSON.stringify(comparable(currentData()));
+    // 前に比べたときの印を渡す。同じなら、DB の関数は中身を返さない（1 回の要求で、変わったかと中身の両方が分かる）。
+    // 書き込みに失敗したことがあれば、印を渡さずに中身を読んで比べる（失敗した書き込みは印を進めない）
+    const data = await fetchCurrent(failures === syncedFailures ? syncedMark : null);
+    if (!data) {
       reloadDue = false;
       return;
     }
-    const before = JSON.stringify(comparable(currentData()));
-    const data = await fetchCurrent();
     // 読んでいるあいだに操作が始まっていたら、読んだものは使わない（あとで読み直す）
     if (midEdit() || JSON.stringify(comparable(currentData())) !== before) {
       return;
     }
     reloadDue = false;
-    syncedMark = mark;
+    syncedMark = data.mark ?? null;
     syncedFailures = failures;
-    if (sameContent(JSON.parse(before), comparable(data))) {
+    if (sameContent(JSON.parse(before), comparable({ ...data, mark: undefined }))) {
       return;
     }
     if (applyCurrent(data)) {
@@ -2378,19 +2378,14 @@ function renderPlace() {
 // 開くのは、前にその圃場で開いていたプラン。覚えていなければ先頭のプラン。
 // DB の往復を待つ回数を減らすため、すべて並べて読む。開くプランを覚えていれば、プランの一覧を待たずに、その中身も読み始める
 async function fetchFieldData(fieldId) {
-  const loadBackdrop = async () => {
-    const backdrop = await state.store.loadBackdrop(fieldId);
-    return { backdrop, backdropUrl: backdrop ? await state.store.imageUrl(backdrop.storage_path) : "" };
-  };
-  const others = Promise.all([loadBackdrop(), state.store.loadLogs(fieldId)]);
-  const savedId = loadPref(fieldId, "plan", CURRENT_PLAN_KEY);
-  const early = savedId ? loadTables(PLAN_TABLES, savedId) : null;
-  // 覚えていたプランが消えていて使わなかったときの失敗で、止めないようにする。使うときは、下で待つので失敗が伝わる
-  early?.catch(() => {});
-  const plans = await state.store.loadPlans(fieldId);
-  const plan = plans.find((item) => item.id === savedId) || plans[0] || null;
-  const loaded = plan && (plan.id === savedId ? early : loadTables(PLAN_TABLES, plan.id));
-  const [[{ backdrop, backdropUrl }, logs], tables] = await Promise.all([others, loaded]);
+  return fieldDataOf(await state.store.loadField({ fieldId, planId: loadPref(fieldId, "plan", CURRENT_PLAN_KEY) }));
+}
+
+// store.loadField の返事から、圃場の中身（loadFieldData が使う形）を作る。下絵の画像の URL は、ここで発行する（ふだんは覚えた URL を使う）
+async function fieldDataOf(loaded) {
+  const { plans, tables, backdrop, logs } = loaded;
+  const plan = plans.find((item) => item.id === loaded.planId) || null;
+  const backdropUrl = backdrop ? await state.store.imageUrl(backdrop.storage_path) : "";
   return { plans, plan, tables, backdrop, backdropUrl, logs };
 }
 
@@ -4078,17 +4073,10 @@ async function startApp() {
     } catch {
       // 読めなければ先頭の圃場を開く
     }
-    // 前に開いていた圃場の中身は、圃場の一覧を待たずに読み始める。DB の往復を待つ回数が 1 回減る
-    const early = fieldId ? fetchFieldData(fieldId) : null;
-    // 圃場が消えていて使わなかったときの失敗で、止めないようにする。使うときは loadFieldData が待つので失敗が伝わる
-    early?.catch(() => {});
-    const [fields, allWorkTypes, crops, fertilizers, minVersion] = await Promise.all([
-      state.store.loadFields(),
-      state.store.loadWorkTypes(),
-      state.store.listAll("crops"),
-      state.store.listAll("fertilizers"),
-      state.store.minAppVersion(),
-    ]);
+    // 圃場の一覧、品目など、前に開いていた圃場とプランの中身を、1 回の要求で、同じ時点の DB から読む（store.loadField）。
+    // 圃場やプランが消えていれば、先頭のものが返る
+    const loaded = await state.store.loadField({ fieldId, planId: fieldId ? loadPref(fieldId, "plan", CURRENT_PLAN_KEY) : null });
+    const { fields, workTypes: allWorkTypes, crops, fertilizers, minVersion } = loaded;
     // DB の形が、この版の画面では正しく書けない形に変わっている。書く前に止め、新しい版を読み込み直す（index.html が受ける）
     if (APP_VERSION < minVersion) {
       showFatal("この DB を使うには、アプリの新しい版が要ります。読み込み直してください。");
@@ -4099,8 +4087,11 @@ async function startApp() {
     if (!state.fields.length) {
       state.fields = [await state.store.createField({ name: config.defaultFieldName })];
     }
-    const field = state.fields.find((item) => item.id === fieldId);
-    await (field ? loadFieldData(field, early) : loadFieldData(state.fields[0]));
+    const field = state.fields.find((item) => item.id === loaded.fieldId);
+    await (field ? loadFieldData(field, fieldDataOf(loaded)) : loadFieldData(state.fields[0]));
+    // 読んだ中身と同じ時点の DB の変更の印を覚える。起動のあと最初に戻ったときも、変わっていなければ読み直さない
+    syncedMark = field ? (loaded.mark ?? null) : null;
+    syncedFailures = state.store.failures?.() ?? 0;
   } catch (error) {
     showFatal(
       error.code === "42501" || /row-level security/.test(error.message || "")

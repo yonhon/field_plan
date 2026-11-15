@@ -795,6 +795,66 @@ as $$
   select case when field.is_owner() then coalesce((select max(id) from field.audit_log), 0) end;
 $$;
 
+-- 起動、戻ってきたときの読み直し、圃場の切り替えで読む中身を、1 回でまとめて返す（要求を 1 つにし、すべてを同じ時点の DB から読む）。
+-- 返す形は、画面の表ごとの読み込み（app/store.js の composeLoadField）と同じ。表は行ごと返すので、列を足しても直さなくてよい。
+-- 表を足す、読む行の絞り方や並び順を変えるときは、ここと composeLoadField の両方を直す（tests/load-field.test.mjs が表の食い違いを確かめる）。
+-- p_field_id、p_plan_id がないか消えていれば、先頭の圃場・プランを開く。
+-- p_since が操作の記録の最後の番号（field.audit_last）と同じなら、どこも変わっていないので、番号と版だけを返す。
+-- stable なので、中の問い合わせはすべて、呼んだ時点の同じ DB を読む（番号と中身がずれない）
+create or replace function field.load_field(p_field_id uuid default null, p_plan_id uuid default null, p_since bigint default null)
+returns json
+language plpgsql stable set search_path = ''
+as $$
+declare
+  v_mark bigint := field.audit_last();
+  v_min int := coalesce((select min_version from field.app_compat limit 1), 0);
+  v_field uuid;
+  v_plan uuid;
+begin
+  if p_since is not null and v_mark = p_since then
+    return json_build_object('unchanged', true, 'mark', v_mark, 'min_version', v_min);
+  end if;
+  select f.id into v_field from field.fields f where f.id = p_field_id;
+  if v_field is null then
+    select f.id into v_field from field.fields f order by f.created_at, f.id limit 1;
+  end if;
+  select p.id into v_plan from field.plans p where p.id = p_plan_id and p.field_id = v_field;
+  if v_plan is null then
+    select p.id into v_plan from field.plans p where p.field_id = v_field order by p.created_at, p.id limit 1;
+  end if;
+  return json_build_object(
+    'unchanged', false,
+    'mark', v_mark,
+    'min_version', v_min,
+    'field_id', v_field,
+    'plan_id', v_plan,
+    'fields', coalesce((select json_agg(t order by t.created_at, t.id) from field.fields t), '[]'),
+    'work_types', coalesce((select json_agg(t order by t.sort, t.code) from field.work_types t), '[]'),
+    'crops', coalesce((select json_agg(t order by t.name, t.id) from field.crops t), '[]'),
+    'fertilizers', coalesce((select json_agg(t order by t.name, t.id) from field.fertilizers t), '[]'),
+    'backdrop', (select row_to_json(t) from field.backdrops t where t.field_id = v_field order by t.created_at desc limit 1),
+    'plans', coalesce((select json_agg(t order by t.created_at, t.id) from field.plans t where t.field_id = v_field), '[]'),
+    'tables', case when v_plan is null then null else json_build_object(
+      'zones', coalesce((select json_agg(t order by t.created_at, t.id) from field.zones t where t.plan_id = v_plan), '[]'),
+      'blocks', coalesce((select json_agg(t order by t.created_at, t.id) from field.blocks t where t.plan_id = v_plan), '[]'),
+      'beds', coalesce((select json_agg(t order by t.seq, t.id) from field.beds t where t.plan_id = v_plan), '[]'),
+      'plantings', coalesce((select json_agg(t order by t.seq, t.id) from field.plantings t where t.plan_id = v_plan), '[]'),
+      'works', coalesce((select json_agg(t order by t.seq, t.id) from field.works t where t.plan_id = v_plan), '[]')
+    ) end,
+    -- 記録は、対象と資材ごと。形は save_work_log が返す 1 件と同じ
+    'logs', coalesce((
+      select json_agg(x order by x.date desc, x.created_at desc, x.id)
+      from (
+        select l.*,
+          coalesce((select json_agg(t) from field.work_log_targets t where t.log_id = l.id), '[]'::json) as targets,
+          coalesce((select json_agg(i) from field.work_log_inputs i where i.log_id = l.id), '[]'::json) as inputs
+        from field.work_logs l where l.field_id = v_field
+      ) x
+    ), '[]')
+  );
+end;
+$$;
+
 -- 毎日 3:30（日本時間）に、1 年より古い操作の記録を消す。同じ名前で登録し直すと、置き換わる
 select cron.schedule(
   'field-audit-log-purge', '30 18 * * *',
@@ -834,6 +894,8 @@ revoke all on function field.save_work_log(jsonb, jsonb, jsonb) from public, ano
 grant execute on function field.save_work_log(jsonb, jsonb, jsonb) to authenticated;
 revoke all on function field.plan_last_changes() from public, anon;
 revoke all on function field.audit_last() from public, anon;
+revoke all on function field.load_field(uuid, uuid, bigint) from public, anon;
+grant execute on function field.load_field(uuid, uuid, bigint) to authenticated;
 grant execute on function field.audit_last() to authenticated;
 grant execute on function field.plan_last_changes() to authenticated;
 revoke all on field.importers from authenticated;
