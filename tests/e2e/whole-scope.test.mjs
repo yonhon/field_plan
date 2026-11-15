@@ -1,0 +1,152 @@
+// 日程の「全体」と、工程表のない圃場図（図の右に「配置と面積」、右下の「＋ 入力する」は図で選んだ区画・畝が相手）を、
+// Chrome で通して確かめる。実行: node --test "tests/e2e/*.test.mjs"
+import { after, before, beforeEach, test } from "node:test";
+import assert from "node:assert/strict";
+import { findChrome, openBrowser } from "./browser.mjs";
+
+const AT = "2026-01-01T00:00:00Z";
+const AREA = [[0, 0], [40, 0], [40, 20], [0, 20]];
+const today = new Date().toISOString().slice(0, 10);
+
+// 区画 A と B に、畝を 1 本ずつ。どちらの畝にも試験菜を植え、今日にかかる作業を 1 つずつ入れる
+const seed = () => ({
+  fields: [{ id: "f1", name: "試験の圃場", outline: AREA, note: "", active_plan_id: "p1", created_at: AT }],
+  plans: [{ id: "p1", field_id: "f1", name: "プラン1" }],
+  zones: [{ id: "z1", plan_id: "p1", kind: "tillable", name: "", shape: AREA, created_at: AT }],
+  blocks: [
+    { id: "b1", plan_id: "p1", zone_id: "z1", name: "A", shape: [[1, 1], [19, 1], [19, 19], [1, 19]], start_date: null, end_date: null, created_at: AT },
+    { id: "b2", plan_id: "p1", zone_id: "z1", name: "B", shape: [[21, 1], [39, 1], [39, 19], [21, 19]], start_date: null, end_date: null, created_at: AT },
+  ],
+  beds: [
+    { id: "bed1", plan_id: "p1", block_id: "b1", seq: 1, shape: [[3, 2], [4, 2], [4, 18], [3, 18]], start_date: null, removed_on: null },
+    { id: "bed2", plan_id: "p1", block_id: "b2", seq: 1, shape: [[23, 2], [24, 2], [24, 18], [23, 18]], start_date: null, removed_on: null },
+  ],
+  plantings: [
+    { id: "pl1", plan_id: "p1", bed_id: "bed1", seq: 1, crop_id: "c1", crop_name: "試験菜" },
+    { id: "pl2", plan_id: "p1", bed_id: "bed2", seq: 1, crop_id: "c1", crop_name: "試験菜" },
+  ],
+  works: ["pl1", "pl2"].map((planting, index) => ({ id: `w${index + 1}`, plan_id: "p1", planting_id: planting, block_id: null, seq: 1, work_type: "harvest", plan_start: today, plan_end: today })),
+  crops: [{ id: "c1", name: "試験菜", mulch: false, bed_width_cm: 100, aisle_width_cm: 60 }],
+});
+
+const options = { skip: findChrome() ? false : "Chrome が見つかりません" };
+let page;
+
+before(async () => {
+  if (!options.skip) {
+    page = await openBrowser();
+  }
+});
+
+after(async () => {
+  await page?.close();
+});
+
+beforeEach(() => {
+  page?.errors.splice(0);
+});
+
+const ganttRows = () => page.run(`[...document.querySelectorAll("#gantt .gantt-row")].map((row) => row.dataset.name).join("/")`);
+const shown = (id) => page.run(`document.getElementById(${JSON.stringify(id)}).offsetParent !== null`);
+const DIALOG = "dialog.log-dialog[open]";
+
+test("日程の「全体」: 工程表にすべての区画を描き、苗と肥料の集計を出す。区画と畝の図と区画の計画は出さない。URL で開き直せる", options, async () => {
+  await page.viewport(1280, 800);
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="map"]');
+  assert.equal(await page.run(`Boolean(document.querySelector("#appView #ganttPanel"))`), false, "圃場図には工程表がない");
+
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(`document.getElementById("schedulePicker").value === "block:b1"`, "初めは先頭の区画");
+  assert.equal(await page.run(`document.getElementById("schedulePicker").options[0].textContent`), "全体", "欄の先頭は全体");
+  assert.equal(await ganttRows(), "A/A 畝1", "区画では、その区画だけ");
+
+  await page.setValue("#schedulePicker", "all");
+  await page.waitFor(`location.hash === "#schedule/all"`, "URL が全体になる");
+  assert.equal(await ganttRows(), "A/A 畝1/B/B 畝1", "全体では、すべての区画と畝");
+  assert.equal(await shown("blockSummary"), true, "苗と肥料の集計を出す");
+  assert.equal(await page.run(`document.getElementById("summaryTitle").textContent`), "苗と肥料の集計（全体）");
+  assert.equal(await page.run(`document.querySelector("#cropSummary td:nth-child(2)").textContent`), "2", "2 つの区画の作付を合わせる");
+  assert.equal(await shown("stripPanel"), false, "区画と畝の図は出さない");
+  assert.equal(await shown("blockRecord"), false, "区画の作業の計画と実績は出さない");
+  assert.equal(await page.run(`document.querySelector("#blockHead h2").textContent`), "全体");
+
+  // 全体の頭の入力のボタンは、相手を決めずに窓を開く
+  await page.click('#blockHead [data-whole="record"]');
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "入力の窓");
+  assert.equal(await page.run(`document.querySelectorAll("${DIALOG} .log-chip.is-on, ${DIALOG} [data-act='block']:checked").length`), 0, "対象は空");
+  await page.click(`${DIALOG} .log-head [data-act="close"]`);
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓が閉じる");
+  // 窓のために積んだ履歴の取り消しを待つ（待たずに進むと、取り消しの戻るが次の操作のあとに効く）
+  await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
+
+  // 工程表の区画の名前を押すと、その区画を開く。戻ると全体に戻る
+  await page.click('#gantt .gantt-link[data-detail="block"][data-id="b2"]');
+  await page.waitFor(`location.hash === "#schedule/block/b2" && document.getElementById("schedulePicker").value === "block:b2"`, "区画 B を開く");
+  assert.equal(await shown("stripPanel"), true, "区画では区画と畝の図を出す");
+  assert.equal(await page.run(`document.getElementById("summaryTitle").textContent`), "苗と肥料の集計（この区画）");
+  await page.run("history.back()");
+  await page.waitFor(`location.hash === "#schedule/all" && document.getElementById("schedulePicker").value === "all"`, "戻ると全体");
+
+  // 開き直しても全体を開く（覚えた場所も全体）
+  await page.click('.tab-btn[data-view="map"]');
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(`document.getElementById("schedulePicker").value === "all"`, "タブを戻っても全体");
+  assert.deepEqual(page.errors, []);
+});
+
+test("圃場図の「＋ 入力する」: 図で選んだ区画・畝を対象に入れ、何も選んでいなければ空で開く", options, async () => {
+  await page.viewport(1280, 800);
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="map"]');
+  await page.waitFor(`Boolean(document.querySelector('#shapeTree [data-shape="b2"]'))`, "木に区画が出る");
+  const targets = async () => {
+    await page.click("#logAddBtn");
+    await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "入力の窓");
+    const result = await page.run(
+      `[...document.querySelectorAll("${DIALOG} .log-chip.is-on")].map((chip) => "bed:" + chip.dataset.id).concat([...document.querySelectorAll("${DIALOG} [data-act='block']:checked")].map((box) => "block:" + box.dataset.id)).join()`
+    );
+    await page.click(`${DIALOG} .log-head [data-act="close"]`);
+    await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓が閉じる");
+    await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
+    return result;
+  };
+  assert.equal(await targets(), "", "何も選んでいない");
+  await page.click('#shapeTree [data-shape="b2"]');
+  assert.equal(await targets(), "block:b2", "区画を選んでいる");
+  await page.click('#shapeTree [data-toggle="b1"]');
+  await page.click('#shapeTree [data-shape="bed1"]');
+  assert.equal(await targets(), "bed:bed1", "畝を選んでいる（今日の作付）");
+  assert.deepEqual(page.errors, []);
+});
+
+test("スマホの幅: 図の右に配置と面積の合計を並べ、木はたたむ。選んだ図形の行と内容は出し、「一覧」で木を出す", options, async () => {
+  await page.viewport(390);
+  await page.loadApp(seed());
+  await page.click('.tab-btn[data-view="map"]');
+  await page.waitFor(`Boolean(document.querySelector('#map [data-shape="b1"]'))`, "圃場図に区画が出る");
+  const box = (selector) => page.run(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }; })()`);
+  const frame = await box("#appView .map-frame");
+  const sum = await box("#appView .area-sum");
+  assert.ok(sum.left >= frame.right, `合計は図の右（図 ${frame.right}、合計 ${sum.left}）`);
+  assert.ok(sum.top < frame.bottom && sum.bottom > frame.top, "図と同じ高さに並ぶ");
+  assert.ok(frame.width > 200, `図の幅が残る（${frame.width}）`);
+  assert.equal(await page.run(`document.documentElement.scrollWidth <= innerWidth`), true, "横にはみ出さない");
+  assert.equal(await shown("shapeTree"), false, "木はたたんである");
+
+  await page.clickMap([10, 10]); // 区画 A の中（畝のない所）
+  await page.waitFor(`document.getElementById("selectionPanel").offsetParent !== null`, "選んだ区画の内容は出す");
+  assert.deepEqual(
+    await page.run(`[...document.querySelectorAll("#shapeTree > li")].filter((li) => li.offsetParent !== null).map((li) => li.dataset.shape || li.id)`),
+    ["b1", "selectionPanel"],
+    "ほかの木の行は出さず、選んだ行とその内容だけ"
+  );
+
+  await page.click("#treeFoldBtn");
+  assert.ok((await page.run(`[...document.querySelectorAll("#shapeTree > li")].filter((li) => li.offsetParent !== null).length`)) > 1, "「一覧」で木を出す");
+  // 押したときに画面が送られるので、測り直して比べる
+  const [tree, after] = [await box("#shapeTree"), await box("#appView .map-frame")];
+  assert.ok(tree.top >= after.bottom, "木は図の下");
+  await page.viewport(null);
+  assert.deepEqual(page.errors, []);
+});

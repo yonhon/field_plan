@@ -341,38 +341,40 @@ label.check {
   box-shadow: var(--shadow);
 }
 
+/* 圃場図の画面。上に警告・今週やること・最近の実績を並べ、その下に図と「配置と面積」を横に並べる。画面は縦に送れるようにする */
 .layout {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 12px;
-  padding: 12px;
-}
-
-/* 図の上に、警告・今週やること・最近の実績を並べるので、図の列は縦に送れるようにする */
-.map-area {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  gap: 12px;
+  padding: 12px;
   overflow-y: auto;
 }
 
 /* 送る列なので、中身は縮めない（縮めると、案内の 2 行目が図に隠れる） */
-.map-area > * {
+.layout > * {
   flex-shrink: 0;
-}
-
-/* 図の下の工程表（すべての区画と畝） */
-#ganttSlotMap {
-  margin-top: 12px;
 }
 
 .map-overview {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-bottom: 12px;
+}
+
+/* 図と、その右の「配置と面積」。高さは、送って図の上を画面の上に合わせたときに、画面の残りに収まる高さ。
+   右の欄は図と同じ高さにし、はみ出す分は欄の中で送る */
+.map-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 12px;
+  height: max(360px, calc(100dvh - 190px));
+}
+
+/* 木の出し入れはスマホだけ */
+.tree-fold-btn {
+  display: none;
 }
 
 .toolbar {
@@ -594,7 +596,8 @@ h3 {
 }
 
 /* プランを読み込んでいるあいだは、図と日程を触れないようにする */
-body.plan-busy .map-area,
+body.plan-busy .map-overview,
+body.plan-busy .map-frame,
 body.plan-busy #scheduleView {
   pointer-events: none;
   opacity: 0.6;
@@ -684,11 +687,11 @@ body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
   font-size: 13px;
 }
 
-/* 図は、送って道具の行を上に合わせたときに、画面の残りに収まる高さにする */
+/* 図の高さは、並べた行（.map-row）で決める */
 .map-frame {
   position: relative;
   flex: none;
-  height: max(360px, calc(100dvh - 190px));
+  height: 100%;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #eef3f1;
@@ -1808,17 +1811,87 @@ body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
   }
 
   .layout {
-    display: flex;
-    flex-direction: column;
+    overflow-y: visible;
+  }
+
+  /* スマホでも図の右に並べる。右の欄は細くして、合計だけを出す。木は図の下に出し、初めはたたむ
+     （たたんでいるあいだも、選んだ図形の内容は出す） */
+  .map-row {
+    grid-template-columns: minmax(0, 1fr) 112px;
+    grid-template-areas:
+      "map sum"
+      "tree tree";
+    gap: 8px;
+    height: auto;
   }
 
   .map-frame {
-    flex: none;
+    grid-area: map;
     height: 62vh;
   }
 
-  .side {
-    overflow: visible;
+  .side,
+  .area-panel {
+    display: contents;
+  }
+
+  .area-sum,
+  .shape-tree {
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .area-sum {
+    grid-area: sum;
+    min-width: 0;
+    max-height: 62vh;
+    overflow-y: auto;
+  }
+
+  .area-sum h2 {
+    font-size: 13px;
+  }
+
+  .area-sum .tree-totals {
+    grid-template-columns: 1fr;
+  }
+
+  .area-sum .tree-totals dd {
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .area-sum .area-part {
+    display: inline-block;
+  }
+
+  /* 図が細いので、表示日・下絵と、図を編集・PDF出力は、収まらなければ次の行へ送る。ボタンの文字は折り返さない */
+  .map-top-row {
+    flex-wrap: wrap;
+  }
+
+  .map-actions .chip-btn {
+    white-space: nowrap;
+  }
+
+  .tree-fold-btn {
+    display: inline-block;
+    padding: 4px 0;
+  }
+
+  .shape-tree {
+    grid-area: tree;
+  }
+
+  .map-row.is-tree-folded .shape-tree > li:not(.tree-detail, .is-selected) {
+    display: none;
+  }
+
+  .map-row.is-tree-folded .shape-tree:not(:has(> li.tree-detail:not([hidden]))) {
+    display: none;
   }
 
   /* 日程の入力欄と、台帳の工程作業日数は、値だけを見せる */
@@ -1909,7 +1982,7 @@ body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
 
 /* 右下のボタンに、最後の欄が隠れないようにする */
 #scheduleView,
-#appView .map-area,
+#appView,
 #appView .side {
   padding-bottom: 84px;
 }

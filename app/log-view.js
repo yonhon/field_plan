@@ -1847,7 +1847,7 @@ export function initLogs(context) {
       openLogEditor(log);
     }
   });
-  // 工程表で行を選んでいれば、その畝（区画）を対象に入れて開く
+  // 圃場図で区画か畝を選んでいれば、その区画（畝の今日の作付）を対象に入れて開く（app.js の mapSelectionPreset）
   $("logAddBtn").addEventListener("click", () => openLogEditor(null, ctx.selectedTarget?.() || {}));
   renderLogs();
 }

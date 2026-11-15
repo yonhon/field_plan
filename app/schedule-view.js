@@ -41,8 +41,10 @@ const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 export const SCOPE_LABELS = { block: "区画の作業（畝立ての前まで）", bed: "畝の作業（畝立てから後）" };
 
 let ctx = null; // { state, setStatus, queueSave, cropColor, plantingOn }
-// いま編集している相手。target は "block"（区画の作業）か、畝の ID
-const sel = { blockId: null, target: "block", plantingId: null };
+// いま編集している相手。target は "block"（区画の作業）か、畝の ID。
+// whole は「全体」（すべての区画）を開いているとき。そのあいだ blockId は null
+const sel = { whole: false, blockId: null, target: "block", plantingId: null };
+const WHOLE = { whole: true, blockId: null, target: "block", plantingId: null };
 // URL の区画で開いたとき、前に開いていたのがその区画の畝なら、その畝に戻す（データを読んでから、keepSelection で）
 let restoreBed = false;
 let problems = []; // 日程の無理。描くたびに求め直す
@@ -53,12 +55,11 @@ export const ARRANGE_MODES = {
 const picked = new Set(); // 工程表で選んでいる作業の ID
 let clipboard = null; // コピーか切り取りをした作業 { works, cut }
 let barDrag = null; // 工程表で帯をドラッグしている途中の状態
-// 工程表で選んでいる行（"block:区画の ID" か "bed:畝の ID"）。貼り付けの入れ先と、「＋ 入力する」の対象になる。
+// 工程表で選んでいる行（"block:区画の ID" か "bed:畝の ID"）。貼り付けの入れ先になる。
 // 日程の画面で開いている区画・畝（sel）とは別に覚える
 let rowSel = null;
 let ganttScrollKey = ""; // 工程表の横の位置を保つための、表示期間とプランと、描く区画
 let ganttScopeKey = null; // 前に描いた工程表の範囲（区画の ID か "all"）。範囲が変わったら、帯の選択を外す
-let ganttFocused = false; // 最後に押したのが工程表の欄か。圃場図の画面で、キーの操作を工程表と図のどちらに渡すかを決める
 let actualDrag = null; // 工程表で実績の帯をドラッグしている途中の状態
 
 const state = () => ctx.state;
@@ -150,12 +151,12 @@ ${error.message}`);
 const savedPlace = () => (state().field && state().plan ? loadPref(state().field.id, "schedulePlace")?.[state().plan.id] || null : null);
 
 function rememberPlace() {
-  if (!state().field || !state().plan || !sel.blockId) {
+  if (!state().field || !state().plan || (!sel.whole && !sel.blockId)) {
     return;
   }
-  const place = { blockId: sel.blockId, target: sel.target, plantingId: sel.plantingId };
+  const place = sel.whole ? { whole: true } : { blockId: sel.blockId, target: sel.target, plantingId: sel.plantingId };
   const saved = savedPlace();
-  if (saved && saved.blockId === place.blockId && saved.target === place.target && saved.plantingId === place.plantingId) {
+  if (saved && Boolean(saved.whole) === Boolean(place.whole) && saved.blockId === place.blockId && saved.target === place.target && saved.plantingId === place.plantingId) {
     return;
   }
   const places = loadPref(state().field.id, "schedulePlace") || {};
@@ -165,18 +166,25 @@ function rememberPlace() {
 function keepSelection() {
   const blocks = state().blocks;
   if (!blocks.length) {
-    Object.assign(sel, { blockId: null, target: "block", plantingId: null });
+    Object.assign(sel, { whole: false, blockId: null, target: "block", plantingId: null });
     return;
   }
   const saved = savedPlace();
-  if (!blocks.some((block) => block.id === sel.blockId)) {
-    // 開いていた区画がこのプランにない（起動したとき、プランを替えたとき）: 前にこのプランで開いていた区画・畝。なければ先頭の区画
+  if (!sel.whole && !blocks.some((block) => block.id === sel.blockId)) {
+    // 開いていた区画がこのプランにない（起動したとき、プランを替えたとき）: 前にこのプランで開いていた全体か区画・畝。なければ先頭の区画
     const known = saved && blocks.some((block) => block.id === saved.blockId);
-    Object.assign(sel, known ? { blockId: saved.blockId, target: saved.target, plantingId: saved.plantingId } : { blockId: blocks[0].id, target: "block", plantingId: null });
+    Object.assign(
+      sel,
+      saved?.whole ? WHOLE : known ? { whole: false, blockId: saved.blockId, target: saved.target, plantingId: saved.plantingId } : { whole: false, blockId: blocks[0].id, target: "block", plantingId: null }
+    );
   } else if (restoreBed && saved?.blockId === sel.blockId) {
     Object.assign(sel, { target: saved.target, plantingId: saved.plantingId });
   }
   restoreBed = false;
+  if (sel.whole) {
+    Object.assign(sel, WHOLE);
+    return;
+  }
   if (sel.target !== "block" && !blockBeds(sel.blockId).some((bed) => bed.id === sel.target)) {
     sel.target = "block";
   }
@@ -190,18 +198,20 @@ function keepSelection() {
   }
 }
 
-// 圃場図で選んだ区画や畝を、日程でも開く。restore: URL の区画で開いたとき（前にその区画の畝を開いていたら、その畝に戻す）
+// 圃場図で選んだ区画や畝を、日程でも開く。kind "all" は全体。restore: URL の区画で開いたとき（前にその区画の畝を開いていたら、その畝に戻す）
 export function openInSchedule(kind, id, { restore = false } = {}) {
   restoreBed = restore;
-  if (kind === "block") {
-    Object.assign(sel, { blockId: id, target: "block", plantingId: null });
+  if (kind === "all") {
+    Object.assign(sel, WHOLE);
+  } else if (kind === "block") {
+    Object.assign(sel, { whole: false, blockId: id, target: "block", plantingId: null });
   } else if (kind === "planting") {
     const planting = state().plantings.find((item) => item.id === id);
     const bed = state().beds.find((item) => item.id === planting.bed_id);
-    Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: id });
+    Object.assign(sel, { whole: false, blockId: bed.block_id, target: bed.id, plantingId: id });
   } else if (kind === "bed") {
     const bed = state().beds.find((item) => item.id === id);
-    Object.assign(sel, { blockId: bed.block_id, target: id, plantingId: null });
+    Object.assign(sel, { whole: false, blockId: bed.block_id, target: id, plantingId: null });
   }
 }
 
@@ -219,9 +229,18 @@ export function renderSchedule() {
   if (!blocks.length) {
     return;
   }
-  renderStrip();
+  // 全体: 工程表（すべての区画）と苗と肥料の集計だけを出す。区画と畝の図と、区画の作業の計画と実績は出さない
+  $("stripPanel").hidden = sel.whole;
+  $("blockRecord").hidden = sel.whole;
+  if (sel.whole) {
+    ctx.renderBlockRecord(null);
+    renderWholeHead();
+    $("blockSummary").hidden = false;
+  } else {
+    renderStrip();
+    ctx.renderBlockRecord(sel.blockId);
+  }
   renderGantt();
-  ctx.renderBlockRecord(sel.blockId);
   renderTypes();
   if (!$("scheduleView").hidden) {
     renderPicker("schedule");
@@ -232,11 +251,22 @@ export function renderSchedule() {
   }
 }
 
-// 日程の画面で開いている区画（「作業を入力する」の窓の、工程の計画の初めの相手に使う）
+// 日程の画面で開いている区画（「作業を入力する」の窓の、工程の計画の初めの相手に使う）。全体では null
 export const currentBlockId = () => sel.blockId;
 
-// 日程の画面の URL。区画を選んでいれば #schedule/block/区画の ID
-export const scheduleHash = () => (sel.blockId ? `#schedule/block/${sel.blockId}` : "#schedule");
+// 日程の画面の URL。全体なら #schedule/all、区画を選んでいれば #schedule/block/区画の ID
+export const scheduleHash = () => (sel.whole ? "#schedule/all" : sel.blockId ? `#schedule/block/${sel.blockId}` : "#schedule");
+
+// 全体の頭。名前と、入力のボタン（相手を決めずに入力の窓を開く）。表示の切り替えは工程表の欄にある
+function renderWholeHead() {
+  draw(
+    $("blockHead"),
+    '<div class="detail-head whole-head"><div class="detail-side is-prev"></div>' +
+      '<div class="detail-center"><div class="detail-title"><h2>全体</h2></div>' +
+      '<div class="detail-actions"><button type="button" class="primary-btn" data-whole="record">＋ 作業を入力</button></div></div>' +
+      '<div class="detail-side is-next"></div></div>'
+  );
+}
 
 // ---- 区画・畝の欄 ----
 
@@ -254,8 +284,8 @@ const bedPlantingNow = (bedId) => {
   return plantingOnDate(plantings, state().works, localToday(), state().logs || []) || plantings.at(-1) || null;
 };
 
-// 区画・畝の欄を描く。日程の画面では選んでいる区画、作付の詳細では開いている作付の畝を選んだ形にする。
-// 確認が必要な点のある区画と畝には ⚠ を付け、その区画（畝）の確認が必要な点を欄の下に並べる
+// 区画・畝の欄を描く。先頭は「全体」（すべての区画）。日程の画面では選んでいる全体か区画、作付の詳細では開いている作付の畝を選んだ形にする。
+// 確認が必要な点のある区画と畝（全体は、どこかにあれば）には ⚠ を付け、その区画（畝）の確認が必要な点を欄の下に並べる
 export function renderPicker(view) {
   if (!ctx) {
     return;
@@ -269,6 +299,7 @@ export function renderPicker(view) {
   const mark = (on) => (on ? " ⚠" : "");
   draw(
     $("schedulePicker"),
+    `<option value="all" class="picker-block">${escapeHtml(`全体${mark(problems.length > 0)}`)}</option>` +
     blocks
       .map((block) => {
         const beds = blockBeds(block.id)
@@ -289,7 +320,7 @@ export function renderPicker(view) {
     const bedId = state().plantings.find((planting) => planting.id === target.id)?.bed_id;
     $("schedulePicker").value = bedId ? `bed:${bedId}` : "";
   } else {
-    $("schedulePicker").value = `block:${sel.blockId}`;
+    $("schedulePicker").value = sel.whole ? "all" : `block:${sel.blockId}`;
   }
 }
 
@@ -312,12 +343,17 @@ export function openProblemTarget(kind, id) {
   openProcessPlan(kind, id);
 }
 
-// 区画・畝の欄で選んだとき。区画なら日程の画面でその区画を、畝ならその畝の作付の詳細を開く。
+// 区画・畝の欄で選んだとき。全体と区画なら日程の画面でそれを、畝ならその畝の作付の詳細を開く。
 // 作付のない畝は、日程の画面でその区画を開き、窓の工程の計画をその畝で開く（作付を足せる）
 function onPick(value) {
+  if (value === "all") {
+    Object.assign(sel, WHOLE);
+    ctx.showView("schedule");
+    return;
+  }
   const [kind, id] = value.split(":");
   if (kind === "block") {
-    Object.assign(sel, { blockId: id, target: "block", plantingId: null });
+    Object.assign(sel, { whole: false, blockId: id, target: "block", plantingId: null });
     ctx.showView("schedule");
     return;
   }
@@ -328,11 +364,11 @@ function onPick(value) {
   const planting = bedPlantingNow(id);
   if (planting) {
     // 日程の画面に戻ったときも、この畝の区画を開く
-    Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: planting.id });
+    Object.assign(sel, { whole: false, blockId: bed.block_id, target: bed.id, plantingId: planting.id });
     rememberPlace();
     ctx.openDetail("planting", planting.id);
   } else {
-    Object.assign(sel, { blockId: bed.block_id, target: bed.id, plantingId: null });
+    Object.assign(sel, { whole: false, blockId: bed.block_id, target: bed.id, plantingId: null });
     ctx.showView("schedule");
     openLogEditor(null, { tab: "process", bedId: bed.id });
   }
@@ -568,22 +604,12 @@ export const blockTarget = (blockId) => (target) => isBlockTarget(target) && tar
 // その畝（の作付）の記録か
 export const bedTarget = (bed, plantingIds) => (target) => target.bed_id === bed.id || plantingIds.includes(target.planting_id);
 
-// 工程表の欄は 1 つで、開いた画面へ移す。圃場図ではすべての区画と畝、日程の画面では選んだ区画だけを描く
-const ganttOnMap = () => $("ganttPanel").parentElement.id === "ganttSlotMap";
+// 工程表は日程の画面にある。全体ではすべての区画と畝、区画を選んだときはその区画だけを描く
 const ganttShown = () => $("ganttPanel").offsetParent !== null;
 // 工程表に描く区画。null はすべての区画
-const ganttBlockId = () => (ganttOnMap() ? null : sel.blockId);
-
-// 工程表の欄を、圃場図（"map"）か日程（"schedule"）へ移す。描くのは renderSchedule
-export function placeGantt(view) {
-  const slot = $(view === "map" ? "ganttSlotMap" : "ganttSlotSchedule");
-  if ($("ganttPanel").parentElement !== slot) {
-    slot.append($("ganttPanel"));
-  }
-}
-
-// 圃場図の画面で、キーの操作（Delete など）を工程表に渡すか。最後に工程表の欄を押したときだけ渡す
-export const ganttHasFocus = () => ganttFocused && ganttShown();
+const ganttBlockId = () => (sel.whole ? null : sel.blockId);
+// このキーを工程表の操作（削除、切り取り、貼り付けなど）で受けるか。保存の待ちのあいだに止めるか（app.js）にも使う
+export const ganttTakesKey = (event) => ganttShown() && canEdit() && !["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName);
 
 // fit を渡すと（PDF 出力）、表示期間を「全体」にして、その幅（px）に収める
 function renderGantt(fit = null) {
@@ -804,9 +830,11 @@ function printGantt() {
   });
 }
 
-// 選んでいる区画の、品目ごとの苗数と、肥料ごとの量。区画の頭の面積・畝・苗の行を押すと開く（planting-view.js）
+// 選んでいる区画（全体ならすべての区画）の、品目ごとの苗数と、肥料ごとの量。区画の頭の面積・畝・苗の行を押すと開く（planting-view.js）。
+// 全体ではいつも出す
 function renderSummary() {
-  const summary = summarize({ ...state(), beds: blockBeds(sel.blockId), logs: state().logs || [] });
+  $("summaryTitle").textContent = sel.whole ? "苗と肥料の集計（全体）" : "苗と肥料の集計（この区画）";
+  const summary = summarize({ ...state(), beds: sel.whole ? state().beds : blockBeds(sel.blockId), logs: state().logs || [] });
   const number = (value, digits = 0) => value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   draw(
     $("cropSummary"),
@@ -937,24 +965,11 @@ function renderPickTools() {
   $("pastePickedBtn").title = rowSel ? "工程表で選んだ行に貼り付けます" : "先に、貼り付ける行を工程表で選んでください";
 }
 
-// 工程表の行を選ぶ（貼り付けの入れ先、「＋ 入力する」の対象）
+// 工程表の行を選ぶ（貼り付けの入れ先）
 function selectRow(row) {
   rowSel = rowKey(row);
   $("gantt").querySelectorAll(".gantt-row").forEach((item) => item.classList.toggle("is-selected", rowKey(item) === rowSel));
   renderPickTools();
-}
-
-// 「＋ 入力する」で、工程表で選んだ行を対象に入れて開くための値。畝なら今日その畝にある作付、区画なら区画
-export function selectedRowPreset() {
-  if (!rowSel || !ganttShown() || !isActivePlan()) {
-    return {};
-  }
-  const [kind, id] = rowSel.split(":");
-  if (kind === "block") {
-    return { blockId: id };
-  }
-  const planting = plantingOnDate(bedPlantings(id), state().works, localToday(), state().logs || []);
-  return planting ? { plantingId: planting.id } : {};
 }
 
 function showPicked() {
@@ -1362,12 +1377,8 @@ function initGanttEditing() {
   $("cutPickedBtn").addEventListener("click", () => copyPicked(true));
   $("pastePickedBtn").addEventListener("click", pastePicked);
   $("deletePickedBtn").addEventListener("click", deletePicked);
-  // 最後に押した所が工程表の欄か。圃場図の画面では、そのときだけキーを工程表で受ける（図の操作と取り合わない）
-  document.addEventListener("pointerdown", (event) => {
-    ganttFocused = Boolean(event.target.closest?.("#ganttPanel"));
-  }, true);
   document.addEventListener("keydown", (event) => {
-    if (!ganttShown() || (ganttOnMap() && !ganttFocused) || !canEdit() || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
+    if (!ganttTakesKey(event)) {
       return;
     }
     const command = event.ctrlKey || event.metaKey;
@@ -1435,6 +1446,12 @@ export function initSchedule(context) {
   });
 
   $("schedulePicker").addEventListener("change", (event) => onPick(event.target.value));
+  // 全体の頭の「＋ 作業を入力」: 相手を決めずに入力の窓を開く
+  $("blockHead").addEventListener("click", (event) => {
+    if (event.target.closest('[data-whole="record"]')) {
+      openLogEditor(null, {});
+    }
+  });
   initGanttEditing();
   $("weekList").addEventListener("click", onWeekClick);
   // 遅れている作業・今週やること・最近の実績のタブ

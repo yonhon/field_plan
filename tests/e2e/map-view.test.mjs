@@ -177,8 +177,8 @@ async function touch(fingers) {
 test("ふだんの図: ホイールだけでは拡大・縮小せず、説明を出す。Ctrl + ホイールと ＋・− では拡大・縮小する", options, async () => {
   await page.viewport(1280, 600); // ページがスクロールできる高さ
   await openMap();
-  // PC の幅では、左の欄（.map-area）がスクロールする
-  const scrollTop = () => page.run(`scrollY + document.querySelector(".map-area").scrollTop`);
+  // PC の幅では、圃場図の画面（#appView）がスクロールする
+  const scrollTop = () => page.run(`scrollY + document.getElementById("appView").scrollTop`);
   const width = await viewWidth();
   const scrolled = await scrollTop();
   await wheel();

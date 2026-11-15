@@ -82,7 +82,7 @@ test("圃場の設定: 回転は書きかけで、元に戻す・やり直すで
   await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる");
   assert.equal(await savedRotation(), 10);
   assert.equal(await page.run(`document.getElementById("rotation").value`), "10", "画面の値も戻る");
-  assert.ok(await page.run(`Boolean(document.querySelector("#appView .map-area .map-frame"))`), "図が圃場図に戻る");
+  assert.ok(await page.run(`Boolean(document.querySelector("#appView .map-row > .map-frame"))`), "図が圃場図に戻る");
   assert.deepEqual(page.errors, []);
 });
 

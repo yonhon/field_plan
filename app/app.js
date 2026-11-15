@@ -45,6 +45,7 @@ import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog
 import { initHistory, resetHistory } from "./history.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
+import { plantingOnDate } from "./logs.js";
 import { initProcessEditor } from "./process-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
@@ -52,7 +53,7 @@ import { initNews } from "./news-view.js";
 import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
-import { currentBlockId, ganttHasFocus, initSchedule, openInSchedule, openProcessPlan, placeGantt, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash, selectedRowPreset } from "./schedule-view.js";
+import { currentBlockId, ganttTakesKey, initSchedule, openInSchedule, openProcessPlan, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash } from "./schedule-view.js";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
@@ -946,11 +947,16 @@ function renderPanel() {
   const tillable = state.zones.filter((zone) => zone.kind === "tillable");
   const blocks = visibleBlocks();
   const beds = visibleBeds();
-  // 配置と面積の木の上の合計。物置などの区域と、どの区域でもない部分は、木の行で 1 件ずつ見る
-  $("areaField").textContent = fieldArea ? formatArea(fieldArea) : "-";
-  $("areaTillable").textContent = tillable.length ? formatArea(sumArea(tillable)) : "-";
-  $("areaBlocks").textContent = blocks.length ? formatArea(sumArea(blocks)) : "-";
-  $("areaBeds").textContent = beds.length ? `${formatArea(sumArea(beds))} / ${beds.length} 本` : "-";
+  // 配置と面積の木の上の合計。物置などの区域と、どの区域でもない部分は、木の行で 1 件ずつ見る。
+  // 坪の括弧と本数は、それぞれ 1 つのまとまりにする（スマホの細い欄では、まとまりごとに次の行へ送る）
+  const totalHtml = (sqm, extra = "") => {
+    const [main, tsubo] = formatArea(sqm).split("（");
+    return `${escapeHtml(main)}<span class="area-part">（${escapeHtml(tsubo)}</span>${extra ? `<span class="area-part">${escapeHtml(extra)}</span>` : ""}`;
+  };
+  draw($("areaField"), fieldArea ? totalHtml(fieldArea) : "-");
+  draw($("areaTillable"), tillable.length ? totalHtml(sumArea(tillable)) : "-");
+  draw($("areaBlocks"), blocks.length ? totalHtml(sumArea(blocks)) : "-");
+  draw($("areaBeds"), beds.length ? totalHtml(sumArea(beds), ` / ${beds.length} 本`) : "-");
 
   const outside = findOutside();
   renderWarnings(outside);
@@ -3115,7 +3121,7 @@ document.addEventListener(
     const text = state.mapEditing ? EDIT_GUARD_TEXT : state.scheduleSaving ? SAVE_GUARD_TEXT : null;
     // 保存の待ちのあいだは、切り取りは止めない（保存しない）。削除と貼り付けを止める
     const keys = state.mapEditing ? ["x", "v"] : ["v"];
-    if (text && ganttHasFocus() && (event.key === "Delete" || event.key === "Backspace" || (ctrl && keys.includes(event.key.toLowerCase())))) {
+    if (text && ganttTakesKey(event) && (event.key === "Delete" || event.key === "Backspace" || (ctrl && keys.includes(event.key.toLowerCase())))) {
       event.preventDefault();
       event.stopPropagation();
       tellGuard(text);
@@ -3484,8 +3490,7 @@ window.addEventListener("resize", renderMap);
 const ARROWS = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
 
 document.addEventListener("keydown", (event) => {
-  // 最後に工程表の欄を押したときは、キーは工程表の操作（schedule-view.js）に渡す
-  if (!state.field || $("appView").hidden || ganttHasFocus() || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
+  if (!state.field || $("appView").hidden || ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) {
     return;
   }
   if (event.key === "Escape") {
@@ -3537,6 +3542,24 @@ $("fitBtn").addEventListener("click", () => {
 $("fitShapesBtn").addEventListener("click", fitShapesToBackdrop);
 $("deleteVertexBtn").addEventListener("click", deleteSelectedVertex);
 $("deleteShapeBtn").addEventListener("click", deleteSelectedShape);
+// 圃場図の右下の「＋ 入力する」で、圃場図で選んだ区画・畝を対象に入れて開くための値。
+// 区画ならその区画、畝なら今日その畝にある作付。ほかの図形を選んでいるとき、何も選んでいないとき、
+// 実際に使うプランでないとき（記録はそのプランにしかつけない）は、何も入れない
+function mapSelectionPreset() {
+  if (!state.selected || isOutline(state.selected) || state.field?.active_plan_id !== state.plan?.id) {
+    return {};
+  }
+  const found = findShape(state.selected);
+  if (found?.kind === "block") {
+    return { blockId: found.item.id };
+  }
+  if (found?.kind === "bed") {
+    const planting = plantingOnDate(bedPlantings(found.item), state.works, localToday(), state.logs || []);
+    return planting ? { plantingId: planting.id } : {};
+  }
+  return {};
+}
+
 $("openScheduleBtn").addEventListener("click", () => {
   const { kind, item } = findShape(state.selected);
   const planting = kind === "bed" ? plantingOn(item) : null;
@@ -3604,6 +3627,14 @@ $("warnings").addEventListener("click", (event) => {
     // 警告の欄は図の上にあるので、選んだ図形が見えるよう、図まで送る
     document.querySelector(".map-frame").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
+});
+// スマホの「一覧」: 配置と面積の木を、図の下に出し入れする（たたんでいるあいだも、選んだ図形の行と内容は出す）
+let treeOpen = false;
+$("treeFoldBtn").addEventListener("click", () => {
+  treeOpen = !treeOpen;
+  $("mapRow").classList.toggle("is-tree-folded", !treeOpen);
+  $("treeFoldBtn").setAttribute("aria-expanded", String(treeOpen));
+  $("treeFoldBtn").textContent = treeOpen ? "一覧 ▾" : "一覧 ▸";
 });
 // 木の行を押すと選んで内容を開き、選んでいる行をもう一度押すと閉じる。▸ は畝の行の出し入れ
 $("shapeTree").addEventListener("click", (event) => {
@@ -3871,7 +3902,7 @@ $("fieldSettings").addEventListener("click", (event) => {
 // 作付の詳細（planting）は、日程のタブの中の画面として扱う
 // 画面の URL。#map、#schedule、#diary、#journal、作付の詳細は #detail/planting/作付の ID。
 // 台帳は、開いているサブタブを付けて #master/サブタブ（crops、work-days、fertilizers）。前の品目の画面の URL（#crops）は、台帳の品目を開く。
-// 日程の画面は、開いている区画を付けて #schedule/block/区画の ID にする。
+// 日程の画面は、開いている区画を付けて #schedule/block/区画の ID、全体なら #schedule/all にする。
 // 前にあった区画の詳細（#detail/block/区画の ID）は、日程の画面でその区画を開く
 // 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）
 const VIEW_NAMES = ["map", "schedule", "master", "diary", "journal"];
@@ -3885,6 +3916,9 @@ function routeFromHash() {
   const block = /^schedule\/block\/([\w-]+)$/.exec(hash);
   if (block) {
     return { view: "schedule", block: block[1] };
+  }
+  if (hash === "schedule/all") {
+    return { view: "schedule", whole: true };
   }
   const master = /^master\/([\w-]+)$/.exec(hash);
   if (master && MASTER_TABS.includes(master[1])) {
@@ -3912,6 +3946,8 @@ function openRoute(route, mode) {
     openPlantingDetail(route.kind, route.id);
   } else if (route.block) {
     openInSchedule("block", route.block, { restore: true });
+  } else if (route.whole) {
+    openInSchedule("all");
   } else if (route.tab) {
     setMasterTab(route.tab);
   }
@@ -3937,17 +3973,13 @@ function showView(view, { history: mode = "push" } = {}) {
   $("journalView").hidden = view !== "journal";
   // 右下の「＋ 入力する」は圃場図だけ（日程の画面と作付の詳細では、頭の「＋ 作業を入力」を使う）
   $("logAddBtn").hidden = view !== "map";
-  // 工程表の欄は 1 つで、圃場図と日程の画面のうち、開いた方へ移す（描くのは renderSchedule）
-  if (view === "map" || view === "schedule") {
-    placeGantt(view);
-  }
   // 区画・畝の欄は、日程の画面と作付の詳細の上に出す
   if (view === "schedule" || view === "planting") {
     placePicker(view);
   }
   if (view === "map") {
     render();
-    renderSchedule(); // 今週やること、警告、工程表（すべての区画）
+    renderSchedule(); // 今週やること、警告
     renderLogs();
     renderWeatherSettings();
   } else if (view === "schedule") {
@@ -4183,7 +4215,7 @@ async function startApp(user = "local") {
     renderPlantingDetail();
     refreshDiaryWorks();
   };
-  initLogs({ state, activePlanData, setStatus, onLogsChanged: refreshRecords, selectedTarget: selectedRowPreset });
+  initLogs({ state, activePlanData, setStatus, onLogsChanged: refreshRecords, selectedTarget: mapSelectionPreset });
   initProcessEditor({ state, setStatus, refresh: refreshRecords, currentBlockId });
   initPlantingView({
     state,
