@@ -917,6 +917,8 @@ alter table field.owners enable row level security;
 alter table field.mcp_access_log enable row level security;
 alter table field.audit_log enable row level security;
 
+-- 方針の条件の関数は (select …) で囲む。囲まないと、読む行ごとに関数を呼ぶ。囲むと、問い合わせ 1 回につき 1 度だけ評価する
+-- （2026-11-15 の測定で、起動の読み込み field.load_field の DB の中の時間が 24 ms から 11 ms に、作業 450 行の読み込みが 6.7 ms から 0.4 ms になった）
 do $$
 declare
   t text;
@@ -930,7 +932,7 @@ begin
     execute format('drop policy if exists owner_all on field.%I', t);
     execute format(
       'create policy owner_all on field.%I for all to authenticated '
-      'using (field.is_owner()) with check (field.is_owner())', t);
+      'using ((select field.is_owner())) with check ((select field.is_owner()))', t);
   end loop;
 end $$;
 
@@ -942,7 +944,7 @@ begin
   foreach t in array array['famic_imports', 'famic_products', 'famic_uses', 'rac_imports', 'rac_codes', 'app_compat'] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists owner_read on field.%I', t);
-    execute format('create policy owner_read on field.%I for select to authenticated using (field.is_owner())', t);
+    execute format('create policy owner_read on field.%I for select to authenticated using ((select field.is_owner()))', t);
     execute format('revoke insert, update, delete on field.%I from authenticated', t);
   end loop;
 end $$;
@@ -950,9 +952,9 @@ end $$;
 -- 取り込み係の許可。FAMIC は、版を読むことと、途中の表に入れることだけ（本番の表は field.famic_finish() が入れ替える）。
 -- 気象の値は読み書きできる
 drop policy if exists importer_read on field.famic_imports;
-create policy importer_read on field.famic_imports for select to authenticated using (field.is_importer());
+create policy importer_read on field.famic_imports for select to authenticated using ((select field.is_importer()));
 drop policy if exists importer_read on field.rac_imports;
-create policy importer_read on field.rac_imports for select to authenticated using (field.is_importer());
+create policy importer_read on field.rac_imports for select to authenticated using ((select field.is_importer()));
 
 do $$
 declare
@@ -961,20 +963,20 @@ begin
   foreach t in array array['famic_products_next', 'famic_uses_next'] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists importer_insert on field.%I', t);
-    execute format('create policy importer_insert on field.%I for insert to authenticated with check (field.is_importer())', t);
+    execute format('create policy importer_insert on field.%I for insert to authenticated with check ((select field.is_importer()))', t);
     execute format('revoke select, update, delete on field.%I from authenticated', t);
   end loop;
 end $$;
 
 drop policy if exists importer_all on field.weather_daily;
 create policy importer_all on field.weather_daily for all to authenticated
-  using (field.is_importer()) with check (field.is_importer());
+  using ((select field.is_importer())) with check ((select field.is_importer()));
 
 -- ニュースは、読むことと足すことだけ（確認した印は変えない）
 drop policy if exists importer_read on field.news;
-create policy importer_read on field.news for select to authenticated using (field.is_importer());
+create policy importer_read on field.news for select to authenticated using ((select field.is_importer()));
 drop policy if exists importer_insert on field.news;
-create policy importer_insert on field.news for insert to authenticated with check (field.is_importer());
+create policy importer_insert on field.news for insert to authenticated with check ((select field.is_importer()));
 
 -- 下絵の画像の置き場。地番や氏名が写っていることがあるので、非公開にする
 insert into storage.buckets (id, name, public) values ('field-plan', 'field-plan', false)
@@ -982,11 +984,11 @@ on conflict (id) do nothing;
 
 drop policy if exists field_plan_owner_all on storage.objects;
 create policy field_plan_owner_all on storage.objects for all to authenticated
-  using (bucket_id = 'field-plan' and field.is_owner())
-  with check (bucket_id = 'field-plan' and field.is_owner());
+  using (bucket_id = 'field-plan' and (select field.is_owner()))
+  with check (bucket_id = 'field-plan' and (select field.is_owner()));
 
 -- 確かめ。RLS のない表と、方針の一覧に足し忘れた表（RLS はあるが方針がない表）、
--- 操作の記録（audit_log）の対象かを決めていない表があれば、失敗させる。
+-- 操作の記録（audit_log）の対象かを決めていない表、行ごとに持ち主かを確かめる方針があれば、失敗させる。
 -- 方針がなくてよいのは、画面から読み書きしない 4 つの表だけ
 do $$
 declare
@@ -1023,5 +1025,13 @@ begin
     and not exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'write_audit_log');
   if missing is not null then
     raise exception '操作の記録（audit_log）のトリガーのない表があります。トリガーの一覧か、対象にしない表の一覧に足してください: %', missing;
+  end if;
+  -- 方針の条件で、持ち主・取り込み係かを確かめる関数を、(select …) で囲まずに呼んでいる方針（読む行ごとに関数を呼ぶ）
+  select string_agg(p.schemaname || '.' || p.tablename || ' の ' || p.policyname, ', ' order by p.schemaname, p.tablename, p.policyname) into missing
+  from pg_policies p
+  where p.schemaname in ('field', 'storage')
+    and regexp_replace(coalesce(p.qual, '') || ' ' || coalesce(p.with_check, ''), 'SELECT field\.is_(owner|importer)\(\)', '', 'g') ~ 'field\.is_(owner|importer)\(\)';
+  if missing is not null then
+    raise exception '方針の条件の field.is_owner() / field.is_importer() は (select …) で囲んでください（囲まないと行ごとに呼ぶ）: %', missing;
   end if;
 end $$;

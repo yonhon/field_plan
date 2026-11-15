@@ -406,5 +406,5 @@ grant execute on function field.diary_add_photo(text, date, timestamp, text, int
 -- 日記の写真の置き場。非公開のまま、本人だけが上げて読めるようにする（公開キーでは一覧も取り出しもできない）
 drop policy if exists diary_photos_owner_all on storage.objects;
 create policy diary_photos_owner_all on storage.objects for all to authenticated
-  using (bucket_id = 'diary-photos' and field.is_owner())
-  with check (bucket_id = 'diary-photos' and field.is_owner());
+  using (bucket_id = 'diary-photos' and (select field.is_owner()))
+  with check (bucket_id = 'diary-photos' and (select field.is_owner()));
