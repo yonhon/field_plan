@@ -19,7 +19,7 @@ import {
   worksRange,
 } from "./schedule.js";
 import { summarize } from "./crops.js";
-import { confirmDelete, notify, notifySaveFailed } from "./dialog.js";
+import { confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor } from "./log-view.js";
 import { isBlockTarget, lateWorks, layoutBars, logEnd, plantingOnDate, withActualDates, workActuals, workStatus } from "./logs.js";
@@ -113,16 +113,35 @@ function placeOf(work) {
   return bed ? `${block?.name || ""} 畝${bed.seq}${planting.crop_name ? `（${planting.crop_name}）` : ""}` : "";
 }
 
+// 日程の操作を描いて、保存する。action は、state を変えてから保存を送り、送った保存を待つ関数。
+// state は、action の中で最初に何かを待つより前に変え終える（action を呼んだすぐあとに描くので、待ったあとに変えた分は描かれない）。
+// 保存の返事を待つあいだは、工程表などの書き換えの操作を止める（state().scheduleSaving。止めるのは app.js の SAVE_GUARDED）。
+// 前の変更が保存できなかったのに、その上で次の変更をしてしまわないように。
+// 成功したら描き直さない（画面はもう変えたあとの内容）。失敗したら、DB から読み直して、画面を保存されている内容に戻す
+let saving = 0;
+
+function setSaving(change) {
+  saving += change;
+  state().scheduleSaving = saving > 0;
+  document.body.classList.toggle("schedule-saving", saving > 0);
+}
+
 async function run(action) {
   ctx.setStatus("保存中…");
+  setSaving(1);
   try {
-    await action();
+    const pending = action();
+    renderSchedule();
+    await pending;
     ctx.setStatus("保存しました");
   } catch (error) {
     ctx.setStatus(`保存に失敗しました: ${error.message}`);
-    notifySaveFailed(error);
+    notify(`保存できませんでした。画面を、保存されている内容に戻します。
+${error.message}`);
+    await ctx.restoreFromDb();
+  } finally {
+    setSaving(-1);
   }
-  renderSchedule();
 }
 
 // ---- 描画 ----
@@ -857,8 +876,8 @@ async function replaceWorks(owner, works) {
     work.seq = index + 1;
   });
   state().works = [...state().works.filter((work) => !replaced(work)), ...works];
-  await store().remove("works", old.filter((work) => !kept.has(work.id)).map((work) => work.id));
-  await store().upsert("works", works);
+  // 消す書き込みと入れる書き込みを続けて送る（呼んだ順に届く）。返事はまとめて待つ
+  await Promise.all([store().remove("works", old.filter((work) => !kept.has(work.id)).map((work) => work.id)), store().upsert("works", works)]);
 }
 
 // 作付のひな形の作業（日付なし）。品目を登録してあれば、マルチを張るかどうかでひな形を選ぶ。
@@ -953,7 +972,8 @@ function sortOwner(owner) {
   return works;
 }
 
-async function newPlanting(bedId, cropName, cropId = null) {
+// 作付を作る。state に足してから保存を送り、送った保存を saved で返す（待つのは呼んだ側。描くのを保存の返事まで遅らせない）
+function newPlanting(bedId, cropName, cropId = null) {
   const planting = {
     id: crypto.randomUUID(),
     plan_id: state().plan.id,
@@ -963,27 +983,28 @@ async function newPlanting(bedId, cropName, cropId = null) {
     crop_name: cropName || "",
     note: "",
   };
-  await store().upsert("plantings", [planting]);
   state().plantings.push(planting);
-  return planting;
+  return { planting, saved: store().upsert("plantings", [planting]) };
 }
 
 // 工程表の行に作業を入れるときの入れ先。畝の行なら、その日が入る作付、
 // なければその日より前に始まる最後の作付、それもなければ最初の作付。作付がなければ作る。
-// source は、作業の元の作付。新しく作る作付は、その品目を引き継ぐ
-async function ownerForRow(row, date, source) {
+// source は、作業の元の作付。新しく作る作付は、その品目を引き継ぐ。
+// 返すのは { owner, saved }。saved は、作付を作ったときのその保存（作らなければ null）
+function ownerForRow(row, date, source) {
   if (row.dataset.block) {
-    return { block_id: row.dataset.block };
+    return { owner: { block_id: row.dataset.block }, saved: null };
   }
   const plantings = bedPlantings(row.dataset.bed).map((planting) => ({ planting, range: worksRange(plantingWorks(planting.id)) }));
   if (!plantings.length) {
-    return { planting_id: (await newPlanting(row.dataset.bed, source?.crop_name, source?.crop_id || null)).id };
+    const { planting, saved } = newPlanting(row.dataset.bed, source?.crop_name, source?.crop_id || null);
+    return { owner: { planting_id: planting.id }, saved };
   }
   const hit =
     plantings.find(({ range }) => range && date && range.start <= date && date <= range.end) ||
     plantings.filter(({ range }) => range && date && range.start <= date).at(-1) ||
     plantings[0];
-  return { planting_id: hit.planting.id };
+  return { owner: { planting_id: hit.planting.id }, saved: null };
 }
 
 async function shiftWorks(works, days) {
@@ -1018,9 +1039,9 @@ async function transferWorks(works, owner, days, copy) {
   for (const each of [...sources.values(), owner]) {
     sortOwner(each).forEach((work) => changed.add(work));
   }
-  await store().upsert("works", [...changed]);
   picked.clear();
   placed.forEach((work) => picked.add(work.id));
+  await store().upsert("works", [...changed]);
 }
 
 async function deletePicked() {
@@ -1033,12 +1054,11 @@ async function deletePicked() {
     record({ kind: "work.delete", text: `${ownerName(ownerOf(works[0]))}の作業 ${works.length} 件（${works.map((work) => typeLabel(work.work_type)).join("、")}）を削除` });
     state().works = state().works.filter((work) => !ids.has(work.id));
     picked.clear();
-    await store().remove("works", [...ids]);
     const changed = new Set();
     for (const owner of new Map(works.map((work) => [ownerKey(ownerOf(work)), ownerOf(work)])).values()) {
       sortOwner(owner).forEach((work) => changed.add(work));
     }
-    await store().upsert("works", [...changed]);
+    await Promise.all([store().remove("works", [...ids]), store().upsert("works", [...changed])]);
   });
 }
 
@@ -1066,17 +1086,18 @@ function pastePicked() {
   run(async () => {
     const first = works.map((work) => work.plan_start).filter(Boolean).sort()[0] || null;
     const source = state().plantings.find((planting) => planting.id === works[0].planting_id);
-    const owner = await ownerForRow({ dataset: kind === "block" ? { block: id } : { bed: id } }, first, source);
+    const { owner, saved } = ownerForRow({ dataset: kind === "block" ? { block: id } : { bed: id } }, first, source);
     if (cut) {
       // 切り取ったあとで消された作業は、もう移せない
       const originals = state().works.filter((work) => works.some((item) => item.id === work.id));
       if (originals.length) {
         record({ kind: "work.transfer", text: `${ownerName(ownerOf(originals[0]))}の作業 ${originals.length} 件を、切り取って貼り付けで移動` });
       }
-      await transferWorks(originals, owner, 0, false);
+      const moved = transferWorks(originals, owner, 0, false);
       clipboard = null;
+      await Promise.all([saved, moved]);
     } else {
-      await transferWorks(works, owner, 0, true);
+      await Promise.all([saved, transferWorks(works, owner, 0, true)]);
       record({ kind: "work.transfer", text: `作業 ${works.length} 件（${works.map((work) => typeLabel(work.work_type)).join("、")}）を、${ownerName(owner)}へコピーして貼り付け` });
     }
   });
@@ -1205,8 +1226,8 @@ function initGanttEditing() {
         const source = state().plantings.find((planting) => planting.id === works[0].planting_id);
         const from = ownerName(ownerOf(works[0]));
         const names = works.map((work) => typeLabel(work.work_type)).join("、");
-        const owner = await ownerForRow(target, first, source);
-        await transferWorks(works, owner, drag.days, event.ctrlKey);
+        const { owner, saved } = ownerForRow(target, first, source);
+        await Promise.all([saved, transferWorks(works, owner, drag.days, event.ctrlKey)]);
         record({ kind: "work.transfer", text: `${from}の作業 ${works.length} 件（${names}）を、${ownerName(owner)}へ${event.ctrlKey ? "コピー" : "移動"}` });
       });
     } else if (drag.days) {
@@ -1375,9 +1396,12 @@ export function initSchedule(context) {
       const crop = state().crops.find((item) => item.id === cropId);
       if (crop && beds.length) {
         run(async () => {
-          for (const bed of beds) {
-            await fillPlanting(await newPlanting(bed.id, crop.name, crop.id));
-          }
+          // すべての畝の作付と作業を先に作り、保存はまとめて待つ（書き込みは呼んだ順に 1 つずつ届くので、作付が作業より先に入る）
+          const saves = beds.flatMap((bed) => {
+            const { planting, saved } = newPlanting(bed.id, crop.name, crop.id);
+            return [saved, fillPlanting(planting)];
+          });
+          await Promise.all(saves);
           const block = state().blocks.find((item) => item.id === beds[0].block_id);
           record({
             kind: "planting.add",

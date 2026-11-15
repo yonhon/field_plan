@@ -593,6 +593,11 @@ body.plan-busy #scheduleView {
   opacity: 0.6;
 }
 
+/* 日程の操作の保存の返事を待つあいだ。帯の操作は止めている（app.js の SAVE_GUARDED） */
+body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
+  cursor: progress;
+}
+
 .work-section {
   padding: 8px 0 10px;
   border-top: 1px solid var(--line);

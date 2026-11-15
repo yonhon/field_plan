@@ -534,7 +534,7 @@ export function createLocalStore({ strict = false } = {}) {
     }
   };
 
-  return {
+  return withTestControl({
     async loadFields() {
       return read().fields || [];
     },
@@ -972,5 +972,34 @@ export function createLocalStore({ strict = false } = {}) {
       const files = read().diary?.files || {};
       return Object.fromEntries(paths.filter((path) => files[path]).map((path) => [path, files[path]]));
     },
+  });
+}
+
+// 通しテストで、ローカルの保存の書き込みを遅らせたり、失敗させたりする（回線の遅さや、保存の失敗を確かめる）。
+// ブラウザーの保存の LOCAL_TEST_KEY に { "delay": ミリ秒, "fail": true } を入れる。書き込みのたびに読むので、起動のあとで切り替えられる
+const LOCAL_TEST_KEY = "field_plan_local_test";
+
+function withTestControl(store) {
+  const control = () => {
+    try {
+      return JSON.parse(localStorage.getItem(LOCAL_TEST_KEY) || "{}");
+    } catch {
+      return {};
+    }
   };
+  // 元の書き込みを先に取っておく（下で、同じ名前を包んだものに置き換える。famic の getter はそのまま残す）
+  const writes = QUEUED_WRITES.filter((name) => store[name]).map((name) => [name, store[name]]).map(([name, write]) => [
+    name,
+    async (...args) => {
+      const { delay = 0, fail = false } = control();
+      if (delay) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      if (fail) {
+        throw new Error("試験のための保存の失敗");
+      }
+      return write(...args);
+    },
+  ]);
+  return Object.defineProperties(store, Object.fromEntries(writes.map(([name, wrapped]) => [name, { value: wrapped, enumerable: true }])));
 }

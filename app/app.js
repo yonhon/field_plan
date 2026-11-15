@@ -108,6 +108,7 @@ const state = {
   store: null,
   mapEditing: false, // 図の編集中（「図を編集」を押してから「完了」まで）。ふだんの図は、選ぶ・見るだけ
   planBusy: false, // プランの作成・切り替えなどの途中
+  scheduleSaving: false, // 日程の操作（工程表の帯を動かすなど）の保存の返事を待っているあいだ（schedule-view.js の run）
   client: null,
   fields: [],
   field: null,
@@ -1331,6 +1332,7 @@ function midEdit() {
     state.planBusy ||
       settings.open ||
       state.mapEditing ||
+      state.scheduleSaving ||
       mapDraft.ops.length ||
       pendingSaves.size ||
       state.store.writing() ||
@@ -3006,16 +3008,55 @@ const EDIT_GUARDED = [
 const EDIT_GUARD_FREE = "#strip [data-open], #strip [data-planting]"; // 畝の図の中でも、作付の詳細を開くのは止めない
 const EDIT_GUARD_TEXT = "図の編集中です。圃場図の上の帯の「保存する」か「閉じる」で、編集を終えてから操作してください。";
 
-const guarded = (target) => state.mapEditing && target instanceof Element && Boolean(target.closest(EDIT_GUARDED)) && !target.closest(EDIT_GUARD_FREE);
+// 日程の操作の保存の返事を待つあいだに止める、書き換えの操作。前の変更が保存できなかったのに、その上で次の変更をしないように。
+// 見る操作（スクロール、作付の詳細を開く）と、保存しない操作（帯のコピー・切り取り）は止めない
+const SAVE_GUARDED = [
+  "#gantt .gantt-bar",
+  "#gantt .gantt-actual-bar",
+  "#pastePickedBtn",
+  "#deletePickedBtn",
+  "#strip",
+  ".strip-tools",
+  "#typeRows :is(input, select, textarea, button)",
+].join(", ");
+const SAVE_GUARD_TEXT = "日程の変更を保存しています。保存が終わってから操作してください。";
 
-// 押し始め（ドラッグの始まり、入力欄に入る、選ぶ欄が開く）は黙って止め、クリックで知らせる
+// 止める操作なら、知らせる文を返す。止めないなら null
+function guardText(target) {
+  if (!(target instanceof Element) || target.closest(EDIT_GUARD_FREE)) {
+    return null;
+  }
+  if (state.mapEditing && target.closest(EDIT_GUARDED)) {
+    return EDIT_GUARD_TEXT;
+  }
+  if (state.scheduleSaving && target.closest(SAVE_GUARDED)) {
+    return SAVE_GUARD_TEXT;
+  }
+  return null;
+}
+
+// 知らせ方。図の編集中は窓で知らせる（自分で閉じるまで続く）。保存の待ちはすぐに終わるので、下の行の文で知らせる
+function tellGuard(text) {
+  if (text === SAVE_GUARD_TEXT) {
+    setStatus(text);
+  } else {
+    notify(text);
+  }
+}
+
+// 押し始め（ドラッグの始まり、入力欄に入る、選ぶ欄が開く）は止める。図の編集中はクリックで知らせ、
+// 保存の待ちは押し始めで知らせる（帯を離したときに続いて届くクリックは、知らせずに止める。「保存中…」を上書きしない）
 for (const type of ["pointerdown", "mousedown"]) {
   document.addEventListener(
     type,
     (event) => {
-      if (guarded(event.target)) {
+      const text = guardText(event.target);
+      if (text) {
         event.preventDefault();
         event.stopPropagation();
+        if (type === "pointerdown" && text === SAVE_GUARD_TEXT) {
+          tellGuard(text);
+        }
       }
     },
     true
@@ -3024,11 +3065,14 @@ for (const type of ["pointerdown", "mousedown"]) {
 document.addEventListener(
   "click",
   (event) => {
-    if (guarded(event.target)) {
+    const text = guardText(event.target);
+    if (text) {
       event.preventDefault();
       event.stopPropagation();
       document.activeElement?.blur?.();
-      notify(EDIT_GUARD_TEXT);
+      if (text !== SAVE_GUARD_TEXT) {
+        tellGuard(text);
+      }
     }
   },
   true
@@ -3038,10 +3082,13 @@ document.addEventListener(
   "keydown",
   (event) => {
     const ctrl = event.ctrlKey || event.metaKey;
-    if (state.mapEditing && ganttHasFocus() && (event.key === "Delete" || event.key === "Backspace" || (ctrl && ["x", "v"].includes(event.key.toLowerCase())))) {
+    const text = state.mapEditing ? EDIT_GUARD_TEXT : state.scheduleSaving ? SAVE_GUARD_TEXT : null;
+    // 保存の待ちのあいだは、切り取りは止めない（保存しない）。削除と貼り付けを止める
+    const keys = state.mapEditing ? ["x", "v"] : ["v"];
+    if (text && ganttHasFocus() && (event.key === "Delete" || event.key === "Backspace" || (ctrl && keys.includes(event.key.toLowerCase())))) {
       event.preventDefault();
       event.stopPropagation();
-      notify(EDIT_GUARD_TEXT);
+      tellGuard(text);
     }
   },
   true
@@ -4070,6 +4117,11 @@ async function startApp() {
       return deleteSelectedShape();
     },
     setStatus,
+    // 日程の操作の保存に失敗したとき。DB から読み直して画面を DB にそろえ、元に戻すの履歴を空にする（履歴には保存できなかった変更が入っている）
+    restoreFromDb: async () => {
+      await reloadFromDb();
+      resetHistory();
+    },
     renderWarnings,
     showView,
     renderBlockRecord,
