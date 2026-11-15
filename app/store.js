@@ -225,6 +225,11 @@ export function createSupabaseStore(client, options) {
     async planLastChanges() {
       return check(await client.rpc("plan_last_changes"));
     },
+    // DB の変更の印（操作の記録 field.audit_log の最後の番号）。戻ってきたときの読み直しの前に、変わったかを確かめる。
+    // 同じ印なら、そのあいだに、読み直す表はどれも変わっていない
+    async changeMark() {
+      return check(await client.rpc("audit_last"));
+    },
     // 記録を足す。番号は DB が振るので、それを返す
     async addChange(entry) {
       const { no, ...row } = entry;
@@ -488,6 +493,7 @@ const QUEUED_WRITES = [
 export function inOrder(store) {
   let last = Promise.resolve();
   let active = 0;
+  let failures = 0; // 失敗した書き込みの数。戻ってきたときの読み直しが、失敗のあとは必ず DB と比べるのに使う
   const queued = (write) => (...args) => {
     const id = operation;
     active += 1;
@@ -500,11 +506,13 @@ export function inOrder(store) {
         sending = null;
         active -= 1;
       });
-    last = result.catch(() => {});
+    last = result.catch(() => {
+      failures += 1;
+    });
     return result;
   };
   const writes = QUEUED_WRITES.filter((name) => store[name]).map((name) => [name, queued(store[name])]);
-  return { ...store, ...Object.fromEntries(writes), writing: () => active > 0 };
+  return { ...store, ...Object.fromEntries(writes), writing: () => active > 0, failures: () => failures };
 }
 
 export function createLocalStore({ strict = false } = {}) {
@@ -696,6 +704,15 @@ export function createLocalStore({ strict = false } = {}) {
     },
     async changeDay(no) {
       return (read().changes || []).find((item) => item.no === no)?.day ?? null;
+    },
+    // DB の変更の印の代わり。ブラウザーの保存の中身から作る（中身が変われば、印も変わる）
+    async changeMark() {
+      const text = localStorage.getItem(LOCAL_KEY) || "";
+      let hash = 2166136261;
+      for (let index = 0; index < text.length; index += 1) {
+        hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
+      }
+      return `${text.length}:${hash >>> 0}`;
     },
     async planLastChanges() {
       const last = new Map();
@@ -1012,8 +1029,10 @@ export function createLocalStore({ strict = false } = {}) {
 
 // 通しテストで、ローカルの保存の書き込みを遅らせたり、失敗させたりする（回線の遅さや、保存の失敗を確かめる）。
 // ブラウザーの保存の LOCAL_TEST_KEY に { "delay": ミリ秒, "fail": true } を入れる。書き込みのたびに読むので、起動のあとで切り替えられる。
-// "readDelay": ミリ秒 は、変更の履歴の読み込み（SLOW_READS）を遅らせる（起動がそれを待たないことを確かめる）
+// "readDelay": ミリ秒 は、変更の履歴の読み込み（SLOW_READS）を遅らせる（起動がそれを待たないことを確かめる）。
+// 圃場の読み込み（loadFields。起動と、戻ってきたときの読み直しで読む）の回数を、LOCAL_READS_KEY に数える
 const LOCAL_TEST_KEY = "field_plan_local_test";
+const LOCAL_READS_KEY = "field_plan_local_reads";
 const SLOW_READS = ["listChanges", "listNotes", "planLastChanges"];
 
 function withTestControl(store) {
@@ -1048,5 +1067,13 @@ function withTestControl(store) {
       return read(...args);
     },
   ]);
-  return Object.defineProperties(store, Object.fromEntries([...writes, ...reads].map(([name, wrapped]) => [name, { value: wrapped, enumerable: true }])));
+  const loadFields = store.loadFields;
+  const counted = [
+    "loadFields",
+    async (...args) => {
+      localStorage.setItem(LOCAL_READS_KEY, String(Number(localStorage.getItem(LOCAL_READS_KEY) || 0) + 1));
+      return loadFields(...args);
+    },
+  ];
+  return Object.defineProperties(store, Object.fromEntries([...writes, ...reads, counted].map(([name, wrapped]) => [name, { value: wrapped, enumerable: true }])));
 }

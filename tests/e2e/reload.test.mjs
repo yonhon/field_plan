@@ -311,3 +311,68 @@ test("元に戻すのに途中で失敗したら、DB から読み直して画�
   assert.equal(await undoDisabled(), true);
   assert.equal(await page.run(`document.getElementById("redoBtn").disabled`), true);
 });
+
+// 起動と、戻ってきたときの読み直しで、圃場を読んだ回数（ローカルの保存が数える）
+const reads = () => page.run('Number(localStorage.getItem("field_plan_local_reads") || 0)');
+
+test("前に DB と比べたときから、どこでも何も変わっていなければ、戻っても読み直さない", options, async () => {
+  await openStrip(2);
+  // 起動のあと最初に戻ったときは、DB と比べる
+  const first = await reads();
+  await awayFor(61);
+  await page.waitFor(`Number(localStorage.getItem("field_plan_local_reads") || 0) === ${first + 1}`, "最初に戻ったときは読み直す");
+  await settle();
+  await awayFor(61);
+  await settle();
+  assert.equal(await reads(), first + 1, "何も変わっていないので、読み直さない");
+  assert.equal(await shownBeds(), "bed1,bed2");
+  assert.deepEqual(page.errors, []);
+});
+
+test("前に DB と比べたあとに、ほかの端末で変えたら、戻ったときに読み込む", options, async () => {
+  await openStrip(2);
+  await awayFor(61);
+  await settle();
+  await changeElsewhere(`data.beds.push(${JSON.stringify(bed(3))})`);
+  await awayFor(61);
+  await waitBeds("bed1,bed2,bed3");
+  assert.equal(await status(), "ほかの画面での変更を読み込みました");
+  assert.deepEqual(page.errors, []);
+});
+
+test("この画面で書き込んだあとは、戻ったときに読み直して DB と比べる。同じなら何も変えない", options, async () => {
+  await openStrip(3);
+  await awayFor(61);
+  await settle();
+  const before = await reads();
+  await deleteBed("bed3", "bed1,bed2");
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "保存の完了");
+  await awayFor(61);
+  await page.waitFor(`Number(localStorage.getItem("field_plan_local_reads") || 0) === ${before + 1}`, "読み直す");
+  await settle();
+  assert.equal(await shownBeds(), "bed1,bed2");
+  assert.equal(await undoDisabled(), false, "DB と同じなので、元に戻すの履歴は残る");
+  assert.deepEqual(page.errors, []);
+});
+
+test("書き込みに失敗したあとは、DB が変わっていなくても、戻ったときに読み直して画面を DB にそろえる", options, async () => {
+  await openStrip(3);
+  await awayFor(61);
+  await settle();
+  await page.run(`localStorage.setItem("field_plan_local_test", JSON.stringify({ fail: true }))`);
+  // 畝を消す（deleteBed は知らせの窓が閉じるのを待つので、ここでは使わない）
+  await page.click('.strip-bed[data-bed="bed3"]');
+  await page.waitFor(`document.querySelector('.strip-bed[data-bed="bed3"]').classList.contains("is-selected")`, "bed3 を選ぶ");
+  await page.click("#stripDeleteBtn");
+  await page.click(CONFIRM);
+  await waitBeds("bed1,bed2");
+  await page.waitFor(`document.querySelector("dialog.notice[open] .notice-text")?.textContent.includes("保存できませんでした")`, "保存の失敗の知らせ");
+  await page.run(`localStorage.removeItem("field_plan_local_test")`);
+  await page.click('dialog.notice[open] [data-action="close"]');
+  await page.waitFor(`!document.querySelector("dialog[open]")`, "窓が閉じる");
+  // DB には bed3 が残っている。画面は消したまま
+  assert.equal(await shownBeds(), "bed1,bed2");
+  await awayFor(61);
+  await waitBeds("bed1,bed2,bed3");
+  assert.deepEqual(page.errors, []);
+});

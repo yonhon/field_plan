@@ -787,6 +787,14 @@ begin
   end loop;
 end $$;
 
+-- 操作の記録の最後の番号。画面は、戻ってきたときにまずこれを読み、前に DB と比べたときと同じなら、読み直さない。
+-- audit_log は画面から読めないので、持ち主かを確かめてから、持ち主の権限で番号だけを返す
+create or replace function field.audit_last() returns bigint
+language sql stable security definer set search_path = ''
+as $$
+  select case when field.is_owner() then coalesce((select max(id) from field.audit_log), 0) end;
+$$;
+
 -- 毎日 3:30（日本時間）に、1 年より古い操作の記録を消す。同じ名前で登録し直すと、置き換わる
 select cron.schedule(
   'field-audit-log-purge', '30 18 * * *',
@@ -825,6 +833,8 @@ grant execute on function field.copy_plan(uuid, text) to authenticated;
 revoke all on function field.save_work_log(jsonb, jsonb, jsonb) from public, anon;
 grant execute on function field.save_work_log(jsonb, jsonb, jsonb) to authenticated;
 revoke all on function field.plan_last_changes() from public, anon;
+revoke all on function field.audit_last() from public, anon;
+grant execute on function field.audit_last() to authenticated;
 grant execute on function field.plan_last_changes() to authenticated;
 revoke all on field.importers from authenticated;
 alter table field.importers enable row level security;

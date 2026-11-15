@@ -1394,6 +1394,12 @@ function typingUnsaved() {
 // 違っていたら入れ替えて、履歴を空にする（古い写しに戻すと、ほかの端末の変更を消してしまう）
 let hiddenAt = null;
 let reloadDue = false; // 読み直すことになっているが、書きかけなどがあって、まだ読み直していない
+// 最後に DB と比べたときの、DB の変更の印（store の changeMark）と、それまでに失敗した書き込みの数。
+// 戻ってきたとき、印が同じで、そのあとに書き込みの失敗もなければ、読み直さない（ほかの端末でも、この画面でも、何も変えていない）。
+// 印は、読む前に確かめた値を覚える（読んでいるあいだに入った変更は、次に戻ったときに拾う）。起動のあとは、まだ比べていない（null）。
+// この画面が書き込めば印が進むので、いままでどおり読み直して DB と比べる（画面と DB がずれていても、そこで直る）
+let syncedMark = null;
+let syncedFailures = 0;
 let reloading = false;
 let reloadTimer = null;
 
@@ -1431,6 +1437,13 @@ async function reloadIfChanged() {
   reloading = true;
   let wait = RELOAD_WAIT_EDIT_MS;
   try {
+    const failures = state.store.failures?.() ?? 0;
+    // 印を読めなければ（DB の関数がない、など）、いままでどおり読み直す
+    const mark = await (state.store.changeMark?.() ?? Promise.resolve(null)).catch(() => null);
+    if (mark !== null && mark === syncedMark && failures === syncedFailures) {
+      reloadDue = false;
+      return;
+    }
     const before = JSON.stringify(comparable(currentData()));
     const data = await fetchCurrent();
     // 読んでいるあいだに操作が始まっていたら、読んだものは使わない（あとで読み直す）
@@ -1438,6 +1451,8 @@ async function reloadIfChanged() {
       return;
     }
     reloadDue = false;
+    syncedMark = mark;
+    syncedFailures = failures;
     if (sameContent(JSON.parse(before), comparable(data))) {
       return;
     }
