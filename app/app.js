@@ -4340,6 +4340,28 @@ function askLogin() {
   }
 }
 
+// PostgREST を、ログインの更新と並べて先に起こす（docs/performance.md の「試していること」）。
+// PostgREST は、30 秒ほど使われない DB とのつながりを閉じる。しばらくあけたあとの最初の要求（起動の読み込み load_field）は、
+// つなぎ直しで遅くなる。ログインの鍵の期限が切れていると、起動はログインの更新（1 秒ほど）を待つので、そのあいだに起こしておく。
+// 起こすのに使うのは、同じプロジェクトの agri_db が公開している市況の集計の 1 行（ログインがいらない。DB の中で 0.3 ms ほど）。
+// field スキーマへの扉は開けない。返事は読まない（no-cors）。公開キーを URL に入れ、見出しを付けないので、事前確認も付かない。
+// 鍵が有効なら（期限まで 90 秒より長い。supabase-js がログインを更新しない）、すぐに load_field を送るので、送らない
+const WARM_URL = "/rest/v1/market_daily_item_stats?select=sale_date&limit=1";
+const REFRESH_MARGIN_MS = 90 * 1000;
+
+function warmPostgrest() {
+  try {
+    const ref = new URL(config.supabaseUrl).hostname.split(".")[0];
+    const session = JSON.parse(localStorage.getItem(`sb-${ref}-auth-token`) || "null");
+    if (!session?.expires_at || session.expires_at * 1000 - Date.now() > REFRESH_MARGIN_MS) {
+      return;
+    }
+    fetch(`${config.supabaseUrl}${WARM_URL}&apikey=${encodeURIComponent(config.supabaseAnonKey)}`, { mode: "no-cors", credentials: "omit", cache: "no-store" }).catch(() => {});
+  } catch {
+    // 起こせなくても、起動は変わらない
+  }
+}
+
 async function main() {
   initToasts();
   const params = new URLSearchParams(location.search);
@@ -4350,6 +4372,7 @@ async function main() {
     return;
   }
 
+  warmPostgrest();
   state.client = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey, { db: { schema: "field" }, global: { fetch: fetchWithOperation } });
   state.store = inOrder(createSupabaseStore(state.client, { url: config.supabaseUrl, anonKey: config.supabaseAnonKey }));
   // 画面を出したあとにログインが切れたら、ログインの窓を出す。知らせの中からは supabase-js を呼べない（待ち合いになる）ので、あとで出す
