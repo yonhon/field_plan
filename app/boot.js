@@ -30,6 +30,22 @@ document.getElementById("updateBtn").addEventListener("click", async (event) => 
     button.textContent = label;
   }
 });
+// いま動いている版と、更新の確かめの結果。利用者のメニュー（user-menu.js）が出す。
+// label は版の印（version.json。公開の手順が作る）の「A199-3f9c2」。印がなければ（?local=1 などの手元の開発）null。
+// status は、この起動の確かめで、サーバーと同じだった（"latest"）か、新しい版を入れ替え済み（"update"）か。分からなければ null。
+// 変わったら "app-version" を知らせる
+const appVersion = (globalThis.fieldPlanVersion = { label: null, status: null });
+const versionChanged = () => document.dispatchEvent(new Event("app-version"));
+// 版の印は、Service Worker が手元の一式から出すので、通信はない（いま動いている一式の版）
+fetch("./version.json")
+  .then((response) => (response.ok ? response.json() : null))
+  .then((info) => {
+    if (typeof info?.label === "string") {
+      appVersion.label = info.label;
+      versionChanged();
+    }
+  })
+  .catch(() => {});
 // ?local=1 は動作確認用なので、Service Worker を登録しない（手元のファイルを直したら、すぐ反映させたい）
 if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("local")) {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
@@ -39,6 +55,10 @@ if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("l
   let outdated = false;
   // 新しい版を取り終えたら、ふだんは読み込み直すボタンを出す。版が古くて止まっているときは、すぐ読み込み直す
   navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data === "update-ready" || event.data === "up-to-date") {
+      appVersion.status = event.data === "update-ready" ? "update" : "latest";
+      versionChanged();
+    }
     if (event.data === "update-ready") {
       if (outdated) {
         location.reload();

@@ -33,6 +33,12 @@ jobs:
       - name: Test
         run: node --test "tests/*.test.mjs"
 
+      # 版の印（app/version.json）を、これから公開するファイルそのものから作る。Service Worker は、
+      # これで版が変わったかを確かめ、取ったファイルを照らし合わせる（scripts/build-version.mjs）。
+      # 一式の一覧（app/sw.js の FILES）にあるファイルがなければ、ここで止まる
+      - name: Build version
+        run: node scripts/build-version.mjs
+
       - name: Setup Pages
         uses: actions/configure-pages@v6
 
@@ -44,3 +50,8 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+      # 公開中のサイトが、作った版の印と同じ中身を配っているかを確かめる。配信が切り替わるまで、5 分まで確かめ直す。
+      # 違えば失敗にする（公開は取り消されないが、失敗の知らせが届く）
+      - name: Verify deployed files
+        run: node scripts/build-version.mjs --verify "${{ steps.deployment.outputs.page_url }}"

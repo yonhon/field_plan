@@ -78,6 +78,21 @@ function isOpen() {
   return !$("userMenu").hidden;
 }
 
+// いま動いている版（boot.js の fieldPlanVersion）。版の印がなければ（手元の開発）出さない。
+// この起動の確かめで、サーバーと同じだったら「最新の版です」、新しい版を入れ替え済みなら、読み込み直すボタンを出す
+function versionHtml() {
+  const version = globalThis.fieldPlanVersion;
+  if (!version?.label) {
+    return "";
+  }
+  const latest = version.status === "latest" ? '<span class="user-menu-latest">最新の版です</span>' : "";
+  const update =
+    version.status === "update"
+      ? '<button type="button" class="user-menu-item user-menu-update" role="menuitem" data-action="reload">新しい版があります — 読み込み直す</button>'
+      : "";
+  return `<p class="user-menu-version">版 ${escapeHtml(version.label)}${latest}</p>${update}<hr class="user-menu-sep" />`;
+}
+
 function close() {
   $("userMenu").hidden = true;
   $("brandMenu").setAttribute("aria-expanded", "false");
@@ -100,7 +115,7 @@ function open() {
       (actions.settings ? '<button type="button" class="user-menu-item edit-only" role="menuitem" data-action="settings">圃場の設定…</button>' : "") +
       '<hr class="user-menu-sep" />'
     : "";
-  draw($("userMenu"), placeHtml + accountHtml);
+  draw($("userMenu"), placeHtml + versionHtml() + accountHtml);
   $("userMenu").hidden = false;
   $("brandMenu").setAttribute("aria-expanded", "true");
 }
@@ -129,6 +144,9 @@ if (typeof document !== "undefined" && $("brandMenu")) {
     close();
     if (action === "logout") {
       await account?.logout?.();
+    } else if (action === "reload") {
+      // 知らせの「読み込み直す」と同じ（送り残しを送ってから読み込み直す。boot.js）
+      $("updateBtn")?.click();
     } else {
       actions[action]?.();
     }
@@ -147,6 +165,12 @@ if (typeof document !== "undefined" && $("brandMenu")) {
     if (event.key === "Escape" && isOpen()) {
       close();
       $("brandMenu").focus();
+    }
+  });
+  // 版や更新の確かめの結果が分かったら、開いているメニューを描き直す
+  document.addEventListener("app-version", () => {
+    if (isOpen()) {
+      open();
     }
   });
   // 画面の幅が変わったら、名前の欄の幅を決め直す。書体を読み終えたときも（文字の幅が変わる。boot.js）

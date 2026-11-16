@@ -5,6 +5,9 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { buildVersion } from "../scripts/build-version.mjs";
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), "..", "app");
 const SOURCE = readFileSync(join(APP, "sw.js"), "utf8");
@@ -114,8 +117,10 @@ function startWorker(server) {
     skipWaiting: async () => {},
     addEventListener: (type, listener) => (listeners[type] = listener),
   };
+  const fetched = []; // サーバーから取った URL
   const fetch = async (input) => {
     const url = typeof input === "string" ? input : input.url;
+    fetched.push(url);
     const body = server[url];
     if (body === undefined) {
       return new Response("", { status: 404 });
@@ -125,7 +130,7 @@ function startWorker(server) {
     }
     return new Response(body);
   };
-  vm.runInNewContext(SOURCE, { self, caches, fetch, Response, URL, Promise, String, Uint8Array, Error, TypeError });
+  vm.runInNewContext(SOURCE, { self, caches, fetch, Response, URL, Promise, String, Uint8Array, Error, TypeError, crypto: globalThis.crypto, TextDecoder });
   const dispatch = async (type, extra = {}) => {
     let waiting = Promise.resolve();
     let responded = null;
@@ -136,6 +141,7 @@ function startWorker(server) {
   return {
     caches,
     messages,
+    fetched,
     install: () => dispatch("install"),
     replies,
     check: () => dispatch("message", { data: "check", source: { postMessage: (data) => replies.push(data) } }),
@@ -187,4 +193,82 @@ test("1 つでも取れなければ、取り直さずに、手元の一式を使
   assert.deepEqual(worker.messages, []);
   assert.deepEqual(worker.replies, ["check-failed"]);
   assert.equal(await worker.request(`${SCOPE}app.js`), "app.js v1");
+});
+
+// 版の印を、サーバーの中身から、公開の手順と同じスクリプト（scripts/build-version.mjs）で作る。
+// 端末の照らし合わせ（sw.js）と、公開の手順の計算が食い違えば、下のテストが失敗する
+function withVersion(server) {
+  const dir = mkdtempSync(join(tmpdir(), "field-plan-sw-"));
+  for (const file of FILES) {
+    const path = join(dir, file === "./" ? "index.html" : file);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, server[new URL(file, SCOPE).href]);
+  }
+  server[`${SCOPE}version.json`] = JSON.stringify(buildVersion({ appDir: dir, files: FILES, no: 1 }));
+  return server;
+}
+
+test("版の印: 手元と同じ版なら、版の印だけを取って終わる", async () => {
+  const server = withVersion(serverWith("v1"));
+  const worker = startWorker(server);
+  await worker.install();
+  worker.fetched.length = 0;
+  await worker.check();
+  assert.deepEqual(worker.fetched, [`${SCOPE}version.json`]);
+  assert.deepEqual(worker.replies, ["up-to-date"]);
+  assert.deepEqual(worker.messages, []);
+});
+
+test("版の印: 版が変われば、変わったファイルだけを取り、ほかは手元から写して入れ替える", async () => {
+  const server = withVersion(serverWith("v1"));
+  const worker = startWorker(server);
+  await worker.install();
+  server[`${SCOPE}app.js`] = "app.js v2";
+  server[`${SCOPE}store.js`] = "store.js v2";
+  withVersion(server);
+  worker.fetched.length = 0;
+  await worker.check();
+  assert.deepEqual(worker.fetched.sort(), [`${SCOPE}app.js`, `${SCOPE}store.js`, `${SCOPE}version.json`].sort());
+  assert.deepEqual(worker.messages, ["update-ready"]);
+  assert.equal(await worker.request(`${SCOPE}app.js`), "app.js v2");
+  assert.equal(await worker.request(`${SCOPE}schedule.js`), "schedule.js v1");
+  assert.equal(JSON.parse(await worker.request(`${SCOPE}version.json`)).version, JSON.parse(server[`${SCOPE}version.json`]).version);
+  assert.equal(worker.caches.stores.size, 1, "古い一式は消す");
+});
+
+test("版の印: 取ったファイルが版の印と合わなければ（新旧が混ざって届いた）、入れ替えずに、手元の一式を使い続ける", async () => {
+  const server = withVersion(serverWith("v1"));
+  const worker = startWorker(server);
+  await worker.install();
+  server[`${SCOPE}app.js`] = "app.js v2";
+  withVersion(server);
+  server[`${SCOPE}app.js`] = "app.js v1 (配信の途中のキャッシュ)";
+  await worker.check();
+  assert.deepEqual(worker.messages, []);
+  assert.deepEqual(worker.replies, ["check-failed"]);
+  assert.equal(await worker.request(`${SCOPE}app.js`), "app.js v1");
+});
+
+test("版の印: 版の印のない一式を入れたあとでも、中身が同じなら、知らせずに印だけを足す", async () => {
+  const server = serverWith("v1");
+  const worker = startWorker(server);
+  await worker.install();
+  withVersion(server);
+  await worker.check();
+  assert.deepEqual(worker.messages, [], "中身は同じなので知らせない");
+  assert.deepEqual(worker.replies, ["up-to-date"]);
+  assert.equal(JSON.parse(await worker.request(`${SCOPE}version.json`)).version, JSON.parse(server[`${SCOPE}version.json`]).version, "印を手元に足した");
+  worker.fetched.length = 0;
+  await worker.check();
+  assert.deepEqual(worker.fetched, [`${SCOPE}version.json`], "次からは、版の印だけを取る");
+});
+
+test("版の印: 画面には、手元の一式の版の印を出す（サーバーの版が変わっても、入れ替えるまでは手元のもの）", async () => {
+  const server = withVersion(serverWith("v1"));
+  const worker = startWorker(server);
+  await worker.install();
+  const kept = server[`${SCOPE}version.json`];
+  server[`${SCOPE}app.js`] = "app.js v2";
+  withVersion(server);
+  assert.equal(await worker.request(`${SCOPE}version.json`), kept);
 });

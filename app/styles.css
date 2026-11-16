@@ -217,6 +217,22 @@ h2 {
   box-shadow: 0 8px 24px rgba(19, 38, 42, 0.16);
 }
 
+/* 利用者のメニューの版の行（いま動いている版と、最新かどうか） */
+.user-menu-version {
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-menu-latest {
+  margin-left: 1em;
+}
+
+.user-menu-update {
+  font-weight: 700;
+}
+
 .user-menu-account {
   margin: 0;
   padding: 8px 10px;

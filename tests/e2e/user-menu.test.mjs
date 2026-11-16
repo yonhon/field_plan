@@ -76,3 +76,27 @@ test("書体: CSS は表示を止めない形で読み、読み終えたらヘ�
   assert.ok((await width()) < before, `書体を読み終えたら、幅を測り直す（${before} → ${await width()}）`);
   assert.deepEqual(page.errors, []);
 });
+
+test("利用者のメニュー: いま動いている版と、最新かどうかを出す。版の印がなければ出さない", options, async () => {
+  await page.loadApp(seed());
+  const menu = async () => {
+    await page.click("#brandMenu");
+    await page.waitFor(`!document.getElementById("userMenu").hidden`, "メニューが開く");
+    const shown = await page.run(`(() => ({
+      version: document.querySelector("#userMenu .user-menu-version")?.textContent ?? null,
+      reload: Boolean(document.querySelector('#userMenu [data-action="reload"]')),
+    }))()`);
+    await page.click("#brandMenu");
+    await page.waitFor(`document.getElementById("userMenu").hidden`, "メニューが閉じる");
+    return shown;
+  };
+  // ?local=1 には版の印（version.json。公開の手順が作る）がない
+  assert.deepEqual(await menu(), { version: null, reload: false });
+  // 版が分かり、この起動の確かめでサーバーと同じだったとき（boot.js が覚えて知らせる）
+  await page.run(`globalThis.fieldPlanVersion.label = "A199-3f9c2"; globalThis.fieldPlanVersion.status = "latest"; document.dispatchEvent(new Event("app-version"))`);
+  assert.deepEqual(await menu(), { version: "版 A199-3f9c2最新の版です", reload: false });
+  // 新しい版を入れ替え済みのとき
+  await page.run(`globalThis.fieldPlanVersion.status = "update"; document.dispatchEvent(new Event("app-version"))`);
+  assert.deepEqual(await menu(), { version: "版 A199-3f9c2", reload: true });
+  assert.deepEqual(page.errors, []);
+});

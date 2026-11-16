@@ -15,3 +15,6 @@ supabase/.temp/
 
 # 監査ファイル
 docs/review-*.md
+
+# 公開の手順（scripts/build-version.mjs）が作る版の印。コミットしない
+app/version.json
