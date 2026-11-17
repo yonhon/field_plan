@@ -68,8 +68,8 @@ const AUDITED = {
   workTypes: { key: "code" },
   workLogs: { key: "id" },
 };
-// 変更の記録の表の名前を、DB の表の名前（undo_op が返す名前）に直す
-const AUDIT_NAMES = { workTypes: "work_types", workLogs: "logs" };
+// 変更の記録の表の名前を、DB の表の名前（undo_op が返す名前）に直す。作業の記録は、記録・対象・資材をまとめて logs
+export const AUDIT_NAMES = { workTypes: "work_types", workLogs: "logs" };
 for (const table of Object.keys(AUDITED)) {
   AUDIT_NAMES[table] = AUDIT_NAMES[table] || table;
 }

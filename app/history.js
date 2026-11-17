@@ -19,6 +19,29 @@ const UNDOABLE_WRITES = new Set(["upsert", "remove", "saveField", "saveLog", "de
 // 先に確かめてから消す行。区域・区画・品目・肥料は 1 件でも、畝・作付・作業・実績はふだんの 1 回ぶん
 // （畝 1 本、作付 1 つとその作業、記録 1 件）より多いとき。DB の関数に上限として渡す
 export const CONFIRM_FROM = { zones: 1, blocks: 1, crops: 1, fertilizers: 1, beds: 2, plantings: 2, works: 11, logs: 2 };
+// 元に戻した行（field.undo_op が返す行）を、画面のどこに当てるか（app.js の applyUndo）。
+// plan はいまのプランの行、shared はプランをまたいで共通の行、logs は作業の記録（記録・対象・資材をまとめて当てる）。
+// DB の変更の記録の対象の表は、ここか UNDO_NOT_APPLIED のどちらかに入れる（tests/undo-tables.test.mjs が確かめる）
+export const UNDO_APPLY = {
+  zones: "plan",
+  blocks: "plan",
+  beds: "plan",
+  plantings: "plan",
+  works: "plan",
+  crops: "shared",
+  fertilizers: "shared",
+  fields: "field",
+  work_types: "workTypes",
+  work_logs: "logs",
+  work_log_targets: "logs",
+  work_log_inputs: "logs",
+};
+// 画面に当て方を決めていない表と、そこに書く操作。どれも、行ったあとに履歴を空にする（resetHistory）ので、戻すことはない。
+// 当てる行が返ったら、applyUndo は当てずに断り、DB から読み直す（Issue #3 の 3 段目で、当て方を足す）
+export const UNDO_NOT_APPLIED = {
+  backdrops: "下絵の読み込みと位置合わせ（圃場の設定の窓）",
+  plans: "プランの作成・コピー・削除・名前の変更、実際に使うプランの切り替え",
+};
 const TABLE_NAMES = { zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", crops: "品目", fertilizers: "肥料", logs: "実績" };
 
 // ctx = { state, busy, lock, flush, apply, reload, setStatus, draft }

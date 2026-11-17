@@ -42,7 +42,7 @@ import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
-import { initHistory, renderHistoryButtons, resetHistory } from "./history.js";
+import { UNDO_APPLY, initHistory, renderHistoryButtons, resetHistory } from "./history.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { plantingOnDate } from "./logs.js";
@@ -1332,10 +1332,10 @@ function sameContent(local, remote) {
 
 // 元に戻した行（DB の関数 field.undo_op が返す、戻した行の今の中身）を画面のデータに当てて、描き直す。
 // 当てるのは、いまの圃場とプランの行と、品目・肥料・作業の種類・実績。row が null の行は消えた
-const UNDO_TABLES = new Set(["zones", "blocks", "beds", "plantings", "works", "crops", "fertilizers"]);
+// どの表をどう当てるかは、history.js の UNDO_APPLY
 function applyUndo({ changes = [], logs = [] }) {
   // 当て方を決めていない表（下絵、プランなど）の行があれば、当てずに知らせる（history.js が DB から読み直す）
-  const unknown = [...new Set(changes.map((item) => item.table).filter((table) => !UNDO_TABLES.has(table) && table !== "fields" && table !== "work_types"))];
+  const unknown = [...new Set(changes.map((item) => item.table).filter((table) => !UNDO_APPLY[table] || UNDO_APPLY[table] === "logs"))];
   if (unknown.length) {
     throw new Error(`画面に当てられない表があります: ${unknown.join(", ")}`);
   }
@@ -1348,7 +1348,7 @@ function applyUndo({ changes = [], logs = [] }) {
     return row ? list.map((item, i) => (i === at ? row : item)) : list.filter((_, i) => i !== at);
   };
   for (const { table, id, row } of changes) {
-    if (UNDO_TABLES.has(table)) {
+    if (UNDO_APPLY[table] === "plan" || UNDO_APPLY[table] === "shared") {
       if (row && row.plan_id && row.plan_id !== state.plan.id) {
         continue; // 別のプランの行。開いていない
       }

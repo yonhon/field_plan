@@ -26,7 +26,7 @@
 
 - **元に戻すは、書き込みの操作の ID で戻す。** `history.js` は、書き込み（`store.js` の `upsert`、`remove`、`saveField`、`saveLog`、`deleteLog`、`saveWorkType`）を列に入れたときの操作の ID を積み、DB の関数 `field.undo_op` で、その ID の変更を DB の側で戻して、返った行を画面に当てる（`app.js` の `applyUndo`）。新しい操作も、この書き込みを通せば、元に戻すを書かなくてよい。
 - **書き込みは、操作の中で送る。** 操作の ID は、押す・キーを打つの始まりで作る。押したあとに `await` をはさんで書くと、そのあいだに次の操作が始まり、別の操作の ID で記録される。保存の予約（`queueSave`）と書き込みの列（`inOrder`）は、予約した時点の ID で送るので、それを使う。
-- **表を足したら、元に戻すの 3 か所を見る。** `field.undo_op` の表の順（`v_order`。親から子）、`app.js` の `applyUndo`（画面への当て方）、このブラウザーの保存の変更の記録（`store.js` の `AUDITED`）。`applyUndo` に当て方のない表の行が返ると、DB から読み直して履歴を空にする。
+- **表を足したら、元に戻すの 3 か所を見る。** `field.undo_op` の表の順（`v_order`。親から子）、`history.js` の `UNDO_APPLY`（画面への当て方。当て方を決めないなら `UNDO_NOT_APPLIED`）と `app.js` の `applyUndo`、このブラウザーの保存の変更の記録（`store.js` の `AUDITED`）。足し忘れは `tests/undo-tables.test.mjs` が見つける。`applyUndo` に当て方のない表の行が返ると、DB から読み直して履歴を空にする。
 - **戻せない操作は、行ったあとに `resetHistory()` を呼ぶ。** その操作の ID は、このあと書いても履歴に積まない。
 - **戻せない操作は、README の「元に戻す、やり直す」に書く。**
 
