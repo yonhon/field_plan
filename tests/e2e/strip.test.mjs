@@ -298,6 +298,54 @@ test("畝を続けて 2 回動かす: 2 回目を押したときに 1 回目の�
   assert.deepEqual(page.errors, []);
 });
 
+// 失敗の知らせを、出なくなるまで閉じる（図形の保存と変更の記録の保存は、別々に知らせる）
+async function closeNotices() {
+  for (let quiet = 0; quiet < 3; ) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    if (await page.run(`Boolean(document.querySelector('dialog.notice[open] [data-action="close"]'))`)) {
+      await page.click('dialog.notice[open] [data-action="close"]');
+      await page.waitFor(`!document.querySelector("dialog.notice[open]")`, "窓が閉じる");
+      quiet = 0;
+    } else {
+      quiet += 1;
+    }
+  }
+}
+
+// 送り直しは、溜まった予約（区域と畝の 2 件）を 1 回で送る。送り直しの途中に、次の操作の保存が割り込んでも、
+// 送り直しの書き込みは、はじめにすべて列に入れるので、次の操作の保存より先に届く。
+// 1 件ずつ列に入れると、送り直しの古い写し（畝幅 150 cm）が後から届き、画面と DB がずれる
+test("送り直しの途中に次の操作の保存が割り込む: 次の操作の中身が DB に残る", options, async () => {
+  await openStrip(1);
+  await failSaves("true");
+  // 区域の名前を変える（区域の予約）
+  await page.click('.tab-btn[data-view="map"]');
+  await page.click('#shapeTree [data-shape="z1"]');
+  await page.waitFor(`document.getElementById("zoneName").offsetParent !== null`, "区域の名前の欄");
+  await page.run(`(() => {
+    const input = document.getElementById("zoneName");
+    input.value = "北";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  await page.waitFor(`${openDialog}?.textContent.includes("保存の失敗")`, "失敗の窓");
+  await closeNotices();
+  // 畝の幅を変える（畝の予約）。失敗のあとなので、操作の始まりでは送らず、予約が溜まる
+  await page.click('.tab-btn[data-view="schedule"]');
+  await widenBed();
+  await page.waitFor(`/保存に失敗しました/.test(document.getElementById("saveStatus").textContent)`, "畝の保存も失敗");
+  await closeNotices();
+  // 回線が戻ると送り直す（区域を 400 ms かけて送り、次に畝）。その途中で畝幅を 200 cm にし、すぐ次を押して、その保存を先に送らせる
+  await page.run(`window.restoreSaves(); window.prompt = () => "200"; window.dispatchEvent(new Event("online"))`);
+  await page.click('[data-dim="width:0"]');
+  await page.click(".tab-btn[data-view=\"schedule\"]");
+  await page.waitFor(`document.querySelector('[data-dim="width:0"]').textContent === "200cm"`, "画面の畝幅");
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "保存の完了");
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.equal(await savedWidth(), 200, "DB の畝幅も 200 cm");
+  assert.equal((await page.saved()).zones.find((zone) => zone.id === "z1").name, "北", "区域の名前は送り直しで保存される");
+  assert.deepEqual(page.errors, []);
+});
+
 test("区域を作ってすぐ区画にする: 区域の保存を待たずに操作しても、両方保存される", options, async () => {
   await page.loadApp({ ...seed(0), zones: [], blocks: [] });
   await page.click("#mapEditBtn");

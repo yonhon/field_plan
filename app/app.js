@@ -1221,8 +1221,13 @@ async function flushSaves({ quiet = false } = {}) {
         writes.push([id, () => state.store.upsert(table, items)]);
       }
     }
-    for (const [id, write] of writes) {
-      await duringOperation(id, write);
+    // すべての書き込みを、待たずに続けて列（inOrder）に入れてから、まとめて待つ。1 つずつ待つと、そのあいだに
+    // ほかの書き込み（次の操作の保存、元に戻す）が列に入り、上で写した古い中身がそのあとに届いて、画面と DB がずれる。
+    // 列は、前の書き込みが失敗しても次を送る。失敗したら、上の予約をすべて戻して送り直す（upsert なので、送り直しても同じ）
+    const sent = writes.map(([id, write]) => duringOperation(id, write));
+    const failed = (await Promise.allSettled(sent)).find((result) => result.status === "rejected");
+    if (failed) {
+      throw failed.reason;
     }
     if (!pendingSaves.size) {
       $("saveStatus").textContent = state.mapEditing ? EDIT_UNSAVED : "保存しました";
