@@ -1363,16 +1363,18 @@ async function applyUndo({ changes = [], logs = [] }) {
       }
       state[table] = put(state[table], "id", id, row);
     } else if (table === "fields") {
-      // 圃場の行は、同じものを使い続ける（state.field を持っている処理があるので）
+      // 圃場の行は、同じものを使い続ける（state.field を持っている処理があるので）。開いている圃場は、一覧の行と
+      // 別のものになっていても当てる
       const known = state.fields.find((item) => item.id === id);
-      if (row && known) {
-        const weather = JSON.stringify([known.base_lat, known.base_lng, known.weather]) !== JSON.stringify([row.base_lat, row.base_lng, row.weather]);
+      if (row && String(id) === String(state.field.id)) {
+        const field = state.field;
+        weatherChanged = weatherChanged || JSON.stringify([field.base_lat, field.base_lng, field.weather]) !== JSON.stringify([row.base_lat, row.base_lng, row.weather]);
+        refill(field, row);
+        field.outline = outlineParts(field.outline);
+      }
+      if (row && known && known !== state.field) {
         refill(known, row);
-        if (known === state.field) {
-          state.field.outline = outlineParts(state.field.outline);
-          weatherChanged = weatherChanged || weather;
-        }
-      } else {
+      } else if (!row || !known) {
         state.fields = put(state.fields, "id", id, row);
       }
     } else if (table === "work_types") {
@@ -1424,8 +1426,9 @@ async function applyUndo({ changes = [], logs = [] }) {
     beginWeatherDraft({ before: markStep, after: renderSettingsFoot });
     renderSettingsFoot();
   }
-  if (weatherChanged) {
-    // 保存したときと同じく、気象の欄を描き直し、観測所の値を取り直す（作付の詳細の気温・雨量が、戻した観測所になる）
+  if (weatherChanged || settings.open) {
+    // 保存したときと同じく、気象の欄を描き直し、観測所の値を取り直す（作付の詳細の気温・雨量が、戻した観測所になる）。
+    // 圃場の設定の窓を開いて戻したときは、窓の気象の欄を必ず描き直す
     renderWeatherSettings();
     syncWeather();
   }

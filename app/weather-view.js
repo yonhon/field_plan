@@ -34,10 +34,16 @@ export async function officeForecast(office) {
 
 const option = (value, label, selected) => `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
 
+// 描き直しの番号。観測所や予報の一覧を待つあいだに、新しい描き直しが始まっていたら、古いほうは描かずにやめる
+// （圃場の設定の窓を開いた直後に元に戻すと、窓を開いたときの描き直しが、戻す前の値で、戻したあとの描き直しを追い越す）
+let renderGeneration = 0;
+
 export async function renderWeatherSettings() {
   if (!ctx || $("appView").hidden) {
     return;
   }
+  const generation = ++renderGeneration;
+  const stale = () => generation !== renderGeneration;
   const field = state().field;
   const settings = weatherSettings();
   $("baseLat").value = field.base_lat ?? "";
@@ -45,6 +51,9 @@ export async function renderWeatherSettings() {
   const hasBase = Number.isFinite(field.base_lat) && Number.isFinite(field.base_lng);
   try {
     const stations = await fetchStations();
+    if (stale()) {
+      return;
+    }
     const list = (kind, selected) => {
       const near = hasBase ? nearestStations(stations, field.base_lat, field.base_lng, kind, 12) : [];
       const current = selected && !near.some((item) => item.code === selected) ? stations.find((item) => item.code === selected) : null;
@@ -60,6 +69,9 @@ export async function renderWeatherSettings() {
   }
   try {
     const areas = await fetchAreas();
+    if (stale()) {
+      return;
+    }
     draw(
       $("forecastOffice"),
       option("", "選んでください", settings.office || "") +
@@ -93,6 +105,9 @@ export async function renderWeatherSettings() {
       // 予報を読めなければ、地点は選べない
     }
   }
+  if (stale()) {
+    return;
+  }
   draw($("forecastPoint"), option("", points.length ? "選んでください" : "先に府県予報区を選んでください", settings.point || "") + points.map(([code, name]) => option(code, name, settings.point)).join(""));
   if (!twoWeekList) {
     // 気象庁の一覧は、県庁所在地などが先にまとまっている（那覇がほかの沖縄の地点から離れている）。
@@ -103,6 +118,9 @@ export async function renderWeatherSettings() {
       .map((item, index) => ({ item, index }))
       .sort((a, b) => a.item.fuk - b.item.fuk || a.index - b.index)
       .map(({ item }) => item);
+  }
+  if (stale()) {
+    return;
   }
   draw(
     $("twoweekStation"),
