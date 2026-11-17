@@ -369,6 +369,44 @@ def check_undo_op(c):
     expect("途中で失敗したら、何も変わらない（戻す処理の記録も残らない）", failed and snapshot() == before and audit_count() == count)
     undo(removed)
 
+    # 戻した行の今の中身を返す（画面は、これを当てて読み直さない）
+    start = snapshot()
+    new_bed = str(uuid.uuid4())
+    added = operation([
+        ("insert into field.beds (id, plan_id, block_id, seq, shape) values (%s, %s, %s, 6, %s)", (new_bed, plan, block, SHAPE)),
+        ("update field.blocks set name = '返す行の試験' where id = %s", (block,)),
+    ])
+    result = undo(added)
+    changes = {(item["table"], item["id"]): item["row"] for item in result.get("changes", [])}
+    now_block = c.execute("select to_jsonb(b) from field.blocks b where id = %s", (block,)).fetchone()[0]
+    expect("戻した行の今の中身を返す（消えた行は null）", changes == {("beds", new_bed): None, ("blocks", str(block)): now_block} and result["logs"] == [] and snapshot() == start)
+
+    # 作業の記録の表は、記録・対象・資材の形で返す
+    edited = operation([
+        ("update field.work_logs set note = '記録の試験' where id = %s", (log,)),
+        ("update field.work_log_targets set label = '対象の試験' where log_id = %s", (log,)),
+    ])
+    result = undo(edited)
+    shaped = c.execute(
+        """select to_jsonb(x) from (select l.*, coalesce((select jsonb_agg(t) from field.work_log_targets t where t.log_id = l.id), '[]'::jsonb) as targets,
+             coalesce((select jsonb_agg(i) from field.work_log_inputs i where i.log_id = l.id), '[]'::jsonb) as inputs from field.work_logs l where l.id = %s) x""",
+        (log,),
+    ).fetchone()[0]
+    expect("作業の記録は、記録・対象・資材の形で、記録ごとに 1 件返す", result["changes"] == [] and result["logs"] == [{"id": str(log), "row": shaped}])
+    removed_log = operation([("delete from field.work_logs where id = %s", (log,))])
+    restored = undo(undo(removed_log)["op_id"])
+    expect("消えた記録は row が null", restored["logs"] == [{"id": str(log), "row": None}])
+    undo(restored["op_id"])
+
+    # 消える行が上限以上なら、戻さずに数を返す
+    beds2 = [str(uuid.uuid4()) for _ in range(2)]
+    many = operation([("insert into field.beds (id, plan_id, block_id, seq, shape) values (%s, %s, %s, %s, %s)", (b, plan, block, 10 + i, SHAPE)) for i, b in enumerate(beds2)])
+    before, count = snapshot(), audit_count()
+    limited = run(OWNER, None, [("select field.undo_op(%s, %s)", (many, json.dumps({"beds": 2, "logs": 2})))])[0]
+    expect("消える行が上限以上なら、戻さずに数を返す", limited == {"status": "confirm", "removed": {"beds": 2}} and snapshot() == before and audit_count() == count)
+    loose = run(OWNER, None, [("select field.undo_op(%s, %s)", (many, json.dumps({"beds": 3})))])[0]
+    expect("上限より少なければ、そのまま戻す", loose["status"] == "done" and snapshot() == start)
+
     # 他人は戻せない
     try:
         undo(renamed, uid=OTHER)

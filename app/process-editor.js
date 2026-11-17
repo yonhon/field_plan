@@ -19,7 +19,6 @@ import {
 } from "./schedule.js";
 import { cropLabel } from "./crops.js";
 import { confirmAction, notify } from "./dialog.js";
-import { noteChange } from "./history.js";
 import { record } from "./journal.js";
 import { ARRANGE_MODES, SCOPE_LABELS, currentActuals, isActivePlan } from "./schedule-view.js";
 import { escapeHtml } from "./html.js";
@@ -658,5 +657,4 @@ export async function saveProcess() {
   });
   ctx.setStatus("保存しました");
   ctx.refresh();
-  noteChange();
 }

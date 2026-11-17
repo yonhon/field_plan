@@ -346,6 +346,64 @@ test("送り直しの途中に次の操作の保存が割り込む: 次の操作
   assert.deepEqual(page.errors, []);
 });
 
+// 図の編集の書きかけは、ヘッダーの元に戻す・やり直すで、画面の中だけで行き来する（DB には送らない）
+test("図の編集: 書きかけを元に戻す・やり直すで 1 操作ずつ行き来し、保存した操作は DB の記録で戻す。区域を消すときは確かめる", options, async () => {
+  await page.loadApp({ ...seed(0), zones: [], blocks: [] });
+  await page.click("#mapEditBtn");
+  await page.setValue("#sizeAlong", "10");
+  await page.setValue("#sizeDepth", "5");
+  await page.run(`document.querySelector('.mode-btn[data-mode="size"]').click()`);
+  await page.click("#map");
+  await page.waitFor(`document.querySelectorAll('#map [data-shape]:not([data-shape^="outline"])').length === 1`, "区域を置く");
+  await page.waitFor(`!document.getElementById("undoBtn").disabled`, "書きかけを元に戻せる");
+
+  await page.click("#undoBtn");
+  await page.waitFor(`document.querySelectorAll('#map [data-shape]:not([data-shape^="outline"])').length === 0`, "書きかけが消える");
+  assert.equal(await page.run(`document.getElementById("mapEditSave").disabled`), true, "保存するものがない");
+  await page.click("#redoBtn");
+  await page.waitFor(`document.querySelectorAll('#map [data-shape]:not([data-shape^="outline"])').length === 1`, "やり直すと、また出る");
+  assert.equal((await page.saved()).zones.length, 0, "書きかけは DB に送らない");
+
+  await page.click("#mapEditSave");
+  await page.waitFor(`document.getElementById("mapEditStatus").textContent === "保存しました"`, "図の編集の保存");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).zones.length === 1`, "区域の保存");
+  // 保存した操作は、DB の記録で戻す。区域が消えるので、先に確かめる
+  await page.click("#undoBtn");
+  await page.waitFor(`document.querySelector("dialog.notice")?.textContent.includes("区域 1 件")`, "消える区域を知らせる");
+  await page.click(CANCEL);
+  await waitNoDialog();
+  assert.equal((await page.saved()).zones.length, 1, "やめたら消えない");
+  await page.click("#undoBtn");
+  await page.click(CONFIRM);
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).zones.length === 0`, "DB の区域が消える");
+  await page.waitFor(`document.querySelectorAll('#map [data-shape]:not([data-shape^="outline"])').length === 0`, "画面の区域も消える");
+  await page.click("#redoBtn");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).zones.length === 1`, "やり直すと戻る");
+  await page.waitFor(`document.querySelectorAll('#map [data-shape]:not([data-shape^="outline"])').length === 1`, "画面にも戻る");
+  assert.deepEqual(page.errors, []);
+});
+
+test("畝の幅を変えたあと、ほかの端末で同じ畝が変わったら、元に戻さずに知らせる", options, async () => {
+  await openStrip(1);
+  await widenBed();
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "保存の完了");
+  await page.waitFor(`!document.getElementById("undoBtn").disabled`, "元に戻すが使える");
+  // ほかの端末が、同じ畝を変える（変更の記録も残る）
+  await page.run(`(() => {
+    const data = JSON.parse(localStorage.getItem("field_plan_local"));
+    const bed = data.beds[0];
+    data.audit.push({ seq: data.audit.at(-1).seq + 1, op: crypto.randomUUID(), table: "beds", id: bed.id, before: structuredClone(bed) });
+    bed.seq = 9;
+    localStorage.setItem("field_plan_local", JSON.stringify(data));
+  })()`);
+  const before = JSON.stringify((await page.saved()).beds);
+  await page.click("#undoBtn");
+  await page.waitFor(`/元に戻せませんでした: ほかの画面や端末で/.test(document.getElementById("saveStatus").textContent)`, "戻せないと知らせる");
+  assert.equal(JSON.stringify((await page.saved()).beds), before, "DB は変わらない");
+  assert.equal(await page.run(`document.querySelector('[data-dim="width:0"]').textContent`), "150cm", "画面も変わらない");
+  assert.deepEqual(page.errors, []);
+});
+
 test("区域を作ってすぐ区画にする: 区域の保存を待たずに操作しても、両方保存される", options, async () => {
   await page.loadApp({ ...seed(0), zones: [], blocks: [] });
   await page.click("#mapEditBtn");

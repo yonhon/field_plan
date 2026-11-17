@@ -798,12 +798,19 @@ $$;
 -- 画面の 1 回の操作（audit_log の op_id）で変わった行を、操作の前の中身に戻す（Issue #2）。1 つのトランザクションで行い、失敗したら何も変えない。
 -- 行ごとに、その操作の最初の記録の old_row が操作の前の中身（足した行は空なので、消す）。同じ行を何度変えた操作も、1 回で戻る。
 -- 戻す処理の変更も、操作の ID 付きで記録する。ID は画面が送る x-op-id、なければ新しく作る。その ID を戻すと、やり直しになる。
--- 返すのは { status: 'done', op_id: 戻す処理の ID, rows: 戻した行の数 }、{ status: 'empty' }（記録がない）、
--- { status: 'conflict', rows: [{ table, row_id }] }（戻さない）。conflict になるのは、次の 2 つ。
+-- 返すのは次のどれか。
+--   { status: 'done', op_id: 戻す処理の ID, rows: 戻した行の数, changes: [{ table, id, row }], logs: [{ id, row }] }
+--     changes は、戻した行の今の中身（消えた行は row が null）。作業の記録の表は changes に入れず、logs に、記録・対象・資材の形
+--     （load_field の logs の 1 件と同じ）で返す。画面は、これを当てれば DB とそろう（読み直さなくてよい）
+--   { status: 'empty' }（記録がない）
+--   { status: 'confirm', removed: { 表: 行の数 } }（p_limits を渡し、消える行がそれ以上の表があった。戻さない）。
+--     p_limits は { zones: 1, beds: 2, logs: 2, ... }。作業の記録は logs で数える。確かめたら、p_limits なしで呼び直す
+--   { status: 'conflict', rows: [{ table, row_id }] }（戻さない）。conflict になるのは、次の 2 つ。
 --   1. 戻す行が、その操作のあとに変わっている（記録がある）
 --   2. 戻すと、操作に入っていない行まで変わる（操作で足した行を、あとから別の行が指していて、連鎖で消える、など）
 -- 監査の対象でない表（changes など）と Storage のファイルは戻さない。
-create or replace function field.undo_op(p_op uuid) returns jsonb
+drop function if exists field.undo_op(uuid);
+create or replace function field.undo_op(p_op uuid, p_limits jsonb default null) returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
@@ -823,6 +830,10 @@ declare
   v_pk text;
   v_set text;
   v_progress boolean;
+  v_removed jsonb;
+  v_changes jsonb := '[]'::jsonb;
+  v_log_ids uuid[] := '{}';
+  v_logs jsonb;
 begin
   if not field.is_owner() then
     raise exception '元に戻せるのは、持ち主だけです' using errcode = '42501';
@@ -857,6 +868,20 @@ begin
   join field.audit_log a on a.table_name = r ->> 't' and a.row_id = r ->> 'id' and a.id > (r ->> 'last')::bigint;
   if v_conflicts is not null then
     return jsonb_build_object('status', 'conflict', 'rows', v_conflicts);
+  end if;
+
+  -- 消える行（操作の前になかった行）が多ければ、戻さずに数を返す
+  if p_limits is not null then
+    select jsonb_object_agg(t, n) into v_removed
+    from (
+      select case r ->> 't' when 'work_logs' then 'logs' else r ->> 't' end as t, count(*) as n
+      from jsonb_array_elements(v_rows) r
+      where jsonb_typeof(r -> 'before') <> 'object' and r ->> 't' not in ('work_log_targets', 'work_log_inputs')
+      group by 1
+    ) c;
+    if exists (select 1 from jsonb_each_text(coalesce(v_removed, '{}'::jsonb)) e(t, n) where p_limits ? e.t and e.n::int >= (p_limits ->> e.t)::int) then
+      return jsonb_build_object('status', 'confirm', 'removed', v_removed);
+    end if;
   end if;
 
   -- 戻す処理の ID。write_audit_log は request.headers の x-op-id を読むので、このトランザクションの中だけ置き換える
@@ -944,13 +969,31 @@ begin
       if v_now is distinct from (case when jsonb_typeof(v_item -> 'before') = 'object' then v_item -> 'before' end) then
         raise exception '戻したあとの中身が、操作の前と違います: % %', v_item ->> 't', v_item ->> 'id';
       end if;
+      -- 画面に返す中身。作業の記録の表は、記録ごとにまとめて返す
+      if v_item ->> 't' = 'work_logs' then
+        v_log_ids := v_log_ids || (v_item ->> 'id')::uuid;
+      elsif v_item ->> 't' in ('work_log_targets', 'work_log_inputs') then
+        v_log_ids := v_log_ids || coalesce(v_now ->> 'log_id', v_item -> 'before' ->> 'log_id', v_item ->> 'log_id')::uuid;
+      else
+        v_changes := v_changes || jsonb_build_array(jsonb_build_object('table', v_item ->> 't', 'id', v_item ->> 'id', 'row', v_now));
+      end if;
     end loop;
+    select coalesce(jsonb_agg(jsonb_build_object('id', ids.id, 'row', (
+      select to_jsonb(x) from (
+        select l.*,
+          coalesce((select jsonb_agg(t) from field.work_log_targets t where t.log_id = l.id), '[]'::jsonb) as targets,
+          coalesce((select jsonb_agg(i) from field.work_log_inputs i where i.log_id = l.id), '[]'::jsonb) as inputs
+        from field.work_logs l where l.id = ids.id
+      ) x))), '[]'::jsonb)
+    into v_logs
+    from (select distinct unnest(v_log_ids) as id) ids
+    where ids.id is not null;
   exception when sqlstate 'FP001' then
     -- この begin の中の変更（戻す処理の記録も含む）は、取り消されている
     return jsonb_build_object('status', 'conflict', 'rows', v_conflicts);
   end;
 
-  return jsonb_build_object('status', 'done', 'op_id', v_new, 'rows', jsonb_array_length(v_rows));
+  return jsonb_build_object('status', 'done', 'op_id', v_new, 'rows', jsonb_array_length(v_rows), 'changes', v_changes, 'logs', v_logs);
 end;
 $$;
 
@@ -1056,8 +1099,8 @@ revoke all on function field.audit_last() from public, anon;
 revoke all on function field.load_field(uuid, uuid, bigint) from public, anon;
 grant execute on function field.load_field(uuid, uuid, bigint) to authenticated;
 grant execute on function field.audit_last() to authenticated;
-revoke all on function field.undo_op(uuid) from public, anon;
-grant execute on function field.undo_op(uuid) to authenticated;
+revoke all on function field.undo_op(uuid, jsonb) from public, anon;
+grant execute on function field.undo_op(uuid, jsonb) to authenticated;
 grant execute on function field.plan_last_changes() to authenticated;
 revoke all on field.importers from authenticated;
 alter table field.importers enable row level security;

@@ -2,7 +2,6 @@
 // 記録は、実際に使うプランの区画・畝・作付・作業につなぐ。計画はスマホでは直せないが、記録はスマホでも入れられる。
 import { WORK_COLORS, WORK_ITEMS, addDays, diffDays, isManagement, localToday, workName } from "./schedule.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
-import { noteChange } from "./history.js";
 import { record } from "./journal.js";
 import { SPEC_FIELDS, formatAmount, isBlockTarget, logEnd, perHoleScale, perHoleUnit, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
@@ -1792,7 +1791,6 @@ async function reload() {
 function logsChanged() {
   renderLogs();
   ctx.onLogsChanged?.();
-  noteChange();
 }
 
 // 記録の並び。DB から読むとき（store の loadLogs）と同じく、日付の新しい順、作った日時の新しい順、ID の順

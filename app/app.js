@@ -42,7 +42,7 @@ import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
-import { initHistory, resetHistory } from "./history.js";
+import { initHistory, renderHistoryButtons, resetHistory } from "./history.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { plantingOnDate } from "./logs.js";
@@ -1328,6 +1328,52 @@ function sameContent(local, remote) {
     return Boolean(remote) && typeof remote === "object" && Object.keys(local).every((name) => sameContent(local[name], remote[name]));
   }
   return local === remote || (local == null && remote == null);
+}
+
+// 元に戻した行（DB の関数 field.undo_op が返す、戻した行の今の中身）を画面のデータに当てて、描き直す。
+// 当てるのは、いまの圃場とプランの行と、品目・肥料・作業の種類・実績。row が null の行は消えた
+const UNDO_TABLES = new Set(["zones", "blocks", "beds", "plantings", "works", "crops", "fertilizers"]);
+function applyUndo({ changes = [], logs = [] }) {
+  // 当て方を決めていない表（下絵、プランなど）の行があれば、当てずに知らせる（history.js が DB から読み直す）
+  const unknown = [...new Set(changes.map((item) => item.table).filter((table) => !UNDO_TABLES.has(table) && table !== "fields" && table !== "work_types"))];
+  if (unknown.length) {
+    throw new Error(`画面に当てられない表があります: ${unknown.join(", ")}`);
+  }
+  // 今ある行は同じ位置で差し替え、ない行は後ろに足す（並びに頼る画面があるので、ほかの行の並びは変えない）
+  const put = (list, key, id, row) => {
+    const at = list.findIndex((item) => String(item[key]) === String(id));
+    if (at < 0) {
+      return row ? [...list, row] : list;
+    }
+    return row ? list.map((item, i) => (i === at ? row : item)) : list.filter((_, i) => i !== at);
+  };
+  for (const { table, id, row } of changes) {
+    if (UNDO_TABLES.has(table)) {
+      if (row && row.plan_id && row.plan_id !== state.plan.id) {
+        continue; // 別のプランの行。開いていない
+      }
+      state[table] = put(state[table], "id", id, row);
+    } else if (table === "fields") {
+      state.fields = put(state.fields, "id", id, row);
+      if (row && row.id === state.field.id) {
+        state.field = state.fields.find((item) => item.id === row.id);
+        state.field.outline = outlineParts(state.field.outline);
+      }
+    } else if (table === "work_types") {
+      state.allWorkTypes = put(state.allWorkTypes, "code", id, row).sort((a, b) => a.sort - b.sort);
+      state.workTypes = state.allWorkTypes.filter(isPlannable);
+    }
+  }
+  for (const { id, row } of logs) {
+    if (!row || row.field_id === state.field.id) {
+      state.logs = put(state.logs, "id", id, row);
+    }
+  }
+  state.logs.sort((a, b) => b.date.localeCompare(a.date) || String(b.created_at).localeCompare(String(a.created_at)));
+  if (mapDraft.current) {
+    mapDraft.current = editSnapshot();
+  }
+  refreshViews();
 }
 
 // データを入れ替えたあと、どの画面も描き直す。なくなった図形を選んだままにしない
@@ -2919,7 +2965,37 @@ const shapeEditable = (key) => Boolean(key) && drawingToolsShown();
 // 書き込みは、した時点の操作の ID を付けて送る（DB の操作の記録で、1 回の操作としてまとまる）
 const EDIT_UNSAVED = "図の編集を保存していません";
 const DRAFT_WRITES = ["upsert", "remove", "saveField", "saveLog", "deleteLog", "saveWorkType"];
-const mapDraft = { base: null, ops: [], start: null };
+// undo / redo は書きかけの履歴。1 回ぶんは、書きかけに書き込みを溜めた操作 1 つ（{ op, before, after, ops }）。
+// current は、最後に書き込みを溜めたあとの写し（次の操作の「前」になる）
+const mapDraft = { base: null, ops: [], start: null, current: null, undo: [], redo: [] };
+
+// 書きかけを、操作 1 つぶん戻す。溜めた書き込みからその操作の分を外し、画面を操作の前の写しに戻す
+function undoDraft() {
+  const entry = mapDraft.undo.pop();
+  const after = editSnapshot();
+  const ops = mapDraft.ops.filter((item) => item.op === entry.op);
+  mapDraft.ops = mapDraft.ops.filter((item) => item.op !== entry.op);
+  mapDraft.redo.push({ op: entry.op, before: entry.before, after, ops });
+  mapDraft.current = entry.before;
+  restoreEditSnapshot(entry.before);
+  renderEditFoot();
+}
+
+function redoDraft() {
+  const entry = mapDraft.redo.pop();
+  mapDraft.ops.push(...entry.ops);
+  mapDraft.undo.push({ op: entry.op, before: entry.before });
+  mapDraft.current = entry.after;
+  restoreEditSnapshot(entry.after);
+  renderEditFoot();
+}
+
+const clearDraftHistory = () => {
+  mapDraft.undo = [];
+  mapDraft.redo = [];
+  mapDraft.current = editSnapshot();
+  renderHistoryButtons();
+};
 
 // 編集で変わりうるデータの写し
 function editSnapshot() {
@@ -2988,11 +3064,19 @@ async function startMapEditing() {
   mapDraft.base = state.store;
   mapDraft.ops = [];
   mapDraft.start = editSnapshot();
+  clearDraftHistory();
   const held = DRAFT_WRITES.filter((name) => mapDraft.base[name]).map((name) => [
     name,
     async (...args) => {
-      mapDraft.ops.push({ name, args: structuredClone(args), op: currentOperation() });
+      const op = currentOperation();
+      if (mapDraft.undo.at(-1)?.op !== op) {
+        mapDraft.undo.push({ op, before: mapDraft.current });
+        mapDraft.redo = [];
+      }
+      mapDraft.ops.push({ name, args: structuredClone(args), op });
+      mapDraft.current = editSnapshot();
       renderEditFoot();
+      renderHistoryButtons();
     },
   ]);
   state.store = { ...mapDraft.base, ...Object.fromEntries(held) };
@@ -3015,6 +3099,7 @@ async function saveMapEditing() {
     releaseRecords(true);
     holdRecords();
     mapDraft.start = editSnapshot();
+    clearDraftHistory(); // 送った操作は、ふだんの履歴（DB の記録で戻す）に入った
     $("mapEditStatus").textContent = "保存しました";
     $("saveStatus").textContent = "保存しました";
   } catch (error) {
@@ -3039,9 +3124,12 @@ async function closeMapEditing() {
   releaseRecords(false);
   state.store = mapDraft.base;
   showMapEditing(false);
+  mapDraft.undo = [];
+  mapDraft.redo = [];
+  mapDraft.current = null;
+  renderHistoryButtons();
   if (changed) {
-    restoreEditSnapshot(mapDraft.start);
-    resetHistory(); // 元に戻すの履歴には、捨てた変更が入っている
+    restoreEditSnapshot(mapDraft.start); // 捨てた書きかけは DB に送っていないので、ふだんの履歴には入っていない
   }
   $("saveStatus").textContent = "";
   return true;
@@ -4280,15 +4368,22 @@ async function startApp(user = "local") {
     state,
     // プランを読み込んでいるあいだは、元に戻さない
     busy: () => state.planBusy || settings.open,
+    // 戻す返事を待つあいだは、図と日程の操作を止める
+    lock: (on) => {
+      state.planBusy = on;
+      renderPlanButtons();
+    },
     setStatus,
     // まだ送っていない図形の保存を、先に済ませる
     flush: async () => {
       clearTimeout(saveTimer);
       await flushSaves();
     },
-    refresh: refreshViews,
-    // 戻すのに途中で失敗したとき、DB から読み直す
+    apply: applyUndo,
+    // 戻したあと、画面に当てられなかったとき、DB から読み直す
     reload: reloadFromDb,
+    // 図の編集の書きかけ
+    draft: () => (state.mapEditing ? { canUndo: mapDraft.undo.length > 0, canRedo: mapDraft.redo.length > 0, undo: undoDraft, redo: redoDraft } : null),
   });
 }
 

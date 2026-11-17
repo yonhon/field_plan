@@ -55,6 +55,32 @@ const PLAN_TABLES = {
   works: { order: "seq", children: [] },
 };
 
+// このブラウザーの保存で、変更の記録（data.audit）を付ける表。key は行を見分ける列
+const AUDITED = {
+  fields: { key: "id" },
+  zones: { key: "id" },
+  blocks: { key: "id" },
+  beds: { key: "id" },
+  plantings: { key: "id" },
+  works: { key: "id" },
+  crops: { key: "id" },
+  fertilizers: { key: "id" },
+  workTypes: { key: "code" },
+  workLogs: { key: "id" },
+};
+// 変更の記録の表の名前を、DB の表の名前（undo_op が返す名前）に直す
+const AUDIT_NAMES = { workTypes: "work_types", workLogs: "logs" };
+for (const table of Object.keys(AUDITED)) {
+  AUDIT_NAMES[table] = AUDIT_NAMES[table] || table;
+}
+// 作業の種類は、保存したことがなければ、もとから入っている種類
+const auditRows = (data, table) => (table === "workTypes" ? data.workTypes || DEFAULT_WORK_TYPES.map((item) => ({ ...item })) : data[table] || []);
+// 表ごとに、行の見分けの値から、行の中身（文字にしたもの）へ
+const auditView = (data) =>
+  Object.fromEntries(
+    Object.entries(AUDITED).map(([table, { key }]) => [table, new Map(auditRows(data, table).map((row) => [String(row[key]), JSON.stringify(row)]))])
+  );
+
 // strict のローカルの保存。ふつうのローカルの保存はすぐ終わり、行のつながりも確かめないので、保存の順序の誤りが出ない。
 // 親の表ほど保存を遅くし（delay × STRICT_DELAY_MS）、親の保存を待たない書き方が必ず失敗するようにする。
 // parents は [親の表, 親を指す列]。親のない行は、DB と同じ 23503 で断る
@@ -307,9 +333,15 @@ export function createSupabaseStore(client, options) {
       check(await client.from("work_logs").delete().eq("id", id));
     },
     // 1 回の操作（DB の変更の記録の op_id）で変わった行を、操作の前に戻す（DB の関数 field.undo_op）。
-    // 返すのは { status: "done", op_id, rows } か { status: "empty" } か { status: "conflict", rows }
-    async undoOp(opId) {
-      return check(await client.rpc("undo_op", { p_op: opId }));
+    // 返すのは { status: "done", op_id, changes: [{ table, id, row }], logs: [{ id, row }] }、{ status: "empty" }、
+    // { status: "confirm", removed }（limits 以上に消える表があった。戻していない）、{ status: "conflict", rows }。
+    // logs の row は、loadLogs の 1 件と同じ形（消えた記録は null）
+    async undoOp(opId, limits = null) {
+      const result = check(await client.rpc("undo_op", { p_op: opId, p_limits: limits }));
+      if (result?.status === "done") {
+        result.logs = (result.logs || []).map(({ id, row }) => ({ id, row: row ? logShape(row) : null }));
+      }
+      return result;
     },
     // ---- 農薬の使用基準（FAMIC）。DB を使わないモードでは使えない ----
     famic: true,
@@ -601,9 +633,27 @@ export function createLocalStore({ strict = false } = {}) {
 function createLocalTables({ strict = false } = {}) {
   const read = () => JSON.parse(localStorage.getItem(LOCAL_KEY) || "{}");
   const write = (data) => localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
+  // 変更の記録。DB の field.audit_log の代わりに、書き込みのたびに、表ごとに前と後の行を比べ、変わった行の前の中身を、
+  // 書き込みの操作の ID と一緒に data.audit に残す（undoOp が使う）。作業の記録は、対象と資材ごと 1 行
+  let auditOp = null; // undoOp のあいだだけ、戻す処理の ID
   const update = (change) => {
     const data = read();
+    const op = auditOp || sending;
+    const before = op ? auditView(data) : null;
     change(data);
+    if (before) {
+      const after = auditView(data);
+      data.audit = data.audit || [];
+      for (const [table, rows] of Object.entries(after)) {
+        for (const id of new Set([...before[table].keys(), ...rows.keys()])) {
+          if (before[table].get(id) !== rows.get(id)) {
+            const seq = (data.audit.at(-1)?.seq || 0) + 1;
+            const old = before[table].get(id);
+            data.audit.push({ seq, op, table, id, before: old === undefined ? null : JSON.parse(old) });
+          }
+        }
+      }
+    }
     write(data);
   };
   const strictWrite = async (table, rows) => {
@@ -635,12 +685,6 @@ function createLocalTables({ strict = false } = {}) {
       delete data.image;
     }
   });
-  // 変更の記録。DB の field.audit_log の代わりに、変える前の行を、操作の ID と一緒に残す（undoOp が使う）
-  const audit = (data, table, id, before, op = sending) => {
-    data.audit = data.audit || [];
-    const seq = (data.audit.at(-1)?.seq || 0) + 1;
-    data.audit.push({ seq, op, table, id, before: before ? structuredClone(before) : null });
-  };
   const removeRows = (data, table, ids) => {
     if (!ids.length) {
       return;
@@ -859,7 +903,6 @@ function createLocalTables({ strict = false } = {}) {
       let result;
       update((data) => {
         const old = (data.workLogs || []).find((item) => item.id === id);
-        audit(data, "workLogs", id, old);
         const saved = {
           created_at: old?.created_at || new Date().toISOString(),
           ...log,
@@ -874,39 +917,61 @@ function createLocalTables({ strict = false } = {}) {
     },
     async deleteLog(id) {
       update((data) => {
-        audit(data, "workLogs", id, (data.workLogs || []).find((log) => log.id === id));
         data.workLogs = (data.workLogs || []).filter((log) => log.id !== id);
       });
     },
-    // DB の field.undo_op と同じ戻し方を、このブラウザーの保存の、変更の記録（data.audit）で行う。
-    // 記録を付けているのは、作業の記録（対象と資材ごと 1 件）だけ
-    async undoOp(opId) {
-      let result;
-      update((data) => {
-        const log = data.audit || [];
-        const rows = new Map();
-        for (const entry of log.filter((item) => item.op === opId)) {
-          const key = `${entry.table}:${entry.id}`;
-          rows.set(key, { ...entry, before: rows.has(key) ? rows.get(key).before : entry.before, last: entry.seq });
-        }
-        if (!rows.size) {
-          result = { status: "empty" };
-          return;
-        }
-        const conflicts = [...rows.values()].filter((row) => log.some((item) => item.table === row.table && item.id === row.id && item.seq > row.last));
-        if (conflicts.length) {
-          result = { status: "conflict", rows: conflicts.map((row) => ({ table: row.table, row_id: row.id })) };
-          return;
-        }
-        const undoId = sending && sending !== opId ? sending : crypto.randomUUID();
+    // DB の field.undo_op と同じ戻し方と返し方を、このブラウザーの保存の、変更の記録（data.audit）で行う
+    async undoOp(opId, limits = null) {
+      const data = read();
+      const log = data.audit || [];
+      const rows = new Map();
+      for (const entry of log.filter((item) => item.op === opId)) {
+        const key = `${entry.table}:${entry.id}`;
+        rows.set(key, { table: entry.table, id: entry.id, before: rows.has(key) ? rows.get(key).before : entry.before, last: entry.seq });
+      }
+      if (!rows.size) {
+        return { status: "empty" };
+      }
+      const conflicts = [...rows.values()].filter((row) => log.some((item) => item.table === row.table && item.id === row.id && item.seq > row.last));
+      if (conflicts.length) {
+        return { status: "conflict", rows: conflicts.map((row) => ({ table: AUDIT_NAMES[row.table], row_id: row.id })) };
+      }
+      if (limits) {
+        const removed = {};
         for (const row of rows.values()) {
-          const list = data[row.table] || [];
-          audit(data, row.table, row.id, list.find((item) => item.id === row.id), undoId);
-          data[row.table] = [...list.filter((item) => item.id !== row.id), ...(row.before ? [structuredClone(row.before)] : [])];
+          if (!row.before) {
+            const name = AUDIT_NAMES[row.table];
+            removed[name] = (removed[name] || 0) + 1;
+          }
         }
-        result = { status: "done", op_id: undoId, rows: rows.size };
-      });
-      return result;
+        if (Object.entries(removed).some(([name, count]) => limits[name] !== undefined && count >= limits[name])) {
+          return { status: "confirm", removed };
+        }
+      }
+      const undoId = sending && sending !== opId ? sending : crypto.randomUUID();
+      auditOp = undoId;
+      try {
+        update((next) => {
+          for (const row of rows.values()) {
+            const { key } = AUDITED[row.table];
+            const list = auditRows(next, row.table);
+            next[row.table] = [...list.filter((item) => String(item[key]) !== row.id), ...(row.before ? [structuredClone(row.before)] : [])];
+          }
+        });
+      } finally {
+        auditOp = null;
+      }
+      const now = read();
+      const changes = [];
+      const logs = [];
+      for (const row of rows.values()) {
+        const { key } = AUDITED[row.table];
+        const current = auditRows(now, row.table).find((item) => String(item[key]) === row.id) || null;
+        (row.table === "workLogs" ? logs : changes).push(
+          row.table === "workLogs" ? { id: row.id, row: current } : { table: AUDIT_NAMES[row.table], id: row.id, row: current }
+        );
+      }
+      return { status: "done", op_id: undoId, rows: rows.size, changes, logs };
     },
     // 農薬の使用基準は DB にある。動作確認のため、このブラウザーの保存に famic: { products, uses } を入れたときだけ、それを使う
     get famic() {

@@ -279,7 +279,7 @@ test("ドラッグしているあいだは読み直さず、離したら読み�
   assert.deepEqual(page.errors, []);
 });
 
-test("元に戻すのに途中で失敗したら、DB から読み直して画面を DB にそろえ、履歴を空にする。読み直せるまで操作を止める", options, async () => {
+test("元に戻すのに失敗したら（回線が切れていた）、画面も DB も変えず、履歴を残す。回線が戻れば、もう一度押して戻せる", options, async () => {
   await openStrip(3);
   await deleteBed("bed3", "bed1,bed2");
   // 書き込みも読み込みもできない（回線が切れた）ことにする
@@ -300,16 +300,15 @@ test("元に戻すのに途中で失敗したら、DB から読み直して画�
     };
   })()`);
   await page.click("#undoBtn");
-  await page.waitFor(`document.getElementById("saveStatus").textContent.includes("DB から読み直しています")`, "読み直しの知らせ");
-  assert.equal(await page.run(`document.body.classList.contains("plan-busy")`), true, "読み直せるまで、図と日程の操作を止める");
-  // 回線が戻る
-  await page.run(`window.offline = false; window.dispatchEvent(new Event("online"))`);
-  await page.waitFor(`document.getElementById("saveStatus").textContent.startsWith("DB の内容を読み直しました。元に戻せませんでした")`, "読み直しの完了");
-  assert.equal(await shownBeds(), "bed1,bed2", "画面は、DB の内容（戻す前）になる");
-  assert.deepEqual((await page.saved()).beds.map((item) => item.id), ["bed1", "bed2"]);
-  assert.equal(await page.run(`document.body.classList.contains("plan-busy")`), false);
-  assert.equal(await undoDisabled(), true);
-  assert.equal(await page.run(`document.getElementById("redoBtn").disabled`), true);
+  await page.waitFor(`document.getElementById("saveStatus").textContent.startsWith("元に戻せませんでした: 回線が切れています")`, "失敗の知らせ");
+  assert.equal(await shownBeds(), "bed1,bed2", "画面は変わらない");
+  assert.equal(await page.run(`document.body.classList.contains("plan-busy")`), false, "操作は止めたままにしない");
+  assert.equal(await undoDisabled(), false, "履歴は残る");
+  // 回線が戻ったら、もう一度押して戻せる
+  await page.run(`window.offline = false`);
+  await page.click("#undoBtn");
+  await waitBeds("bed1,bed2,bed3");
+  assert.deepEqual((await page.saved()).beds.map((item) => item.id).sort(), ["bed1", "bed2", "bed3"]);
 });
 
 // 起動と、戻ってきたときの読み直しで、圃場を読んだ回数（ローカルの保存が数える）
