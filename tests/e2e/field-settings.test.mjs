@@ -204,15 +204,29 @@ test("圃場の設定: 保存した回転と気象の設定を、窓を閉じた
   await page.click("#fieldSettingsClose");
   await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓を閉じる");
 
+  // 元に戻すと、圃場の設定の窓が開き、窓の中の欄が変わるところを見せる
   await page.click("#undoBtn");
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "窓が開く");
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).backdrops.f1.rotation_deg === 0`, "下絵の向きが戻る");
+  await page.waitFor(`document.getElementById("rotation").value === "0"`, "窓の欄も戻る");
+  await page.waitFor(`document.getElementById("settingsStatus").textContent.startsWith("元に戻しました")`, "窓の中に知らせる");
+  assert.equal(await page.run(`document.getElementById("settingsSave").disabled`), true, "戻した内容は、窓の書きかけにしない");
+  await page.click(`${DIALOG} [data-fstab="weather"]`);
+  assert.equal(await page.run(`document.getElementById("baseLat").value`), "", "気象の欄も戻る");
   const undone = await page.saved();
   assert.deepEqual(undone.zones, before.zones, "どちらのプランの区域も戻る");
   assert.deepEqual(undone.fields[0].outline, before.fields[0].outline, "外形も戻る");
   assert.equal(undone.fields[0].base_lat ?? null, null, "気象の設定も戻る");
+  await page.click("#fieldSettingsClose");
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "確かめずに閉じる（書きかけはない）");
+
   await page.click("#redoBtn");
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "やり直すでも窓が開く");
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).backdrops.f1.rotation_deg === 90`, "やり直すと、また当たる");
+  await page.waitFor(`document.getElementById("rotation").value === "90"`, "窓の欄も変わる");
   assert.deepEqual((await page.saved()).zones, turned.zones);
+  await page.click("#fieldSettingsClose");
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる");
   assert.deepEqual(page.errors, []);
 });
 
@@ -237,8 +251,11 @@ test("圃場の設定: 読み込んだ下絵を保存したあと、元に戻す
     await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓を閉じる");
 
     await page.click("#undoBtn");
+    await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "窓が開く");
     await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).backdrops.f1?.storage_path === "local:f1"`, "前の下絵に戻る");
-    await page.waitFor(`document.querySelector("#map image")?.getAttribute("href") === ${JSON.stringify(IMAGE)}`, "前の画像を描く");
+    await page.waitFor(`document.querySelector("#map image")?.getAttribute("href") === ${JSON.stringify(IMAGE)}`, "窓の図に、前の画像を描く");
+    await page.click("#fieldSettingsClose");
+    await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる");
     await page.click("#redoBtn");
     await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).backdrops.f1?.storage_path === ${JSON.stringify(loaded.storage_path)}`, "やり直すと、読み込んだ下絵");
     assert.deepEqual(page.errors, []);

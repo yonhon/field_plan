@@ -42,7 +42,7 @@ import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
-import { UNDO_APPLY, initHistory, markFieldOperation, renderHistoryButtons, resetHistory } from "./history.js";
+import { UNDO_APPLY, initHistory, markSettingsOperation, renderHistoryButtons, resetHistory } from "./history.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { plantingOnDate } from "./logs.js";
@@ -1341,6 +1341,13 @@ async function applyUndo({ changes = [], logs = [] }) {
   if (unknown.length) {
     throw new Error(`画面に当てられない表があります: ${unknown.join(", ")}`);
   }
+  // 同じ行（オブジェクト）のまま、中身を戻した行にそろえる。戻した行にない列は消す
+  const refill = (target, row) => {
+    for (const key of Object.keys(target).filter((name) => !(name in row))) {
+      delete target[key];
+    }
+    Object.assign(target, row);
+  };
   // 今ある行は同じ位置で差し替え、ない行は後ろに足す（並びに頼る画面があるので、ほかの行の並びは変えない）
   const put = (list, key, id, row) => {
     const at = list.findIndex((item) => String(item[key]) === String(id));
@@ -1360,7 +1367,7 @@ async function applyUndo({ changes = [], logs = [] }) {
       const known = state.fields.find((item) => item.id === id);
       if (row && known) {
         const weather = JSON.stringify([known.base_lat, known.base_lng, known.weather]) !== JSON.stringify([row.base_lat, row.base_lng, row.weather]);
-        Object.assign(known, row);
+        refill(known, row);
         if (known === state.field) {
           state.field.outline = outlineParts(state.field.outline);
           weatherChanged = weatherChanged || weather;
@@ -1377,7 +1384,7 @@ async function applyUndo({ changes = [], logs = [] }) {
       if (row && row.field_id !== state.field.id) {
         continue;
       } else if (row && known) {
-        Object.assign(known, row);
+        refill(known, row);
       } else if (row) {
         state.plans.push(row);
         state.plans.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
@@ -1409,6 +1416,13 @@ async function applyUndo({ changes = [], logs = [] }) {
   state.logs.sort((a, b) => b.date.localeCompare(a.date) || String(b.created_at).localeCompare(String(a.created_at)));
   if (!state.plans.some((item) => item.id === state.plan.id)) {
     await openPlan(state.plans[0]); // 開いていたプランを作った操作を戻した
+  }
+  if (settings.open) {
+    // 圃場の設定の窓を開いて戻した。戻したところを窓の新しい出発点にする（窓の書きかけとみなさない）
+    Object.assign(settings, { undo: [], redo: [], transforms: [], records: [] });
+    settings.start = settingsSnapshot();
+    beginWeatherDraft({ before: markStep, after: renderSettingsFoot });
+    renderSettingsFoot();
   }
   if (weatherChanged) {
     // 保存したときと同じく、気象の欄を描き直し、観測所の値を取り直す（作付の詳細の気温・雨量が、戻した観測所になる）
@@ -3997,7 +4011,7 @@ async function saveFieldSettings() {
   // 保存は、1 つの操作（元に戻すの 1 回ぶん）。何回かに分けて書くので、どの書き込みにも、この操作の ID を付ける。
   // 圃場の操作なので、どのプランを開いていても戻せる
   const op = currentOperation();
-  markFieldOperation(op);
+  markSettingsOperation(op);
   const base = state.store;
   state.store = bindOperation(base, op);
   try {
@@ -4428,7 +4442,13 @@ async function startApp(user = "local") {
       state.planBusy = on;
       renderPlanButtons();
     },
-    setStatus,
+    // 圃場の設定の窓を開いていれば、窓の中にも出す（戻す・やり直すを、窓を開いて見せるので）
+    setStatus: (text) => {
+      setStatus(text);
+      if (settings.open) {
+        $("settingsStatus").textContent = text;
+      }
+    },
     // まだ送っていない図形の保存を、先に済ませる
     flush: async () => {
       clearTimeout(saveTimer);
@@ -4437,12 +4457,16 @@ async function startApp(user = "local") {
     apply: applyUndo,
     // 戻したあと、画面に当てられなかったとき、DB から読み直す
     reload: reloadFromDb,
-    // プランの操作を戻す前に、「圃場とプラン」の窓を開いて見せる
-    showPlans: async () => {
-      if (!document.querySelector("dialog.field-plans[open]")) {
+    // プランの操作と圃場の設定の保存は、戻す前に、その窓を開いて見せる
+    showDialog: async (kind) => {
+      if (kind === "plans" && !document.querySelector("dialog.field-plans[open]")) {
         openFieldPlans();
-        await new Promise((resolve) => setTimeout(resolve, 400));
+      } else if (kind === "settings" && !settings.open) {
+        await openFieldSettings();
+      } else {
+        return;
       }
+      await new Promise((resolve) => setTimeout(resolve, 400));
     },
     // 図の編集の書きかけ
     draft: () => (state.mapEditing ? { canUndo: mapDraft.undo.length > 0, canRedo: mapDraft.redo.length > 0, undo: undoDraft, redo: redoDraft } : null),

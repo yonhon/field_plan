@@ -8,7 +8,8 @@
 // 図の編集の書きかけ（まだ DB に送っていない変更）は、図の編集が持つ書きかけの履歴（ctx.draft）で、画面の中だけで行き来する。
 // 1 回ぶんは、その操作をしたときに開いていたプランを覚える（scope）。次に戻すものが別のプランの操作なら、戻さずに知らせ、
 // そのプランに切り替えたら戻せる。プランの操作（「圃場とプラン」の窓）と、圃場の設定の窓の保存は、圃場の操作（scope: "field"）で、
-// どのプランからでも戻せる。プランの操作は、「圃場とプラン」の窓を開いてから戻す（ctx.showPlans）。
+// どのプランからでも戻せる。戻す・やり直すときは、その窓（「圃場とプラン」の窓か、圃場の設定の窓）を開いてから、
+// ユーザーの目の前で戻す（ctx.showDialog）。
 // 圃場の切り替え・作成・削除・名前の変更は対象外で、圃場を切り替えると履歴が空になる（resetHistory）。
 import { confirmDelete } from "./dialog.js";
 import { record } from "./journal.js";
@@ -47,14 +48,15 @@ export const UNDO_APPLY = {
 export const UNDO_NOT_APPLIED = {};
 const TABLE_NAMES = { plans: "プラン", zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", crops: "品目", fertilizers: "肥料", logs: "実績" };
 
-// ctx = { state, busy, lock, flush, apply, reload, setStatus, draft, showPlans }
+// ctx = { state, busy, lock, flush, apply, reload, setStatus, draft, showDialog }
 let ctx = null;
-// 1 回ぶんは { op, scope, plans }。op は操作の ID（やり直しの 1 回ぶんは、戻す処理の ID）。
-// scope は、操作したときに開いていたプランの ID か "field"。plans は、プランの操作か（戻すときに「圃場とプラン」の窓を開く）
+// 1 回ぶんは { op, scope, dialog }。op は操作の ID（やり直しの 1 回ぶんは、戻す処理の ID）。
+// scope は、操作したときに開いていたプランの ID か "field"。dialog は、戻すときに開く窓（"plans": 「圃場とプラン」の窓、
+// "settings": 圃場の設定の窓、null: 開かない）
 const undoStack = [];
 const redoStack = [];
 const ignored = new Set(); // 履歴を空にした操作の ID。そのあとに書いても積まない
-const fieldOps = new Set(); // 圃場の操作の ID（圃場の設定の窓の保存）。開いているプランによらず戻せる
+const settingsOps = new Set(); // 圃場の設定の窓の保存の操作の ID。圃場の操作で、開いているプランによらず戻せる
 let busy = false;
 
 // 文字を打っている途中か。そのあいだは、ブラウザーの入力欄の「元に戻す」に任せる
@@ -89,25 +91,27 @@ function written(name, op) {
   }
   let entry = undoStack.at(-1);
   if (entry?.op !== op) {
-    entry = { op, scope: ctx.state.plan?.id ?? "field", plans: false };
+    entry = { op, scope: ctx.state.plan?.id ?? "field", dialog: null };
     undoStack.push(entry);
     if (undoStack.length > MAX_STEPS) {
       undoStack.shift();
     }
   }
   if (PLAN_WRITES.has(name)) {
-    entry.plans = true;
+    entry.dialog = "plans";
+  } else if (settingsOps.has(op)) {
+    entry.dialog = "settings";
   }
-  if (entry.plans || fieldOps.has(op)) {
+  if (entry.dialog) {
     entry.scope = "field";
   }
   redoStack.length = 0;
   renderButtons();
 }
 
-// この操作を、圃場の操作にする（開いているプランによらず戻せる）。圃場の設定の窓の保存で、書く前に呼ぶ
-export function markFieldOperation(op = currentOperation()) {
-  fieldOps.add(op);
+// この操作を、圃場の設定の窓の保存にする（開いているプランによらず戻せ、戻すときは圃場の設定の窓を開く）。書く前に呼ぶ
+export function markSettingsOperation(op = currentOperation()) {
+  settingsOps.add(op);
 }
 
 // 履歴を空にする（プランの切り替え、縮尺の合わせ直しなど、戻せない操作のあと）。その操作がこのあと書いても、積まない
@@ -156,10 +160,10 @@ async function step(from, to, label) {
   }
   busy = true;
   renderButtons();
-  ctx.lock(true);
-  if (entry.plans) {
-    await ctx.showPlans(); // プランの操作は、「圃場とプラン」の窓を開いて、目の前で戻す
+  if (entry.dialog) {
+    await ctx.showDialog(entry.dialog); // その窓を開いて、目の前で戻す（窓を開いてから、操作を止める）
   }
+  ctx.lock(true);
   ctx.setStatus(`${label}しています…`);
   from.pop();
   const { op } = entry;
