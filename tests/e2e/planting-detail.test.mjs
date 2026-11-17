@@ -234,3 +234,23 @@ test("農薬の使用回数: 最初に使った順に、成分の下にその成
   assert.deepEqual(notes, ["本剤 甲粒剤は上限に達しています。"], "条件は黄色い枠に出さない");
   assert.deepEqual(page.errors, []);
 });
+
+// 元に戻すは、その操作をした作付の詳細に移り、戻した計画の作業の日付の欄を光らせる
+test("作付の詳細で計画の日付を直し、別の画面で元に戻すと、作付の詳細に戻って、計画の日付の欄が光る", options, async () => {
+  await page.loadApp(seed());
+  await openFromMap("pl1");
+  await page.waitFor(`location.hash === "#detail/planting/pl1" && !document.getElementById("plantingView").hidden`, "作付の詳細が開く");
+  await page.click('[data-plan-edit="w-pl1"]');
+  await page.waitFor(`Boolean(document.querySelector("dialog.plan-edit[open]"))`, "計画を直す窓");
+  await page.run(`(() => { const input = document.querySelector('dialog.plan-edit [data-k="start"]'); input.value = "2026-10-20"; input.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.click('dialog.plan-edit [data-action="save"]');
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).works.find((work) => work.id === "w-pl1").plan_start === "2026-10-20"`, "計画の保存");
+  await page.click('.tab-btn[data-view="map"]');
+  await page.waitFor(`!document.getElementById("appView").hidden`, "圃場図");
+
+  await page.click("#undoBtn");
+  await page.waitFor(`location.hash === "#detail/planting/pl1" && !document.getElementById("plantingView").hidden`, "作付の詳細に戻る");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).works.find((work) => work.id === "w-pl1").plan_start === "2026-10-15"`, "計画が戻る");
+  await page.waitFor(`document.querySelector('td.detail-plan[data-plan="w-pl1"]')?.classList.contains("undo-flash")`, "計画の日付の欄が光る");
+  assert.deepEqual(page.errors, []);
+});

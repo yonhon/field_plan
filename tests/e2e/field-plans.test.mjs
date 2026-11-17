@@ -162,6 +162,7 @@ test("元に戻す: プランの名前の変更を戻すと、「圃場とプラ
   await page.click("#undoBtn");
   await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "窓が開く");
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).plans.find((plan) => plan.id === "p2").name === "一のプランB"`, "DB の名前が戻る");
+  await page.waitFor(`document.querySelector('${DIALOG} .fp-plan[data-plan="p2"]')?.classList.contains("undo-flash")`, "窓のプランの行が光る");
   await page.waitFor(`/一のプランB/.test(${JSON.stringify("")} + [...document.querySelectorAll("${DIALOG} .fp-plan")].map((row) => row.textContent).join("/"))`, "窓の一覧も戻る");
   await closeDialog();
   await page.click("#redoBtn");

@@ -1508,28 +1508,33 @@ function showUndone(targets) {
       return [`[data-planting="${key}"]`];
     }
     if (table === "works") {
-      return [`.gantt-bar[data-id="${key}"]`];
+      // 工程表の帯、作付の詳細と区画の作業の計画の日付の欄、工程の計画の窓のカード
+      return [`.gantt-bar[data-id="${key}"]`, `td.detail-plan[data-plan="${key}"]`, `.pe-card[data-id="${key}"]`];
     }
     if (table === "logs") {
       return [`[data-log="${key}"]`, `[data-log-id="${key}"]`, `.gantt-actual-bar[data-logs*="${key}"]`];
     }
     if (table === "plans") {
-      return [`dialog.field-plans [data-id="${key}"]`];
+      return [`dialog.field-plans .fp-plan[data-plan="${key}"]`];
     }
     return [];
   });
   if (!selectors.length) {
     return;
   }
-  const marked = [...document.querySelectorAll(selectors.join(","))].filter((element) => element.getClientRects().length > 0);
-  // 見える位置まで送る（ページや入れ物のスクロール。図そのものは動かさない）
-  marked.find((element) => !(element instanceof SVGElement))?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  for (const element of marked) {
-    element.classList.remove("undo-flash");
-    void element.getBoundingClientRect(); // 続けて戻したときも、光らせ直す
-    element.classList.add("undo-flash");
-  }
-  setTimeout(() => marked.forEach((element) => element.classList.remove("undo-flash")), UNDO_FLASH_MS);
+  // 光らせるのは、元に戻すの処理がすべて終わってから（操作の止めを外すときに「圃場とプラン」の窓などを描き直すので、
+  // 先に光らせると、描き直しで目印が消える）
+  setTimeout(() => {
+    const marked = [...document.querySelectorAll(selectors.join(","))].filter((element) => element.getClientRects().length > 0);
+    // 見える位置まで送る（ページや入れ物のスクロール。図そのものは動かさない）
+    marked.find((element) => !(element instanceof SVGElement))?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    for (const element of marked) {
+      element.classList.remove("undo-flash");
+      void element.getBoundingClientRect(); // 続けて戻したときも、光らせ直す
+      element.classList.add("undo-flash");
+    }
+    setTimeout(() => marked.forEach((element) => element.classList.remove("undo-flash")), UNDO_FLASH_MS);
+  });
 }
 
 // データを入れ替えたあと、どの画面も描き直す。なくなった図形を選んだままにしない
