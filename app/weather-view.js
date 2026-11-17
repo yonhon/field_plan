@@ -34,6 +34,17 @@ export async function officeForecast(office) {
 
 const option = (value, label, selected) => `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
 
+// 調べるための記録。ブラウザーに field_plan_debug の印があるときだけ、コンソールに書く（ふだんは何もしない）
+export function debugLog(label, detail) {
+  try {
+    if (localStorage.getItem("field_plan_debug")) {
+      console.info(`[field_plan] ${label}`, JSON.stringify(detail));
+    }
+  } catch {
+    // 印を読めなければ、書かない
+  }
+}
+
 // 描き直しの番号。観測所や予報の一覧を待つあいだに、新しい描き直しが始まっていたら、古いほうは描かずにやめる
 // （圃場の設定の窓を開いた直後に元に戻すと、窓を開いたときの描き直しが、戻す前の値で、戻したあとの描き直しを追い越す）
 let renderGeneration = 0;
@@ -46,6 +57,7 @@ export async function renderWeatherSettings() {
   const stale = () => generation !== renderGeneration;
   const field = state().field;
   const settings = weatherSettings();
+  debugLog("renderWeatherSettings", { generation, temp_station: settings.temp_station ?? null, sameAsList: state().fields.includes(field) });
   $("baseLat").value = field.base_lat ?? "";
   $("baseLng").value = field.base_lng ?? "";
   const hasBase = Number.isFinite(field.base_lat) && Number.isFinite(field.base_lng);
@@ -151,6 +163,7 @@ const weatherOf = (field) => ({ base_lat: field.base_lat ?? null, base_lng: fiel
 
 export function beginWeatherDraft(hooks = {}) {
   draft = { before: weatherOf(state().field), texts: [], hooks };
+  debugLog("beginWeatherDraft", { before: draft.before.weather?.temp_station ?? null });
 }
 
 // 書きかけを保存する（元に戻すで、開いたときの値に戻っていれば保存しない）。保存したら、そこを新しい出発点にする
@@ -175,6 +188,7 @@ export async function commitWeatherDraft() {
 // 書きかけを捨てて、元の値に戻す。窓を閉じたときに呼ぶ
 export function cancelWeatherDraft() {
   if (draft) {
+    debugLog("cancelWeatherDraft", { now: state().field.weather?.temp_station ?? null, back: draft.before.weather?.temp_station ?? null });
     Object.assign(state().field, draft.before);
   }
   draft = null;
