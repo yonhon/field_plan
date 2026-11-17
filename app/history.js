@@ -1,10 +1,14 @@
 // 元に戻す（Ctrl+Z）と、やり直す（Ctrl+Y）。
 // 操作ごとに逆の手順を書くのではなく、操作の前後で計画のデータの写しを取っておき、戻すときはその写しに合わせる。
+// 実績だけが変わった操作は、写しではなく、DB の変更の記録で戻す（store.undoOp。DB の関数 field.undo_op）。
+// 書き込みに付けた操作の ID（store.js の onQueuedWrite）を覚えておき、その ID の変更を DB の側で戻して、実績を読み直す。
+// 監査ログの方式への切り替えの 1 段目（Issue #3）。計画の操作は、まだ写しで戻す。
 // 対象は、いまのプランの区域・区画・畝・作付・作業と、圃場の外形、品目、肥料、作業の種類の目安、圃場の実績。
 // プランの切り替え・作成・削除と、縮尺・向きの合わせ直しは対象外で、行うと履歴が空になる。
 // 戻すと多くの行が消えるときは、先に確かめる。
 import { confirmDelete } from "./dialog.js";
 import { record } from "./journal.js";
+import { onQueuedWrite } from "./store.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -15,9 +19,12 @@ const SETTLE_MS = 250; // 操作のあと、データが落ち着くのを待つ
 const LATE_MS = 1500; // 保存を待ってから変わるデータ（プランの作成など）を拾うための、遅い確認
 
 let ctx = null; // { state, busy, flush, refresh, reload, setStatus }
+// 履歴の 1 回ぶんは { snap, ops }。snap は、その 1 回ぶんの前の写し。ops は、DB の変更の記録で戻す操作の ID（写しで戻すときは空）
 const undoStack = [];
 const redoStack = [];
 let last = null; // 最後に確かめたときの写し
+let queuedOps = []; // 最後に履歴に積んだあとに、実績を書いた操作の ID
+const LOG_WRITES = new Set(["saveLog", "deleteLog"]);
 let busy = false;
 let timers = [];
 
@@ -63,7 +70,8 @@ function check() {
     return;
   }
   if (planOf(now) === planOf(last)) {
-    undoStack.push(last);
+    const ops = logsOnly(last, now) && queuedOps.length ? [...new Set(queuedOps)] : [];
+    undoStack.push({ snap: last, ops });
     if (undoStack.length > MAX_STEPS) {
       undoStack.shift();
     }
@@ -71,8 +79,16 @@ function check() {
     undoStack.length = 0; // プランを切り替えたら、前のプランの履歴は使えない
   }
   redoStack.length = 0;
+  queuedOps = [];
   last = now;
   renderButtons();
+}
+
+// 2 つの写しの違いが、実績だけか
+function logsOnly(before, after) {
+  const { logs: a, ...restA } = JSON.parse(before);
+  const { logs: b, ...restB } = JSON.parse(after);
+  return JSON.stringify(a) !== JSON.stringify(b) && JSON.stringify(restA) === JSON.stringify(restB);
 }
 
 // 保存を待ってから変わるデータは、変わった時点で確かめる（操作から時間がたつと、次の操作と 1 回ぶんになる）
@@ -90,8 +106,35 @@ export function resetHistory() {
   }
   undoStack.length = 0;
   redoStack.length = 0;
+  queuedOps = [];
   last = snapshot();
   renderButtons();
+}
+
+// DB の変更の記録で、操作を新しい順に戻す。戻す処理の操作の ID を、戻した順に返す（やり直すときは、それを新しい順に戻す）
+async function undoOps(ops) {
+  const { state } = ctx;
+  const applied = [];
+  try {
+    for (const op of [...ops].reverse()) {
+      const result = await state.store.undoOp(op);
+      if (result?.status === "conflict") {
+        throw Object.assign(new Error("ほかの画面や端末で、あとから変わっているので、戻せません"), { conflict: true });
+      }
+      if (result?.status === "done") {
+        applied.push(result.op_id);
+      }
+    }
+  } catch (error) {
+    // 途中まで戻したなら、画面と DB がずれている
+    throw Object.assign(error, { partial: applied.length > 0 });
+  }
+  try {
+    state.logs = await state.store.loadLogs(state.field.id);
+  } catch (error) {
+    throw Object.assign(error, { partial: true }); // DB は戻したが、画面は戻す前のまま
+  }
+  return applied;
 }
 
 // データを写しの内容に合わせ、DB も同じ内容にする
@@ -174,7 +217,8 @@ async function step(from, to, label) {
   try {
     await ctx.flush(); // まだ送っていない保存を先に済ませる
     const current = snapshot();
-    const target = from[from.length - 1];
+    const entry = from[from.length - 1];
+    const target = entry.snap;
     // 別のプランの写しには戻さない（そのプランの中身を消してしまう）
     if (planOf(target) !== planOf(current)) {
       from.length = 0;
@@ -191,11 +235,26 @@ async function step(from, to, label) {
       }
     }
     from.pop();
-    to.push(current);
-    try {
-      await restore(target);
-    } catch (error) {
-      throw Object.assign(error, { partial: true });
+    if (entry.ops.length) {
+      let applied;
+      try {
+        applied = await undoOps(entry.ops);
+      } catch (error) {
+        if (!error.partial && !error.conflict) {
+          from.push(entry); // 何も変わっていない（回線が切れていた、など）。もう一度試せるよう、履歴に残す
+        }
+        throw error;
+      }
+      if (applied.length) {
+        to.push({ snap: current, ops: applied });
+      }
+    } else {
+      to.push({ snap: current, ops: [] });
+      try {
+        await restore(target);
+      } catch (error) {
+        throw Object.assign(error, { partial: true });
+      }
     }
     last = snapshot();
     record({ kind: label === "元に戻" ? "history.undo" : "history.redo", text: label === "元に戻" ? "直前の操作を元に戻した" : "元に戻した操作をやり直した" });
@@ -224,6 +283,12 @@ export const redo = () => step(redoStack, undoStack, "やり直");
 export function initHistory(context) {
   ctx = context;
   last = snapshot();
+  // 元に戻す処理そのものの書き込み（busy のあいだ）は、覚えない
+  onQueuedWrite((name, op) => {
+    if (!busy && LOG_WRITES.has(name)) {
+      queuedOps.push(op);
+    }
+  });
   $("undoBtn").hidden = false;
   $("redoBtn").hidden = false;
   renderButtons();

@@ -387,10 +387,48 @@ test("実績の日付を動かす: 元に戻すと日付が戻り、やり直す
   await page.click("#undoBtn");
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).workLogs[0].date === "${DAY}"`, "実績の日付が戻る");
   assert.equal((await page.saved()).works.length, 1, "計画の行は変わらない");
+  // 実績だけの操作は、写しではなく、変更の記録で戻す（記録は、動かしたときと戻したときの 2 件。別の操作の ID）
+  const audit = (await page.saved()).audit;
+  assert.equal(audit.length, 2);
+  assert.notEqual(audit[1].op, audit[0].op);
 
   await page.waitFor(`!document.getElementById("redoBtn").disabled`, "やり直すが使える");
   await page.click("#redoBtn");
   await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).workLogs[0].date === ${JSON.stringify(moved)}`, "やり直し");
+  assert.equal((await page.saved()).audit.length, 3, "やり直しも、変更の記録で戻す");
+  assert.deepEqual(page.errors, []);
+});
+
+test("実績の日付を動かしたあと、ほかの端末で同じ実績が変わったら、元に戻さずに知らせる", options, async () => {
+  const DAY = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+  const data = seed(2);
+  data.plantings = [{ id: "pl1", plan_id: "p1", bed_id: "bed1", seq: 1, crop_id: "c1", crop_name: "試験菜", note: "" }];
+  data.works = [{ id: "w1", plan_id: "p1", block_id: null, planting_id: "pl1", work_type: "plant", seq: 1, plan_start: DAY, plan_end: DAY, detail: {}, note: "" }];
+  data.fields[0].active_plan_id = "p1";
+  data.workLogs = [{
+    id: "log1", field_id: "f1", date: DAY, end_date: null, work_type: "plant", finishes: true, spec: {}, note: "", created_at: AT, inputs: [],
+    targets: [{ id: "t1", log_id: "log1", planting_id: "pl1", bed_id: "bed1", block_id: null, work_id: "w1", label: "", crop_name: "試験菜", area_m2: null, spray_l: null }],
+  }];
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.click('#ganttModes [data-gantt-mode="act"]');
+  await page.waitFor(`document.querySelector("#gantt .gantt-actual-bar")`, "実績の帯");
+  await page.drag("#gantt .gantt-actual-bar", 60);
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).workLogs[0].date !== "${DAY}"`, "実績の移動");
+  await page.waitFor(`!document.getElementById("undoBtn").disabled`, "元に戻すが使える");
+  // ほかの端末が、同じ実績のメモを変える（変更の記録も残る）
+  await page.run(`(() => {
+    const data = JSON.parse(localStorage.getItem("field_plan_local"));
+    const log = data.workLogs[0];
+    data.audit.push({ seq: data.audit.at(-1).seq + 1, op: crypto.randomUUID(), table: "workLogs", id: log.id, before: structuredClone(log) });
+    log.note = "ほかの端末のメモ";
+    localStorage.setItem("field_plan_local", JSON.stringify(data));
+  })()`);
+  const before = JSON.stringify((await page.saved()).workLogs);
+  await page.click("#undoBtn");
+  await page.waitFor(`/元に戻せませんでした: ほかの画面や端末で/.test(document.getElementById("saveStatus").textContent)`, "戻せないと知らせる");
+  assert.equal(JSON.stringify((await page.saved()).workLogs), before, "実績は変わらない");
+  assert.equal(await page.run(`document.getElementById("undoBtn").disabled`), true, "戻せない 1 回ぶんは、履歴から外す");
   assert.deepEqual(page.errors, []);
 });
 

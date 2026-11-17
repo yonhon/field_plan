@@ -306,6 +306,11 @@ export function createSupabaseStore(client, options) {
     async deleteLog(id) {
       check(await client.from("work_logs").delete().eq("id", id));
     },
+    // 1 回の操作（DB の変更の記録の op_id）で変わった行を、操作の前に戻す（DB の関数 field.undo_op）。
+    // 返すのは { status: "done", op_id, rows } か { status: "empty" } か { status: "conflict", rows }
+    async undoOp(opId) {
+      return check(await client.rpc("undo_op", { p_op: opId }));
+    },
     // ---- 農薬の使用基準（FAMIC）。DB を使わないモードでは使えない ----
     famic: true,
     // 農薬を名前（カタカナにそろえた文字の一部）か登録番号で探す。有効成分ごとの行を返す
@@ -547,8 +552,16 @@ export function fetchWithOperation(url, options = {}) {
 const QUEUED_WRITES = [
   "upsert", "remove", "saveField", "saveBackdrop", "saveLog", "deleteLog", "saveWorkType", "saveFieldWeather", "markNews",
   "createField", "deleteField", "createPlan", "copyPlan", "renamePlan", "deletePlan", "setActivePlan",
-  "diarySaveDay", "diaryAddPhoto",
+  "diarySaveDay", "diaryAddPhoto", "undoOp",
 ];
+
+// 書き込みを列に入れたときに知らせる相手。(書き込みの名前, 操作の ID) で呼ぶ。
+// 元に戻すの履歴（history.js）が、どの操作で何を書いたかを覚えるのに使う
+const writeListeners = new Set();
+export function onQueuedWrite(listener) {
+  writeListeners.add(listener);
+  return () => writeListeners.delete(listener);
+}
 
 // 書き込みを、呼んだ順に 1 つずつ送る。同時に送ると、親の行より先に子の行が届いて断られることがある。
 // 前の書き込みが失敗しても、次の書き込みは送る。writing は、送り終えていない書き込みがあるあいだ true。
@@ -557,8 +570,9 @@ export function inOrder(store) {
   let last = Promise.resolve();
   let active = 0;
   let failures = 0; // 失敗した書き込みの数。戻ってきたときの読み直しが、失敗のあとは必ず DB と比べるのに使う
-  const queued = (write) => (...args) => {
+  const queued = (write, name) => (...args) => {
     const id = operation;
+    writeListeners.forEach((listener) => listener(name, id));
     active += 1;
     const result = last
       .then(() => {
@@ -574,7 +588,7 @@ export function inOrder(store) {
     });
     return result;
   };
-  const writes = QUEUED_WRITES.filter((name) => store[name]).map((name) => [name, queued(store[name])]);
+  const writes = QUEUED_WRITES.filter((name) => store[name]).map((name) => [name, queued(store[name], name)]);
   return { ...store, ...Object.fromEntries(writes), writing: () => active > 0, failures: () => failures };
 }
 
@@ -621,6 +635,12 @@ function createLocalTables({ strict = false } = {}) {
       delete data.image;
     }
   });
+  // 変更の記録。DB の field.audit_log の代わりに、変える前の行を、操作の ID と一緒に残す（undoOp が使う）
+  const audit = (data, table, id, before, op = sending) => {
+    data.audit = data.audit || [];
+    const seq = (data.audit.at(-1)?.seq || 0) + 1;
+    data.audit.push({ seq, op, table, id, before: before ? structuredClone(before) : null });
+  };
   const removeRows = (data, table, ids) => {
     if (!ids.length) {
       return;
@@ -839,6 +859,7 @@ function createLocalTables({ strict = false } = {}) {
       let result;
       update((data) => {
         const old = (data.workLogs || []).find((item) => item.id === id);
+        audit(data, "workLogs", id, old);
         const saved = {
           created_at: old?.created_at || new Date().toISOString(),
           ...log,
@@ -853,8 +874,39 @@ function createLocalTables({ strict = false } = {}) {
     },
     async deleteLog(id) {
       update((data) => {
+        audit(data, "workLogs", id, (data.workLogs || []).find((log) => log.id === id));
         data.workLogs = (data.workLogs || []).filter((log) => log.id !== id);
       });
+    },
+    // DB の field.undo_op と同じ戻し方を、このブラウザーの保存の、変更の記録（data.audit）で行う。
+    // 記録を付けているのは、作業の記録（対象と資材ごと 1 件）だけ
+    async undoOp(opId) {
+      let result;
+      update((data) => {
+        const log = data.audit || [];
+        const rows = new Map();
+        for (const entry of log.filter((item) => item.op === opId)) {
+          const key = `${entry.table}:${entry.id}`;
+          rows.set(key, { ...entry, before: rows.has(key) ? rows.get(key).before : entry.before, last: entry.seq });
+        }
+        if (!rows.size) {
+          result = { status: "empty" };
+          return;
+        }
+        const conflicts = [...rows.values()].filter((row) => log.some((item) => item.table === row.table && item.id === row.id && item.seq > row.last));
+        if (conflicts.length) {
+          result = { status: "conflict", rows: conflicts.map((row) => ({ table: row.table, row_id: row.id })) };
+          return;
+        }
+        const undoId = sending && sending !== opId ? sending : crypto.randomUUID();
+        for (const row of rows.values()) {
+          const list = data[row.table] || [];
+          audit(data, row.table, row.id, list.find((item) => item.id === row.id), undoId);
+          data[row.table] = [...list.filter((item) => item.id !== row.id), ...(row.before ? [structuredClone(row.before)] : [])];
+        }
+        result = { status: "done", op_id: undoId, rows: rows.size };
+      });
+      return result;
     },
     // 農薬の使用基準は DB にある。動作確認のため、このブラウザーの保存に famic: { products, uses } を入れたときだけ、それを使う
     get famic() {
