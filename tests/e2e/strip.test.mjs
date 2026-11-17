@@ -402,6 +402,45 @@ test("同じ畝の幅を 2 回変え、元に戻すを 2 回押すと、どち�
   assert.deepEqual(page.errors, []);
 });
 
+// 元に戻す・やり直すは、その操作をした画面に移り、戻した行を選んで、少しのあいだ光らせる
+test("元に戻す: 別の画面から押すと、操作をした日程の画面に移り、戻した畝を選んで光らせる", options, async () => {
+  await openStrip(2);
+  await widenBed();
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "保存");
+  // 畝 2 を選んでから、圃場図へ移る
+  await chooseBed("bed2");
+  await page.click('.tab-btn[data-view="map"]');
+  await page.waitFor(`!document.getElementById("appView").hidden`, "圃場図");
+  await page.click("#undoBtn");
+  await page.waitFor(`!document.getElementById("scheduleView").hidden`, "日程の画面に移る");
+  await page.waitFor(`document.querySelector('[data-dim="width:0"]')?.textContent === "100cm"`, "畝幅が戻る");
+  await page.waitFor(`document.querySelector('.strip-bed[data-bed="bed1"]').classList.contains("is-selected")`, "戻した畝を選ぶ");
+  assert.equal(await page.run(`document.querySelector('.strip-bed[data-bed="bed1"]').classList.contains("undo-flash")`), true, "戻した畝を光らせる");
+  await page.waitFor(`!document.querySelector('.strip-bed[data-bed="bed1"]').classList.contains("undo-flash")`, "少しあとに消える");
+  assert.equal(await savedWidth(), 100);
+  assert.deepEqual(page.errors, []);
+});
+
+test("やり直す: 別の画面から押すと、操作をした圃場図に移り、区画を選んで光らせる", options, async () => {
+  await openStrip(1);
+  await page.click('.tab-btn[data-view="map"]');
+  await page.click('#shapeTree [data-shape="b1"]');
+  await page.waitFor(`document.getElementById("blockName").offsetParent !== null`, "区画の名前の欄");
+  await page.run(`(() => { const input = document.getElementById("blockName"); input.value = "北"; input.dispatchEvent(new Event("input", { bubbles: true })); input.blur(); })()`);
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).blocks[0].name === "北"`, "名前の保存");
+  await page.click("#undoBtn");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).blocks[0].name === "A"`, "元に戻す");
+  // 選びをはずして、日程の画面へ移ってから、やり直す
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(`!document.getElementById("scheduleView").hidden`, "日程の画面");
+  await page.click("#redoBtn");
+  await page.waitFor(`!document.getElementById("appView").hidden`, "圃場図に移る");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).blocks[0].name === "北"`, "やり直す");
+  await page.waitFor(`document.querySelector('#map [data-shape="b1"]').classList.contains("is-selected")`, "区画を選ぶ");
+  assert.equal(await page.run(`[...document.querySelectorAll('[data-shape="b1"]')].some((element) => element.classList.contains("undo-flash"))`), true, "区画を光らせる");
+  assert.deepEqual(page.errors, []);
+});
+
 test("畝の幅を変えたあと、ほかの端末で同じ畝が変わったら、元に戻さずに知らせる", options, async () => {
   await openStrip(1);
   await widenBed();

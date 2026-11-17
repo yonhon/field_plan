@@ -10,6 +10,8 @@
 // そのプランに切り替えたら戻せる。プランの操作（「圃場とプラン」の窓）と、圃場の設定の窓の保存は、圃場の操作（scope: "field"）で、
 // どのプランからでも戻せる。戻す・やり直すときは、その窓（「圃場とプラン」の窓か、圃場の設定の窓）を開いてから、
 // ユーザーの目の前で戻す（ctx.showDialog）。
+// 1 回ぶんは、その操作をした画面（URL のハッシュ。where）も覚え、戻す・やり直すときは、その画面に移ってから戻す（ctx.goTo）。
+// 戻した行は、app.js の applyUndo が選んで、見える位置まで送り、少しのあいだ光らせる。
 // 圃場の切り替え・作成・削除・名前の変更は対象外で、圃場を切り替えると履歴が空になる（resetHistory）。
 import { confirmDelete } from "./dialog.js";
 import { record } from "./journal.js";
@@ -48,9 +50,9 @@ export const UNDO_APPLY = {
 export const UNDO_NOT_APPLIED = {};
 const TABLE_NAMES = { plans: "プラン", zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", crops: "品目", fertilizers: "肥料", logs: "実績" };
 
-// ctx = { state, busy, lock, flush, apply, reload, setStatus, draft, showDialog }
+// ctx = { state, busy, lock, flush, apply, reload, setStatus, draft, showDialog, where, goTo }
 let ctx = null;
-// 1 回ぶんは { op, scope, dialog }。op は操作の ID（やり直しの 1 回ぶんは、戻す処理の ID）。
+// 1 回ぶんは { op, scope, dialog, where }。op は操作の ID（やり直しの 1 回ぶんは、戻す処理の ID）。
 // scope は、操作したときに開いていたプランの ID か "field"。dialog は、戻すときに開く窓（"plans": 「圃場とプラン」の窓、
 // "settings": 圃場の設定の窓、null: 開かない）
 const undoStack = [];
@@ -91,7 +93,7 @@ function written(name, op) {
   }
   let entry = undoStack.at(-1);
   if (entry?.op !== op) {
-    entry = { op, scope: ctx.state.plan?.id ?? "field", dialog: null };
+    entry = { op, scope: ctx.state.plan?.id ?? "field", dialog: null, where: ctx.where?.() ?? null };
     undoStack.push(entry);
     if (undoStack.length > MAX_STEPS) {
       undoStack.shift();
@@ -160,6 +162,9 @@ async function step(from, to, label) {
   }
   busy = true;
   renderButtons();
+  if (entry.where) {
+    await ctx.goTo(entry.where); // その操作をした画面に移って、目の前で戻す
+  }
   if (entry.dialog) {
     await ctx.showDialog(entry.dialog); // その窓を開いて、目の前で戻す（窓を開いてから、操作を止める）
   }

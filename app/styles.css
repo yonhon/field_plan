@@ -4991,3 +4991,28 @@ dialog.field-settings::backdrop {
     padding: 7px 10px;
   }
 }
+
+/* 元に戻した・やり直した行の目印。少しのあいだ光らせる（app.js の showUndone）。図の図形は塗りを、ほかは枠と地を光らせる */
+.undo-flash {
+  animation: undo-flash 1.6s ease-out;
+}
+
+@keyframes undo-flash {
+  0%,
+  45% {
+    background-color: #fff3c4;
+    box-shadow: 0 0 0 3px #f2b705;
+  }
+}
+
+svg .undo-flash {
+  animation-name: undo-flash-shape;
+}
+
+@keyframes undo-flash-shape {
+  0%,
+  45% {
+    fill: #f2b705;
+    fill-opacity: 0.55;
+  }
+}

@@ -1334,6 +1334,24 @@ function sameContent(local, remote) {
 // 当てるのは、いまの圃場とプランの行と、品目・肥料・作業の種類・実績。row が null の行は消えた
 // どの表をどう当てるかは、history.js の UNDO_APPLY。開いているプランが消えたら、残ったプランの先頭を開く
 async function applyUndo({ changes = [], logs = [] }) {
+  // 戻した行を、当てたあとに選び、光らせる。消えた行は、その親（畝なら区画）を光らせる（当てる前の行で親を調べる）
+  const shown = [];
+  for (const { table, id, row } of changes) {
+    if (row) {
+      shown.push({ table, id: String(id) });
+    } else {
+      const old = (state[table] || []).find((item) => String(item.id) === String(id));
+      const parent = old && ({ beds: ["blocks", old.block_id], blocks: ["zones", old.zone_id], plantings: ["beds", old.bed_id], works: old.planting_id ? ["plantings", old.planting_id] : ["blocks", old.block_id] })[table];
+      if (parent?.[1]) {
+        shown.push({ table: parent[0], id: String(parent[1]) });
+      }
+    }
+  }
+  for (const { id, row } of logs) {
+    if (row) {
+      shown.push({ table: "logs", id: String(id) });
+    }
+  }
   let backdropChanged = false;
   let weatherChanged = false; // 気象の設定（基準点、観測所）が変わった
   // 当て方を決めていない表（下絵、プランなど）の行があれば、当てずに知らせる（history.js が DB から読み直す）
@@ -1438,6 +1456,80 @@ async function applyUndo({ changes = [], logs = [] }) {
   refreshViews();
   renderPlans();
   refreshFieldPlans();
+  showUndone(shown);
+}
+
+// 戻す・やり直すの前に、その操作をした画面へ移る。移ったら、少し待って、戻すところを見せる。
+// 図の編集中は移らない（書きかけの図から離れない）。開けない画面（消えた作付の詳細など）なら、移らない
+async function goToUndoWhere(where) {
+  if (!where?.hash || state.mapEditing || location.hash === where.hash) {
+    return;
+  }
+  const route = routeFromHash(where.hash);
+  if (!route) {
+    return;
+  }
+  try {
+    openRoute(route, "push");
+  } catch {
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, 400));
+}
+
+// 戻した行を選んで、見える位置まで送り、少しのあいだ光らせる。図の拡大・位置と、工程表のスクロールの位置は変えない。
+// 選ぶのは、図の画面なら区域・区画・畝、日程の画面なら、いま開いている区画の中の畝と作付
+const UNDO_FLASH_MS = 1600;
+function showUndone(targets) {
+  const view = routeFromHash()?.view || "map";
+  const shape = targets.find((item) => ["zones", "blocks", "beds"].includes(item.table) && shapePoints(item.id));
+  if (view === "map" && shape && state.selected !== shape.id) {
+    state.selected = shape.id;
+    state.selectedVertex = null;
+    render();
+  }
+  const block = currentBlockId();
+  const inBlock = targets.find((item) => {
+    const bed = item.table === "beds" ? state.beds.find((row) => row.id === item.id) : null;
+    const planting = item.table === "plantings" ? state.plantings.find((row) => row.id === item.id) : null;
+    const bedOfPlanting = planting && state.beds.find((row) => row.id === planting.bed_id);
+    return (bed || bedOfPlanting)?.block_id === block;
+  });
+  if (view === "schedule" && block && inBlock) {
+    openInSchedule(inBlock.table === "beds" ? "bed" : "planting", inBlock.id);
+    renderSchedule();
+  }
+  const selectors = targets.flatMap(({ table, id }) => {
+    const key = CSS.escape(id);
+    if (["zones", "blocks", "beds"].includes(table)) {
+      return [`[data-shape="${key}"]`, `.strip-bed[data-bed="${key}"]`, `[data-block="${key}"]`];
+    }
+    if (table === "plantings") {
+      return [`[data-planting="${key}"]`];
+    }
+    if (table === "works") {
+      return [`.gantt-bar[data-id="${key}"]`];
+    }
+    if (table === "logs") {
+      return [`[data-log="${key}"]`, `[data-log-id="${key}"]`, `.gantt-actual-bar[data-logs*="${key}"]`];
+    }
+    if (table === "plans") {
+      return [`dialog.field-plans [data-id="${key}"]`];
+    }
+    return [];
+  });
+  if (!selectors.length) {
+    return;
+  }
+  const marked = [...document.querySelectorAll(selectors.join(","))].filter((element) => element.getClientRects().length > 0);
+  // 見える位置まで送る（ページや入れ物のスクロール。図そのものは動かさない）
+  marked.find((element) => !(element instanceof SVGElement))?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  for (const element of marked) {
+    element.classList.remove("undo-flash");
+    void element.getBoundingClientRect(); // 続けて戻したときも、光らせ直す
+    element.classList.add("undo-flash");
+  }
+  setTimeout(() => marked.forEach((element) => element.classList.remove("undo-flash")), UNDO_FLASH_MS);
 }
 
 // データを入れ替えたあと、どの画面も描き直す。なくなった図形を選んだままにしない
@@ -4098,8 +4190,8 @@ $("fieldSettings").addEventListener("click", (event) => {
 // 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）
 const VIEW_NAMES = ["map", "schedule", "master", "diary", "journal"];
 
-function routeFromHash() {
-  const hash = decodeURIComponent(location.hash.slice(1));
+function routeFromHash(text = location.hash) {
+  const hash = decodeURIComponent(text.slice(1));
   const detail = /^detail\/(planting|block)\/([\w-]+)$/.exec(hash);
   if (detail) {
     return detail[1] === "block" ? { view: "schedule", block: detail[2] } : { view: "planting", kind: detail[1], id: detail[2] };
@@ -4460,6 +4552,9 @@ async function startApp(user = "local") {
     apply: applyUndo,
     // 戻したあと、画面に当てられなかったとき、DB から読み直す
     reload: reloadFromDb,
+    // 操作をした画面。戻す・やり直すときは、その画面に移ってから戻す
+    where: () => ({ hash: location.hash }),
+    goTo: goToUndoWhere,
     // プランの操作と圃場の設定の保存は、戻す前に、その窓を開いて見せる
     showDialog: async (kind) => {
       if (kind === "plans" && !document.querySelector("dialog.field-plans[open]")) {
