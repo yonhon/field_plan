@@ -197,7 +197,9 @@ async function launch() {
     const target = JSON.stringify(selector);
     await waitFor(`Boolean(document.querySelector(${target}))`, selector);
     await run(`document.querySelector(${target}).scrollIntoView({ block: "center" })`);
-    // 測ってから押すまでに配置が変わると、別の要素を押してしまう。次の描画でも同じ位置で、その要素が押せることを確かめる
+    // 測ってから押すまでに配置が変わると、別の要素を押してしまう。次の描画でも同じ位置で、その要素が押せることを確かめる。
+    // 送ったあとに配置が直って、画面の外へ押し出されることがある（履歴の画面は、画面の外の日の高さを見積もりで置き、
+    // 画面に入ると本当の高さに直す）。押せないあいだは、人がするのと同じく、そのたびに画面の真ん中へ送り直す
     await waitFor(
       `new Promise((resolve) => {
         const element = document.querySelector(${target});
@@ -205,7 +207,11 @@ async function launch() {
         requestAnimationFrame(() => {
           const now = element?.getBoundingClientRect();
           const same = box && now && box.x === now.x && box.y === now.y && now.width > 0;
-          resolve(Boolean(same && element.contains(document.elementFromPoint(now.x + now.width / 2, now.y + now.height / 2))));
+          const clickable = Boolean(same && element.contains(document.elementFromPoint(now.x + now.width / 2, now.y + now.height / 2)));
+          if (!clickable) {
+            element?.scrollIntoView({ block: "center" });
+          }
+          resolve(clickable);
         });
       })`,
       `${selector} を押せる`

@@ -1335,6 +1335,7 @@ function sameContent(local, remote) {
 // どの表をどう当てるかは、history.js の UNDO_APPLY。開いているプランが消えたら、残ったプランの先頭を開く
 async function applyUndo({ changes = [], logs = [] }) {
   let backdropChanged = false;
+  let weatherChanged = false; // 気象の設定（基準点、観測所）が変わった
   // 当て方を決めていない表（下絵、プランなど）の行があれば、当てずに知らせる（history.js が DB から読み直す）
   const unknown = [...new Set(changes.map((item) => item.table).filter((table) => !UNDO_APPLY[table] || UNDO_APPLY[table] === "logs"))];
   if (unknown.length) {
@@ -1355,10 +1356,17 @@ async function applyUndo({ changes = [], logs = [] }) {
       }
       state[table] = put(state[table], "id", id, row);
     } else if (table === "fields") {
-      state.fields = put(state.fields, "id", id, row);
-      if (row && row.id === state.field.id) {
-        state.field = state.fields.find((item) => item.id === row.id);
-        state.field.outline = outlineParts(state.field.outline);
+      // 圃場の行は、同じものを使い続ける（state.field を持っている処理があるので）
+      const known = state.fields.find((item) => item.id === id);
+      if (row && known) {
+        const weather = JSON.stringify([known.base_lat, known.base_lng, known.weather]) !== JSON.stringify([row.base_lat, row.base_lng, row.weather]);
+        Object.assign(known, row);
+        if (known === state.field) {
+          state.field.outline = outlineParts(state.field.outline);
+          weatherChanged = weatherChanged || weather;
+        }
+      } else {
+        state.fields = put(state.fields, "id", id, row);
       }
     } else if (table === "work_types") {
       state.allWorkTypes = put(state.allWorkTypes, "code", id, row).sort((a, b) => a.sort - b.sort);
@@ -1401,6 +1409,11 @@ async function applyUndo({ changes = [], logs = [] }) {
   state.logs.sort((a, b) => b.date.localeCompare(a.date) || String(b.created_at).localeCompare(String(a.created_at)));
   if (!state.plans.some((item) => item.id === state.plan.id)) {
     await openPlan(state.plans[0]); // 開いていたプランを作った操作を戻した
+  }
+  if (weatherChanged) {
+    // 保存したときと同じく、気象の欄を描き直し、観測所の値を取り直す（作付の詳細の気温・雨量が、戻した観測所になる）
+    renderWeatherSettings();
+    syncWeather();
   }
   if (mapDraft.current) {
     mapDraft.current = editSnapshot();
