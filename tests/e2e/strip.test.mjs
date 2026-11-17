@@ -275,6 +275,29 @@ test("閉じる前: 保存が終わっていなければ確かめ、終わって
   assert.equal(await leaving(), false);
 });
 
+// 操作の始まりに、前の操作の送り残しを、その時点の中身で送る。送らずにおくと、前の操作の変更が次の操作の ID で送られ、
+// 次の操作を戻すと前の操作まで戻る（field.audit_log の op_id）
+test("畝を続けて 2 回動かす: 2 回目を押したときに 1 回目の位置を送り、2 回目の途中の位置は送らない", options, async () => {
+  await openStrip(1);
+  const shapeOf = async () => JSON.stringify((await page.saved()).beds.find((item) => item.id === "bed1").shape);
+  const before = await shapeOf();
+  await page.drag('.strip-bed[data-bed="bed1"]', 30);
+  let first = null;
+  let later = null;
+  // 保存を待たず（600 ms より前に）、同じ畝をもう一度動かし、押したまま止まる
+  await page.drag('.strip-bed[data-bed="bed1"]', 30, async () => {
+    await page.waitFor(`JSON.stringify(JSON.parse(localStorage.getItem("field_plan_local")).beds.find((item) => item.id === "bed1").shape) !== ${JSON.stringify(before)}`, "1 回目の位置の保存");
+    first = await shapeOf();
+    // 自動保存の時間を過ぎても、押しているあいだの位置は送らない
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    later = await shapeOf();
+  });
+  assert.equal(later, first, "押しているあいだは、1 回目の位置のまま");
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "2 回目の保存");
+  assert.notEqual(await shapeOf(), first, "離したあとに、2 回目の位置を送る");
+  assert.deepEqual(page.errors, []);
+});
+
 test("区域を作ってすぐ区画にする: 区域の保存を待たずに操作しても、両方保存される", options, async () => {
   await page.loadApp({ ...seed(0), zones: [], blocks: [] });
   await page.click("#mapEditBtn");

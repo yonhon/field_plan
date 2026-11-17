@@ -1121,9 +1121,28 @@ async function sendPendingSaves() {
   }
 }
 
-// 押す、キーを打つ、の始まりが、1 回の操作の区切り
+// 文字を打つ欄。ここで打つキーは、続けて 1 つの保存にまとめる
+const isTextEntry = (element) =>
+  element?.tagName === "TEXTAREA" ||
+  element?.isContentEditable ||
+  (element?.tagName === "INPUT" && !["button", "checkbox", "radio", "range", "color", "file", "submit", "reset"].includes(element.type));
+
+// 押す、キーを打つ、の始まりが、1 回の操作の区切り。
+// 送り残しの保存は、ここで、予約した操作の ID のまま先に送る。送らずにおくと、次の操作が同じ行を変えたとき、
+// 前の操作の変更が次の操作の ID で送られ、次の操作を戻すと前の操作まで戻る（field.audit_log の op_id。issue #1）。
+// 文字の欄で打つキーと、押し続けたキーは、1 つの保存にまとめたいので、先に送らない。
+// 保存に失敗したあと（retries が 1 以上）も送らない。送り直しは、時間をおいた試しと、回線が戻ったときに任せる
+// （押すたびに送ると、失敗の窓の「閉じる」を押したときにまた失敗して、窓が出直す）
+function beginOperation(event) {
+  const continuing = event.type === "keydown" && (event.repeat || isTextEntry(event.target));
+  if (!continuing && pendingSaves.size && retries === 0) {
+    clearTimeout(saveTimer);
+    flushSaves();
+  }
+  startOperation();
+}
 for (const type of ["pointerdown", "keydown"]) {
-  document.addEventListener(type, startOperation, true);
+  document.addEventListener(type, beginOperation, true);
 }
 
 // 新しい版へ読み込み直す前に、送り残しの保存と、送っている書き込みと、変更の記録を送り終える。
@@ -1176,27 +1195,34 @@ async function flushSaves({ quiet = false } = {}) {
   const saves = [...pendingSaves];
   pendingSaves.clear();
   try {
+    // 送る中身は、いまの時点で写す。操作の始まり（beginOperation）で呼んだとき、送り終える前に次の操作が
+    // 同じ行を変えても、前の操作の ID で次の操作の変更を送らないように
+    const writes = [];
     const rows = { zones: [], blocks: [], beds: [] };
     for (const [key, id] of saves) {
       if (key === "field") {
-        await duringOperation(id, () => state.store.saveField(state.field));
+        const field = structuredClone(state.field);
+        writes.push([id, () => state.store.saveField(field)]);
       } else if (key === "backdrop") {
-        const { size, ...row } = state.backdrop;
-        await duringOperation(id, () => state.store.saveBackdrop(row));
+        const { size, ...row } = structuredClone(state.backdrop);
+        writes.push([id, () => state.store.saveBackdrop(row)]);
       } else {
         // 消したあとに残っていた保存の予約は、相手が見つからないので捨てる
         const found = findShape(key.slice(key.indexOf(":") + 1));
         if (found) {
-          rows[TABLES[found.kind]].push({ id, item: found.item });
+          rows[TABLES[found.kind]].push({ id, item: structuredClone(found.item) });
         }
       }
     }
-    // 予約した操作ごとに分けて送る
+    // 区域、区画、畝は、予約した操作ごとに分けて送る
     for (const table of ["zones", "blocks", "beds"]) {
       for (const id of new Set(rows[table].map((row) => row.id))) {
         const items = rows[table].filter((row) => row.id === id).map((row) => row.item);
-        await duringOperation(id, () => state.store.upsert(table, items));
+        writes.push([id, () => state.store.upsert(table, items)]);
       }
+    }
+    for (const [id, write] of writes) {
+      await duringOperation(id, write);
     }
     if (!pendingSaves.size) {
       $("saveStatus").textContent = state.mapEditing ? EDIT_UNSAVED : "保存しました";
