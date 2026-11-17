@@ -50,7 +50,7 @@ import { initProcessEditor } from "./process-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail, renderWholeHead } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
 import { initNews } from "./news-view.js";
-import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, debugLog, initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
+import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { currentBlockId, ganttTakesKey, initSchedule, openInSchedule, openProcessPlan, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash } from "./schedule-view.js";
@@ -1366,14 +1366,6 @@ async function applyUndo({ changes = [], logs = [] }) {
       // 圃場の行は、同じものを使い続ける（state.field を持っている処理があるので）。開いている圃場は、一覧の行と
       // 別のものになっていても当てる
       const known = state.fields.find((item) => item.id === id);
-      debugLog("applyUndo fields", {
-        id,
-        open: String(id) === String(state.field.id),
-        sameAsList: known === state.field,
-        before: state.field.weather?.temp_station ?? null,
-        row: row?.weather?.temp_station ?? null,
-        settingsOpen: settings.open,
-      });
       if (row && String(id) === String(state.field.id)) {
         const field = state.field;
         weatherChanged = weatherChanged || JSON.stringify([field.base_lat, field.base_lng, field.weather]) !== JSON.stringify([row.base_lat, row.base_lng, row.weather]);
@@ -1434,7 +1426,6 @@ async function applyUndo({ changes = [], logs = [] }) {
     beginWeatherDraft({ before: markStep, after: renderSettingsFoot });
     renderSettingsFoot();
   }
-  debugLog("applyUndo done", { temp_station: state.field.weather?.temp_station ?? null, weatherChanged, settingsOpen: settings.open, tables: changes.map((item) => item.table) });
   if (weatherChanged || settings.open) {
     // 保存したときと同じく、気象の欄を描き直し、観測所の値を取り直す（作付の詳細の気温・雨量が、戻した観測所になる）。
     // 圃場の設定の窓を開いて戻したときは、窓の気象の欄を必ず描き直す
@@ -3923,7 +3914,6 @@ function restoreSnapshot(snap) {
   state.selectedVertex = null;
   settings.transforms = [...snap.transforms];
   settings.records = [...snap.records];
-  debugLog("restoreSnapshot", { now: state.field.weather?.temp_station ?? null, back: snap.weather?.weather?.temp_station ?? null });
   Object.assign(state.field, structuredClone(snap.weather));
   setView(snap.view);
   render();

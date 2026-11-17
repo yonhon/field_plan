@@ -263,3 +263,31 @@ test("圃場の設定: 読み込んだ下絵を保存したあと、元に戻す
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// 図の画面のほか（日程など）から開いた窓でも、気象の欄を描き直す。元に戻すで戻した値が、窓の欄に出る
+// （2026-11-17 に実機で見つかった。図の画面が隠れているときは、気象の欄を描き直していなかった）
+test("圃場の設定: 日程の画面から開いた窓でも、保存した気象の設定を元に戻すと、欄の値が戻る", options, async () => {
+  await page.loadApp(seed(false));
+  await page.click('.tab-btn[data-view="schedule"]');
+  await openSettings();
+  await page.click(`${DIALOG} [data-fstab="weather"]`);
+  await page.run(`(() => { const input = document.getElementById("baseLat"); input.value = "26.3"; input.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.click("#settingsSave");
+  await page.waitFor(`document.getElementById("settingsStatus").textContent === "保存しました"`, "保存");
+  await page.click("#fieldSettingsClose");
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓を閉じる");
+
+  await page.click("#undoBtn");
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "窓が開く");
+  await page.waitFor(`(JSON.parse(localStorage.getItem("field_plan_local")).fields[0].base_lat ?? null) === null`, "DB の緯度が戻る");
+  await page.click(`${DIALOG} [data-fstab="weather"]`);
+  await page.waitFor(`document.getElementById("baseLat").value === ""`, "窓の緯度の欄も戻る");
+  await page.click("#fieldSettingsClose");
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる");
+  // 開き直しても、戻した値
+  await openSettings();
+  await page.click(`${DIALOG} [data-fstab="weather"]`);
+  assert.equal(await page.run(`document.getElementById("baseLat").value`), "");
+  await page.click("#fieldSettingsClose");
+  assert.deepEqual(page.errors, []);
+});
