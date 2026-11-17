@@ -50,7 +50,7 @@ test("足した行と変えた行を戻すと、操作の前に戻り、戻し�
   assert.notEqual(result.op_id, op);
 });
 
-test("戻す処理の ID を戻すと、やり直しになる。やり直したあとに元の操作を戻すと、ぶつかる", async () => {
+test("戻す処理の ID を戻すと、やり直しになる", async () => {
   const store = inOrder(createLocalStore());
   const op = await operation(store, () => store.upsert("beds", [{ ...bed(1), seq: 5 }]));
   const moved = tables();
@@ -60,8 +60,20 @@ test("戻す処理の ID を戻すと、やり直しになる。やり直した�
   const redone = await store.undoOp(undone.op_id);
   assert.equal(redone.status, "done");
   assert.deepEqual(tables(), moved);
+});
+
+test("同じ行を続けて変えた 2 つの操作は、新しい順に戻せば、どちらも戻る。あとの操作が残っていれば、前の操作はぶつかる", async () => {
+  const store = inOrder(createLocalStore());
+  const start = tables();
+  const first = await operation(store, () => store.upsert("beds", [bed(2)]));
+  const second = await operation(store, () => store.upsert("beds", [{ ...bed(2), seq: 7 }]));
   startOperation();
-  assert.equal((await store.undoOp(op)).status, "conflict");
+  assert.equal((await store.undoOp(first)).status, "conflict", "あとの操作で変わったまま");
+  startOperation();
+  assert.equal((await store.undoOp(second)).status, "done");
+  startOperation();
+  assert.equal((await store.undoOp(first)).status, "done", "あとの操作を戻したので、前の操作のあとの中身に戻っている");
+  assert.deepEqual(tables(), start);
 });
 
 test("消した親と、連鎖で消えた子を、まとめて戻す", async () => {

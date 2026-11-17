@@ -328,6 +328,17 @@ def check_undo_op(c):
     undo(later)
     undo(first)
 
+    # 作付と作業を足した操作のあとに、その作業を動かした。新しい順に戻せば、どちらも戻る（あとの操作を戻した記録で止まらない）
+    start = snapshot()
+    new_planting, new_work = str(uuid.uuid4()), str(uuid.uuid4())
+    planted = operation([
+        ("insert into field.plantings (id, plan_id, bed_id, seq, crop_name) values (%s, %s, %s, 2, '足した作付')", (new_planting, plan, bed)),
+        ("insert into field.works (id, plan_id, planting_id, work_type, seq, plan_start, plan_end) values (%s, %s, %s, %s, 1, '2026-06-01', '2026-06-02')", (new_work, plan, new_planting, kind)),
+    ])
+    shifted = operation([("update field.works set plan_start = '2026-06-08', plan_end = '2026-06-09' where id = %s", (new_work,))])
+    a, b = undo(shifted), undo(planted)
+    expect("同じ行を続けて変えた 2 つの操作を、新しい順に戻せば、どちらも戻る", a["status"] == "done" and b["status"] == "done" and snapshot() == start)
+
     # 戻すと、操作に入っていない行まで変わる（あとで足した作付が、連鎖で消える）
     other_bed = str(uuid.uuid4())
     made = operation([("insert into field.beds (id, plan_id, block_id, seq, shape) values (%s, %s, %s, 9, %s)", (other_bed, plan, block, SHAPE))])

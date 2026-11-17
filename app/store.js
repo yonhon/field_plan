@@ -649,7 +649,8 @@ function createLocalTables({ strict = false } = {}) {
           if (before[table].get(id) !== rows.get(id)) {
             const seq = (data.audit.at(-1)?.seq || 0) + 1;
             const old = before[table].get(id);
-            data.audit.push({ seq, op, table, id, before: old === undefined ? null : JSON.parse(old) });
+            const now = rows.get(id);
+            data.audit.push({ seq, op, table, id, before: old === undefined ? null : JSON.parse(old), after: now === undefined ? null : JSON.parse(now) });
           }
         }
       }
@@ -927,12 +928,17 @@ function createLocalTables({ strict = false } = {}) {
       const rows = new Map();
       for (const entry of log.filter((item) => item.op === opId)) {
         const key = `${entry.table}:${entry.id}`;
-        rows.set(key, { table: entry.table, id: entry.id, before: rows.has(key) ? rows.get(key).before : entry.before, last: entry.seq });
+        rows.set(key, { table: entry.table, id: entry.id, before: rows.has(key) ? rows.get(key).before : entry.before, after: entry.after ?? null });
       }
       if (!rows.size) {
         return { status: "empty" };
       }
-      const conflicts = [...rows.values()].filter((row) => log.some((item) => item.table === row.table && item.id === row.id && item.seq > row.last));
+      // 今の中身が、その操作のあとの中身と違う行があれば、戻さない（あとの操作を先に戻して、元どおりなら、ぶつからない）
+      const conflicts = [...rows.values()].filter((row) => {
+        const { key } = AUDITED[row.table];
+        const current = auditRows(data, row.table).find((item) => String(item[key]) === row.id) ?? null;
+        return JSON.stringify(current) !== JSON.stringify(row.after);
+      });
       if (conflicts.length) {
         return { status: "conflict", rows: conflicts.map((row) => ({ table: AUDIT_NAMES[row.table], row_id: row.id })) };
       }

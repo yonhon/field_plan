@@ -806,7 +806,8 @@ $$;
 --   { status: 'confirm', removed: { 表: 行の数 } }（p_limits を渡し、消える行がそれ以上の表があった。戻さない）。
 --     p_limits は { zones: 1, beds: 2, logs: 2, ... }。作業の記録は logs で数える。確かめたら、p_limits なしで呼び直す
 --   { status: 'conflict', rows: [{ table, row_id }] }（戻さない）。conflict になるのは、次の 2 つ。
---   1. 戻す行が、その操作のあとに変わっている（記録がある）
+--   1. 戻す行の今の中身が、その操作のあとの中身と違う（ほかの画面や端末で変わった）。
+--      あとの操作を先に戻して、操作のあとの中身に戻っていれば、ぶつからない
 --   2. 戻すと、操作に入っていない行まで変わる（操作で足した行を、あとから別の行が指していて、連鎖で消える、など）
 -- 監査の対象でない表（changes など）と Storage のファイルは戻さない。
 drop function if exists field.undo_op(uuid);
@@ -818,7 +819,7 @@ declare
   v_order constant text[] := array[
     'fields', 'backdrops', 'plans', 'work_types', 'fertilizers', 'crops', 'zones', 'blocks', 'beds', 'plantings', 'works',
     'work_logs', 'work_log_targets', 'work_log_inputs'];
-  v_rows jsonb;      -- [{ t: 表, id: 行の ID, before: 操作の前の中身か null, last: その操作の最後の記録の番号 }]
+  v_rows jsonb;      -- [{ t: 表, id: 行の ID, before: 操作の前の中身か null, after: 操作のあとの中身か null }]
   v_conflicts jsonb;
   v_headers jsonb;
   v_new uuid;
@@ -844,11 +845,11 @@ begin
   -- 戻す処理を 1 つずつ行う（同じ操作を 2 回続けて戻さない）
   perform pg_advisory_xact_lock(hashtext('field.undo_op'));
 
-  select jsonb_agg(jsonb_build_object('t', table_name, 'id', row_id, 'before', before, 'last', last)
+  select jsonb_agg(jsonb_build_object('t', table_name, 'id', row_id, 'before', before, 'after', after)
                    order by array_position(v_order, table_name), row_id)
   into v_rows
   from (
-    select table_name, row_id, (array_agg(old_row order by id))[1] as before, max(id) as last
+    select table_name, row_id, (array_agg(old_row order by id))[1] as before, (array_agg(new_row order by id desc))[1] as after
     from field.audit_log
     where op_id = p_op
     group by table_name, row_id
@@ -861,11 +862,16 @@ begin
       (select string_agg(distinct r ->> 't', ', ') from jsonb_array_elements(v_rows) r where not (r ->> 't') = any (v_order));
   end if;
 
-  -- 1. その操作のあとに変わった行があれば、戻さない
-  select jsonb_agg(distinct jsonb_build_object('table', a.table_name, 'row_id', a.row_id))
-  into v_conflicts
-  from jsonb_array_elements(v_rows) r
-  join field.audit_log a on a.table_name = r ->> 't' and a.row_id = r ->> 'id' and a.id > (r ->> 'last')::bigint;
+  -- 1. 今の中身が、その操作のあとの中身と違う行があれば、戻さない
+  for v_item in select x from jsonb_array_elements(v_rows) e(x) loop
+    select a.attname into v_pk
+    from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = i.indkey[0]
+    where i.indrelid = format('field.%I', v_item ->> 't')::regclass and i.indisprimary;
+    execute format('select to_jsonb(t) from field.%I t where %I::text = $1', v_item ->> 't', v_pk) into v_now using v_item ->> 'id';
+    if v_now is distinct from (case when jsonb_typeof(v_item -> 'after') = 'object' then v_item -> 'after' end) then
+      v_conflicts := coalesce(v_conflicts, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('table', v_item ->> 't', 'row_id', v_item ->> 'id'));
+    end if;
+  end loop;
   if v_conflicts is not null then
     return jsonb_build_object('status', 'conflict', 'rows', v_conflicts);
   end if;

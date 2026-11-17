@@ -383,6 +383,25 @@ test("図の編集: 書きかけを元に戻す・やり直すで 1 操作ずつ
   assert.deepEqual(page.errors, []);
 });
 
+// あとの操作を元に戻した記録で、前の操作が「ほかの端末で変わった」とされない（2026-11-17 に実機で見つかった）
+test("同じ畝の幅を 2 回変え、元に戻すを 2 回押すと、どちらも戻る", options, async () => {
+  await openStrip(1);
+  await widenBed();
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "1 回目の保存");
+  await page.run(`window.prompt = () => "200"`);
+  await page.click('[data-dim="width:0"]');
+  await page.waitFor(`document.querySelector('[data-dim="width:0"]').textContent === "200cm"`, "2 回目の幅");
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "2 回目の保存");
+  await page.click("#undoBtn");
+  await page.waitFor(`document.querySelector('[data-dim="width:0"]').textContent === "150cm"`, "1 回目の元に戻す");
+  await page.waitFor(`!document.getElementById("undoBtn").disabled`, "もう 1 回戻せる");
+  await page.click("#undoBtn");
+  await page.waitFor(`document.querySelector('[data-dim="width:0"]').textContent === "100cm"`, "2 回目の元に戻す");
+  assert.equal(await savedWidth(), 100);
+  assert.doesNotMatch(await status(), /戻せません/);
+  assert.deepEqual(page.errors, []);
+});
+
 test("畝の幅を変えたあと、ほかの端末で同じ畝が変わったら、元に戻さずに知らせる", options, async () => {
   await openStrip(1);
   await widenBed();
