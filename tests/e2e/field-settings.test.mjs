@@ -3,6 +3,9 @@
 // 保存しないまま閉じると、開く前の状態に戻る
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { findChrome, openBrowser } from "./browser.mjs";
 
 const AT = "2026-01-01T00:00:00Z";
@@ -179,4 +182,67 @@ test("圃場の設定: 縮尺のタブで、図の上の 2 点を押して縮尺
   await page.click("#fieldSettingsClose");
   await page.waitFor(`!document.querySelector("${DIALOG}")`, "確かめずに閉じる");
   assert.deepEqual(page.errors, []);
+});
+
+// 保存した設定は、ふだんの元に戻すで、保存の前に戻せる（Issue #3 の 3 段目）。すべてのプランの図形と、下絵と、気象の設定が 1 回で戻る
+test("圃場の設定: 保存した回転と気象の設定を、窓を閉じたあとの元に戻すで戻し、やり直すとまた当たる", options, async () => {
+  await page.loadApp(seed(false));
+  const before = await page.saved();
+  await openSettings();
+  await setRotation(90);
+  await page.waitFor(`!document.getElementById("settingsSave").disabled`, "書きかけ");
+  await page.click(`${DIALOG} [data-fstab="weather"]`);
+  await page.run(`(() => { const input = document.getElementById("baseLat"); input.value = "26.3"; input.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+  await page.click("#settingsSave");
+  // すべてのプランに当てることを確かめる窓
+  await page.waitFor(`document.querySelector("dialog.notice[open]")?.textContent.includes("すべてのプラン")`, "確かめの窓");
+  await page.click('dialog.notice[open] [data-action="delete"]');
+  await page.waitFor(`document.getElementById("settingsStatus").textContent === "保存しました"`, "保存");
+  const turned = await page.saved();
+  assert.equal(turned.backdrops.f1.rotation_deg, 90);
+  assert.notDeepEqual(turned.zones.find((zone) => zone.id === "z2").shape, before.zones.find((zone) => zone.id === "z2").shape, "開いていないプランの区域も回る");
+  await page.click("#fieldSettingsClose");
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓を閉じる");
+
+  await page.click("#undoBtn");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).backdrops.f1.rotation_deg === 0`, "下絵の向きが戻る");
+  const undone = await page.saved();
+  assert.deepEqual(undone.zones, before.zones, "どちらのプランの区域も戻る");
+  assert.deepEqual(undone.fields[0].outline, before.fields[0].outline, "外形も戻る");
+  assert.equal(undone.fields[0].base_lat ?? null, null, "気象の設定も戻る");
+  await page.click("#redoBtn");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).backdrops.f1.rotation_deg === 90`, "やり直すと、また当たる");
+  assert.deepEqual((await page.saved()).zones, turned.zones);
+  assert.deepEqual(page.errors, []);
+});
+
+// 下絵の読み込みも、保存したあとで戻せる。前の画像のファイルは消していないので、前の下絵に戻る
+test("圃場の設定: 読み込んだ下絵を保存したあと、元に戻すで前の下絵に戻り、やり直すと読み込んだ下絵になる", options, async () => {
+  await page.loadApp(seed(false));
+  const dir = mkdtempSync(join(tmpdir(), "field-plan-backdrop-"));
+  const file = join(dir, "square.svg");
+  // 前の下絵（400 × 200）と縦横の比が違う画像（引き継ぎを尋ねない）
+  writeFileSync(file, '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="#b4c8d8"/></svg>');
+  try {
+    await openSettings();
+    const { root } = await page.send("DOM.getDocument", { depth: -1, pierce: true });
+    const { nodeId } = await page.send("DOM.querySelector", { nodeId: root.nodeId, selector: "#backdropFile" });
+    await page.send("DOM.setFileInputFiles", { nodeId, files: [file] });
+    await page.waitFor(`!document.getElementById("settingsSave").disabled`, "読み込んだ下絵の書きかけ");
+    await page.click("#settingsSave");
+    await page.waitFor(`document.getElementById("settingsStatus").textContent === "保存しました"`, "保存");
+    const loaded = (await page.saved()).backdrops.f1;
+    assert.notEqual(loaded.storage_path, "local:f1", "新しい画像");
+    await page.click("#fieldSettingsClose");
+    await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓を閉じる");
+
+    await page.click("#undoBtn");
+    await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).backdrops.f1?.storage_path === "local:f1"`, "前の下絵に戻る");
+    await page.waitFor(`document.querySelector("#map image")?.getAttribute("href") === ${JSON.stringify(IMAGE)}`, "前の画像を描く");
+    await page.click("#redoBtn");
+    await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).backdrops.f1?.storage_path === ${JSON.stringify(loaded.storage_path)}`, "やり直すと、読み込んだ下絵");
+    assert.deepEqual(page.errors, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

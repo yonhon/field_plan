@@ -6,7 +6,10 @@
 // その ID を戻すと、やり直しになる。
 // そのあとにほかの画面や端末で同じ行が変わっていたら、戻さずに知らせ、その 1 回ぶんを履歴から外す。
 // 図の編集の書きかけ（まだ DB に送っていない変更）は、図の編集が持つ書きかけの履歴（ctx.draft）で、画面の中だけで行き来する。
-// プランの切り替え・作成・削除、縮尺・向きの合わせ直しなどは対象外で、行うと履歴が空になる（resetHistory）。
+// 1 回ぶんは、その操作をしたときに開いていたプランを覚える（scope）。次に戻すものが別のプランの操作なら、戻さずに知らせ、
+// そのプランに切り替えたら戻せる。プランの操作（「圃場とプラン」の窓）と、圃場の設定の窓の保存は、圃場の操作（scope: "field"）で、
+// どのプランからでも戻せる。プランの操作は、「圃場とプラン」の窓を開いてから戻す（ctx.showPlans）。
+// 圃場の切り替え・作成・削除・名前の変更は対象外で、圃場を切り替えると履歴が空になる（resetHistory）。
 import { confirmDelete } from "./dialog.js";
 import { record } from "./journal.js";
 import { currentOperation, onQueuedWrite } from "./store.js";
@@ -15,10 +18,11 @@ const $ = (id) => document.getElementById(id);
 
 const MAX_STEPS = 50;
 // 履歴に積む書き込み。DB の変更の記録の対象の表に書くもの
-const UNDOABLE_WRITES = new Set(["upsert", "remove", "saveField", "saveLog", "deleteLog", "saveWorkType"]);
+const PLAN_WRITES = new Set(["createPlan", "copyPlan", "renamePlan", "deletePlan", "setActivePlan"]);
+const UNDOABLE_WRITES = new Set(["upsert", "remove", "saveField", "saveLog", "deleteLog", "saveWorkType", "saveBackdrop", "saveFieldWeather", ...PLAN_WRITES]);
 // 先に確かめてから消す行。区域・区画・品目・肥料は 1 件でも、畝・作付・作業・実績はふだんの 1 回ぶん
 // （畝 1 本、作付 1 つとその作業、記録 1 件）より多いとき。DB の関数に上限として渡す
-export const CONFIRM_FROM = { zones: 1, blocks: 1, crops: 1, fertilizers: 1, beds: 2, plantings: 2, works: 11, logs: 2 };
+export const CONFIRM_FROM = { plans: 1, zones: 1, blocks: 1, crops: 1, fertilizers: 1, beds: 2, plantings: 2, works: 11, logs: 2 };
 // 元に戻した行（field.undo_op が返す行）を、画面のどこに当てるか（app.js の applyUndo）。
 // plan はいまのプランの行、shared はプランをまたいで共通の行、logs は作業の記録（記録・対象・資材をまとめて当てる）。
 // DB の変更の記録の対象の表は、ここか UNDO_NOT_APPLIED のどちらかに入れる（tests/undo-tables.test.mjs が確かめる）
@@ -31,24 +35,26 @@ export const UNDO_APPLY = {
   crops: "shared",
   fertilizers: "shared",
   fields: "field",
+  plans: "plans",
+  backdrops: "backdrop",
   work_types: "workTypes",
   work_logs: "logs",
   work_log_targets: "logs",
   work_log_inputs: "logs",
 };
-// 画面に当て方を決めていない表と、そこに書く操作。どれも、行ったあとに履歴を空にする（resetHistory）ので、戻すことはない。
-// 当てる行が返ったら、applyUndo は当てずに断り、DB から読み直す（Issue #3 の 3 段目で、当て方を足す）
-export const UNDO_NOT_APPLIED = {
-  backdrops: "下絵の読み込みと位置合わせ（圃場の設定の窓）",
-  plans: "プランの作成・コピー・削除・名前の変更、実際に使うプランの切り替え",
-};
-const TABLE_NAMES = { zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", crops: "品目", fertilizers: "肥料", logs: "実績" };
+// 画面に当て方を決めていない表と、そこに書く操作。書く操作は、行ったあとに履歴を空にする（resetHistory）ので、戻すことはない。
+// 当てる行が返ったら、applyUndo は当てずに断り、DB から読み直す。いまはない
+export const UNDO_NOT_APPLIED = {};
+const TABLE_NAMES = { plans: "プラン", zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", crops: "品目", fertilizers: "肥料", logs: "実績" };
 
-// ctx = { state, busy, lock, flush, apply, reload, setStatus, draft }
+// ctx = { state, busy, lock, flush, apply, reload, setStatus, draft, showPlans }
 let ctx = null;
-const undoStack = []; // 操作の ID
-const redoStack = []; // 戻す処理の操作の ID
+// 1 回ぶんは { op, scope, plans }。op は操作の ID（やり直しの 1 回ぶんは、戻す処理の ID）。
+// scope は、操作したときに開いていたプランの ID か "field"。plans は、プランの操作か（戻すときに「圃場とプラン」の窓を開く）
+const undoStack = [];
+const redoStack = [];
 const ignored = new Set(); // 履歴を空にした操作の ID。そのあとに書いても積まない
+const fieldOps = new Set(); // 圃場の操作の ID（圃場の設定の窓の保存）。開いているプランによらず戻せる
 let busy = false;
 
 // 文字を打っている途中か。そのあいだは、ブラウザーの入力欄の「元に戻す」に任せる
@@ -81,14 +87,27 @@ function written(name, op) {
   if (busy || !UNDOABLE_WRITES.has(name) || ignored.has(op)) {
     return;
   }
-  if (undoStack.at(-1) !== op) {
-    undoStack.push(op);
+  let entry = undoStack.at(-1);
+  if (entry?.op !== op) {
+    entry = { op, scope: ctx.state.plan?.id ?? "field", plans: false };
+    undoStack.push(entry);
     if (undoStack.length > MAX_STEPS) {
       undoStack.shift();
     }
   }
+  if (PLAN_WRITES.has(name)) {
+    entry.plans = true;
+  }
+  if (entry.plans || fieldOps.has(op)) {
+    entry.scope = "field";
+  }
   redoStack.length = 0;
   renderButtons();
+}
+
+// この操作を、圃場の操作にする（開いているプランによらず戻せる）。圃場の設定の窓の保存で、書く前に呼ぶ
+export function markFieldOperation(op = currentOperation()) {
+  fieldOps.add(op);
 }
 
 // 履歴を空にする（プランの切り替え、縮尺の合わせ直しなど、戻せない操作のあと）。その操作がこのあと書いても、積まない
@@ -122,18 +141,35 @@ async function step(from, to, label) {
   if (busy || !from.length) {
     return;
   }
+  const entry = from.at(-1);
+  // 別のプランの操作は、そのプランを開いているときだけ戻す
+  if (entry.scope !== "field" && entry.scope !== ctx.state.plan.id) {
+    const plan = ctx.state.plans.find((item) => item.id === entry.scope);
+    if (!plan) {
+      from.pop(); // プランがない（ほかの画面や端末で消した）。戻せないので、履歴から外す
+      ctx.setStatus(`${label}せませんでした: その操作をしたプランが、もうありません`);
+      renderButtons();
+      return;
+    }
+    ctx.setStatus(`プラン「${plan.name}」の操作です。そのプランに切り替えると、${label}せます`);
+    return;
+  }
   busy = true;
   renderButtons();
   ctx.lock(true);
+  if (entry.plans) {
+    await ctx.showPlans(); // プランの操作は、「圃場とプラン」の窓を開いて、目の前で戻す
+  }
   ctx.setStatus(`${label}しています…`);
-  const op = from.pop();
+  from.pop();
+  const { op } = entry;
   let result = null;
   try {
     result = await ctx.state.store.undoOp(op, CONFIRM_FROM);
     if (result?.status === "confirm") {
       const list = Object.entries(result.removed).map(([table, count]) => `${TABLE_NAMES[table] ?? table} ${count} 件`).join("、");
       if (!(await confirmDelete(`${label}すと、次のものが消えます。`, list))) {
-        from.push(op);
+        from.push(entry);
         ctx.setStatus(`${label}すのをやめました`);
         result = null;
       } else {
@@ -142,7 +178,7 @@ async function step(from, to, label) {
     }
   } catch (error) {
     // DB の関数は 1 つのトランザクションなので、何も変わっていない（回線が切れていた、など）。もう一度試せるよう、履歴に残す
-    from.push(op);
+    from.push(entry);
     ctx.setStatus(`${label}せませんでした: ${error.message}`);
     result = null;
   }
@@ -151,9 +187,9 @@ async function step(from, to, label) {
   } else if (result?.status === "empty") {
     ctx.setStatus(`${label}すものがありませんでした`);
   } else if (result?.status === "done") {
-    to.push(result.op_id);
+    to.push({ ...entry, op: result.op_id });
     try {
-      ctx.apply(result);
+      await ctx.apply(result);
       record({ kind: label === "元に戻" ? "history.undo" : "history.redo", text: label === "元に戻" ? "直前の操作を元に戻した" : "元に戻した操作をやり直した" });
       ctx.setStatus(`${label}しました（あと ${from.length} 回${label}せます）`);
     } catch (error) {

@@ -58,6 +58,8 @@ const PLAN_TABLES = {
 // このブラウザーの保存で、変更の記録（data.audit）を付ける表。key は行を見分ける列
 const AUDITED = {
   fields: { key: "id" },
+  plans: { key: "id" },
+  backdrops: { key: "id" },
   zones: { key: "id" },
   blocks: { key: "id" },
   beds: { key: "id" },
@@ -73,8 +75,16 @@ export const AUDIT_NAMES = { workTypes: "work_types", workLogs: "logs" };
 for (const table of Object.keys(AUDITED)) {
   AUDIT_NAMES[table] = AUDIT_NAMES[table] || table;
 }
-// 作業の種類は、保存したことがなければ、もとから入っている種類
-const auditRows = (data, table) => (table === "workTypes" ? data.workTypes || DEFAULT_WORK_TYPES.map((item) => ({ ...item })) : data[table] || []);
+// 作業の種類は、保存したことがなければ、もとから入っている種類。下絵は、圃場ごとに 1 つ（data.backdrops は圃場の ID から下絵へ）
+const auditRows = (data, table) => {
+  if (table === "workTypes") {
+    return data.workTypes || DEFAULT_WORK_TYPES.map((item) => ({ ...item }));
+  }
+  if (table === "backdrops") {
+    return Object.values(data.backdrops || {});
+  }
+  return data[table] || [];
+};
 // 表ごとに、行の見分けの値から、行の中身（文字にしたもの）へ
 const auditView = (data) =>
   Object.fromEntries(
@@ -571,6 +581,13 @@ export function duringOperation(id, call) {
   }
 }
 
+// 書き込みを、どれも id の操作のものとして送る店。何回かに分けて書く 1 つの操作（圃場の設定の窓の保存）に使う。
+// そのあいだに別の操作が始まっても、その操作の ID にならない
+export function bindOperation(store, id) {
+  const writes = QUEUED_WRITES.filter((name) => store[name]).map((name) => [name, (...args) => duringOperation(id, () => store[name](...args))]);
+  return { ...store, ...Object.fromEntries(writes) };
+}
+
 // Supabase の fetch。書き込みに操作の ID を付ける。読み取りと認証には付けない
 export function fetchWithOperation(url, options = {}) {
   if (!sending || !String(url).includes("/rest/v1/") || (options.method || "GET") === "GET") {
@@ -725,7 +742,10 @@ function createLocalTables({ strict = false } = {}) {
           data[table] = (data[table] || []).filter((row) => !plans.includes(row.plan_id));
         }
         delete data.backdrops?.[id];
-        delete data.images?.[id];
+        // 下絵の画像は、圃場の ID か「圃場の ID:読み込みの ID」で持つ
+        for (const key of Object.keys(data.images || {}).filter((name) => name === id || name.startsWith(`${id}:`))) {
+          delete data.images[key];
+        }
       });
       return 0;
     },
@@ -741,10 +761,12 @@ function createLocalTables({ strict = false } = {}) {
         reader.onerror = () => reject(reader.error);
         reader.readAsDataURL(file);
       });
+      // 読み込むごとに別に持つ（元に戻すで、前の下絵に戻せるように。DB の Storage も、前の画像を消さない）
+      const key = `${fieldId}:${crypto.randomUUID()}`;
       update((data) => {
-        data.images = { ...data.images, [fieldId]: dataUrl };
+        data.images = { ...data.images, [key]: dataUrl };
       });
-      return `local:${fieldId}`;
+      return `local:${key}`;
     },
     async imageUrl(path) {
       return read().images?.[path.slice("local:".length)] || "";
@@ -961,7 +983,12 @@ function createLocalTables({ strict = false } = {}) {
           for (const row of rows.values()) {
             const { key } = AUDITED[row.table];
             const list = auditRows(next, row.table);
-            next[row.table] = [...list.filter((item) => String(item[key]) !== row.id), ...(row.before ? [structuredClone(row.before)] : [])];
+            const kept = [...list.filter((item) => String(item[key]) !== row.id), ...(row.before ? [structuredClone(row.before)] : [])];
+            if (row.table === "backdrops") {
+              next.backdrops = Object.fromEntries(kept.map((item) => [item.field_id, item]));
+            } else {
+              next[row.table] = kept;
+            }
           }
         });
       } finally {

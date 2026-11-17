@@ -42,7 +42,7 @@ import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
-import { UNDO_APPLY, initHistory, renderHistoryButtons, resetHistory } from "./history.js";
+import { UNDO_APPLY, initHistory, markFieldOperation, renderHistoryButtons, resetHistory } from "./history.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { plantingOnDate } from "./logs.js";
@@ -54,7 +54,7 @@ import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather,
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { currentBlockId, ganttTakesKey, initSchedule, openInSchedule, openProcessPlan, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash } from "./schedule-view.js";
-import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
+import { bindOperation, createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
 
@@ -1332,8 +1332,9 @@ function sameContent(local, remote) {
 
 // 元に戻した行（DB の関数 field.undo_op が返す、戻した行の今の中身）を画面のデータに当てて、描き直す。
 // 当てるのは、いまの圃場とプランの行と、品目・肥料・作業の種類・実績。row が null の行は消えた
-// どの表をどう当てるかは、history.js の UNDO_APPLY
-function applyUndo({ changes = [], logs = [] }) {
+// どの表をどう当てるかは、history.js の UNDO_APPLY。開いているプランが消えたら、残ったプランの先頭を開く
+async function applyUndo({ changes = [], logs = [] }) {
+  let backdropChanged = false;
   // 当て方を決めていない表（下絵、プランなど）の行があれば、当てずに知らせる（history.js が DB から読み直す）
   const unknown = [...new Set(changes.map((item) => item.table).filter((table) => !UNDO_APPLY[table] || UNDO_APPLY[table] === "logs"))];
   if (unknown.length) {
@@ -1362,6 +1363,34 @@ function applyUndo({ changes = [], logs = [] }) {
     } else if (table === "work_types") {
       state.allWorkTypes = put(state.allWorkTypes, "code", id, row).sort((a, b) => a.sort - b.sort);
       state.workTypes = state.allWorkTypes.filter(isPlannable);
+    } else if (table === "plans") {
+      // 開いている圃場のプランの一覧。行は同じものを使い続ける（窓やほかの処理が、行そのものを持っている）
+      const known = state.plans.find((item) => item.id === id);
+      if (row && row.field_id !== state.field.id) {
+        continue;
+      } else if (row && known) {
+        Object.assign(known, row);
+      } else if (row) {
+        state.plans.push(row);
+        state.plans.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+      } else if (known) {
+        state.plans.splice(state.plans.indexOf(known), 1);
+      }
+    } else if (table === "backdrops") {
+      backdropChanged = true;
+    }
+  }
+  if (backdropChanged) {
+    // 下絵は、圃場のいちばん新しい行を使う。読み込みを戻すと新しい行が消え、前の行に戻るので、読み直して当てる。
+    // 画像のファイルは消していないので、画像が変わったら URL を取り直す
+    const row = await state.store.loadBackdrop(state.field.id);
+    const sameImage = row && row.storage_path === state.backdrop?.storage_path;
+    state.backdrop = row ? { ...row, size: sameImage ? state.backdrop.size ?? null : null } : null;
+    if (!row) {
+      state.backdropUrl = "";
+    } else if (!sameImage) {
+      state.backdropUrl = await state.store.imageUrl(row.storage_path);
+      measureBackdrop(state.backdrop, state.backdropUrl);
     }
   }
   for (const { id, row } of logs) {
@@ -1370,10 +1399,15 @@ function applyUndo({ changes = [], logs = [] }) {
     }
   }
   state.logs.sort((a, b) => b.date.localeCompare(a.date) || String(b.created_at).localeCompare(String(a.created_at)));
+  if (!state.plans.some((item) => item.id === state.plan.id)) {
+    await openPlan(state.plans[0]); // 開いていたプランを作った操作を戻した
+  }
   if (mapDraft.current) {
     mapDraft.current = editSnapshot();
   }
   refreshViews();
+  renderPlans();
+  refreshFieldPlans();
 }
 
 // データを入れ替えたあと、どの画面も描き直す。なくなった図形を選んだままにしない
@@ -2538,6 +2572,7 @@ async function openField(field) {
   $("viewDate").value = state.viewDate;
   setMode("select");
   showPlan(plan);
+  resetHistory(); // 前の圃場の履歴は使えない。開き終えた状態から数え直す
   fitView();
   render();
   renderWeatherSettings();
@@ -2708,7 +2743,7 @@ function showPlan(plan) {
   render();
   renderSchedule();
   renderPlantingDetail();
-  resetHistory(); // 前のプランの履歴は使えない。開き終えた状態から数え直す
+  // 履歴は空にしない。1 回ぶんは操作したときのプランを覚えていて、別のプランの操作は、そのプランを開いたときだけ戻す
 }
 
 function askPlanName(message, initial) {
@@ -3934,7 +3969,7 @@ async function saveFieldSettings() {
   }
   if (settings.transforms.length) {
     const ok = await confirmAction({
-      message: "図形の大きさ・向きを変える調整が入っています。この圃場のすべてのプランの外形・区域・区画・畝に当てて保存します。保存したあとは「元に戻す」で戻せません。",
+      message: "図形の大きさ・向きを変える調整が入っています。この圃場のすべてのプランの外形・区域・区画・畝に当てて保存します。保存したあとも、「元に戻す」で、保存の前に戻せます。",
       action: "保存する",
     });
     if (!ok) {
@@ -3946,6 +3981,12 @@ async function saveFieldSettings() {
   const now = settingsSnapshot();
   $("settingsStatus").textContent = "保存中…";
   $("settingsSave").disabled = true;
+  // 保存は、1 つの操作（元に戻すの 1 回ぶん）。何回かに分けて書くので、どの書き込みにも、この操作の ID を付ける。
+  // 圃場の操作なので、どのプランを開いていても戻せる
+  const op = currentOperation();
+  markFieldOperation(op);
+  const base = state.store;
+  state.store = bindOperation(base, op);
   try {
     if (JSON.stringify(now.backdrop && { ...now.backdrop, size: null }) !== JSON.stringify(start.backdrop && { ...start.backdrop, size: null }) && state.backdrop) {
       const { size, ...row } = state.backdrop;
@@ -3973,11 +4014,12 @@ async function saveFieldSettings() {
     settings.records.forEach((entry) => record(entry));
     Object.assign(settings, { undo: [], redo: [], transforms: [], records: [] });
     settings.start = settingsSnapshot();
-    resetHistory();
     $("settingsStatus").textContent = "保存しました";
   } catch (error) {
     $("settingsStatus").textContent = `保存できませんでした: ${error.message}`;
     notifySaveFailed(error);
+  } finally {
+    state.store = base;
   }
   renderSettingsFoot();
 }
@@ -4382,6 +4424,13 @@ async function startApp(user = "local") {
     apply: applyUndo,
     // 戻したあと、画面に当てられなかったとき、DB から読み直す
     reload: reloadFromDb,
+    // プランの操作を戻す前に、「圃場とプラン」の窓を開いて見せる
+    showPlans: async () => {
+      if (!document.querySelector("dialog.field-plans[open]")) {
+        openFieldPlans();
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    },
     // 図の編集の書きかけ
     draft: () => (state.mapEditing ? { canUndo: mapDraft.undo.length > 0, canRedo: mapDraft.redo.length > 0, undo: undoDraft, redo: redoDraft } : null),
   });

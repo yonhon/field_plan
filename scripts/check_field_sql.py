@@ -418,6 +418,21 @@ def check_undo_op(c):
     loose = run(OWNER, None, [("select field.undo_op(%s, %s)", (many, json.dumps({"beds": 3})))])[0]
     expect("上限より少なければ、そのまま戻す", loose["status"] == "done" and snapshot() == start)
 
+    # プランを消した操作を戻すと、区域から作業まで中身ごと戻り、実績の対象の空になった欄も戻る
+    c.execute("insert into field.work_log_targets (log_id, planting_id, bed_id, block_id) select %s, p.id, p.bed_id, d.block_id from field.plantings p join field.beds d on d.id = p.bed_id where p.plan_id = %s limit 1", (log, plan2))
+    start = snapshot()
+    gone = operation([("delete from field.plans where id = %s", (plan2,))])
+    nulled = c.execute("select count(*) from field.audit_log where op_id = %s and table_name = 'work_log_targets' and op = 'update'", (gone,)).fetchone()[0]
+    result = undo(gone)
+    expect(f"プランを消した操作を戻すと、中身ごと戻り、実績の対象の空になった欄（{nulled} 件）も戻る", nulled >= 1 and result["status"] == "done" and snapshot() == start)
+
+    # プランのコピーを戻すと、写したプランが消える。プランが消えるので、上限を渡すと確かめる
+    copied = str(uuid.uuid4())
+    run(OWNER, copied, [("select (field.copy_plan(%s, '戻す試験の写し')).id", (plan,))])
+    limited = run(OWNER, None, [("select field.undo_op(%s, %s)", (copied, json.dumps({"plans": 1})))])[0]
+    result = undo(copied)
+    expect("プランのコピーを戻すと、写したプランが消える（上限を渡すと、先に数を返す）", limited["status"] == "confirm" and limited["removed"].get("plans") == 1 and result["status"] == "done" and snapshot() == start)
+
     # 他人は戻せない
     try:
         undo(renamed, uid=OTHER)

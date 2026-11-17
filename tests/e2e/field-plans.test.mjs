@@ -144,3 +144,89 @@ test("圃場とプラン: 開いているプランをコピーすると、行に
   assert.deepEqual(Object.keys(copy).sort(), ["field_id", "id", "name"], "プランの行に、余計な列を付けない");
   assert.deepEqual(page.errors, []);
 });
+
+// 元に戻す・やり直す（Issue #3 の 3 段目）。プランの操作は、「圃場とプラン」の窓を開いて、目の前で戻す
+const closeDialog = async () => {
+  await page.click(`${DIALOG} [data-act="close"]`);
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "窓が閉じる");
+};
+const planNames = () => page.run(`[...document.querySelectorAll("${DIALOG} .fp-plan")].map((row) => row.textContent).join("/")`);
+
+test("元に戻す: プランの名前の変更を戻すと、「圃場とプラン」の窓が開いて、前の名前に戻る。やり直すと、また変わる", options, async () => {
+  await page.loadApp(seed(), { field_plan_current_field: "f1", field_plan_prefs: JSON.stringify({ f1: { plan: "p1" } }) });
+  await openDialog();
+  await answer("名前を変えたプラン");
+  await fromMenu("plan:p2", "renamePlan");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).plans.find((plan) => plan.id === "p2").name === "名前を変えたプラン"`, "名前の保存");
+  await closeDialog();
+  await page.click("#undoBtn");
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "窓が開く");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).plans.find((plan) => plan.id === "p2").name === "一のプランB"`, "DB の名前が戻る");
+  await page.waitFor(`/一のプランB/.test(${JSON.stringify("")} + [...document.querySelectorAll("${DIALOG} .fp-plan")].map((row) => row.textContent).join("/"))`, "窓の一覧も戻る");
+  await closeDialog();
+  await page.click("#redoBtn");
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "やり直すでも窓が開く");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).plans.find((plan) => plan.id === "p2").name === "名前を変えたプラン"`, "やり直し");
+  assert.match(await planNames(), /名前を変えたプラン/);
+  assert.deepEqual(page.errors, []);
+});
+
+test("元に戻す: 作って開いたプランを戻すと、確かめてから消し、前のプランを開く。消したプランを戻すと、中身ごと戻る", options, async () => {
+  await page.loadApp(seed(), { field_plan_current_field: "f1", field_plan_prefs: JSON.stringify({ f1: { plan: "p1" } }) });
+  await openDialog();
+  await answer("新しいプラン");
+  await page.click(`${DIALOG} [data-act="newPlan"]`);
+  await page.waitFor(`document.getElementById("brandPlan").textContent.startsWith("新しいプラン")`, "作ったプランを開く");
+  await closeDialog();
+  await page.click("#undoBtn");
+  await page.waitFor(`document.querySelector("dialog.notice[open]")?.textContent.includes("プラン 1 件")`, "消えるプランを知らせる");
+  await page.click('dialog.notice[open] [data-action="delete"]');
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).plans.length === 3`, "作ったプランが消える");
+  await page.waitFor(`document.getElementById("brandPlan").textContent.startsWith("一のプランA")`, "前のプランを開く");
+  assert.doesNotMatch(await planNames(), /新しいプラン/);
+  await closeDialog();
+
+  // 開いていないプランを消して、戻す
+  await openDialog();
+  await page.run(`window.confirm = () => true`);
+  await fromMenu("plan:p2", "deletePlan");
+  await page.click('dialog.notice[open] [data-action="delete"]');
+  await page.waitFor(`!JSON.parse(localStorage.getItem("field_plan_local")).plans.some((plan) => plan.id === "p2")`, "プランの削除");
+  await page.waitFor(`!JSON.parse(localStorage.getItem("field_plan_local")).zones.some((zone) => zone.id === "z2")`, "中身も消える");
+  await closeDialog();
+  await page.click("#undoBtn");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).zones.some((zone) => zone.id === "z2")`, "中身ごと戻る");
+  assert.match(await planNames(), /一のプランB/, "窓の一覧に戻る");
+  assert.equal(await page.run(`document.getElementById("brandPlan").textContent`).then((text) => text.startsWith("一のプランA")), true, "開いているプランは変えない");
+  assert.deepEqual(page.errors, []);
+});
+
+test("元に戻す: 別のプランの操作は、戻さずに知らせ、そのプランに切り替えると戻せる", options, async () => {
+  await page.loadApp({ ...seed(), blocks: [{ id: "b1", plan_id: "p1", zone_id: "z1", name: "A", shape: AREA, start_date: null, end_date: null, created_at: AT }] },
+    { field_plan_current_field: "f1", field_plan_prefs: JSON.stringify({ f1: { plan: "p1" } }) });
+  // プラン A で、区画の名前を変える
+  await page.click('#shapeTree [data-shape="b1"]');
+  await page.waitFor(`document.getElementById("blockName").offsetParent !== null`, "区画の名前の欄");
+  await page.run(`(() => { const input = document.getElementById("blockName"); input.value = "変えた名前"; input.dispatchEvent(new Event("input", { bubbles: true })); input.blur(); })()`);
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).blocks[0].name === "変えた名前"`, "名前の保存");
+  // プラン B に切り替える
+  await openDialog();
+  await page.click(`${DIALOG} [data-act="open"][data-id="p2"]`);
+  await page.waitFor(`document.getElementById("brandPlan").textContent.startsWith("一のプランB")`, "プラン B を開く");
+  if (await page.run(`Boolean(document.querySelector("${DIALOG}"))`)) {
+    await closeDialog();
+  }
+  await page.click("#undoBtn");
+  await page.waitFor(`document.getElementById("saveStatus").textContent === "プラン「一のプランA」の操作です。そのプランに切り替えると、元に戻せます"`, "知らせる");
+  assert.equal((await saved()).blocks[0].name, "変えた名前", "戻さない");
+  // プラン A に戻すと、戻せる
+  await openDialog();
+  await page.click(`${DIALOG} [data-act="open"][data-id="p1"]`);
+  await page.waitFor(`document.getElementById("brandPlan").textContent.startsWith("一のプランA")`, "プラン A を開く");
+  if (await page.run(`Boolean(document.querySelector("${DIALOG}"))`)) {
+    await closeDialog();
+  }
+  await page.click("#undoBtn");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).blocks[0].name === "A"`, "戻る");
+  assert.deepEqual(page.errors, []);
+});
