@@ -795,6 +795,165 @@ as $$
   select case when field.is_owner() then coalesce((select max(id) from field.audit_log), 0) end;
 $$;
 
+-- 画面の 1 回の操作（audit_log の op_id）で変わった行を、操作の前の中身に戻す（Issue #2）。1 つのトランザクションで行い、失敗したら何も変えない。
+-- 行ごとに、その操作の最初の記録の old_row が操作の前の中身（足した行は空なので、消す）。同じ行を何度変えた操作も、1 回で戻る。
+-- 戻す処理の変更も、操作の ID 付きで記録する。ID は画面が送る x-op-id、なければ新しく作る。その ID を戻すと、やり直しになる。
+-- 返すのは { status: 'done', op_id: 戻す処理の ID, rows: 戻した行の数 }、{ status: 'empty' }（記録がない）、
+-- { status: 'conflict', rows: [{ table, row_id }] }（戻さない）。conflict になるのは、次の 2 つ。
+--   1. 戻す行が、その操作のあとに変わっている（記録がある）
+--   2. 戻すと、操作に入っていない行まで変わる（操作で足した行を、あとから別の行が指していて、連鎖で消える、など）
+-- 監査の対象でない表（changes など）と Storage のファイルは戻さない。
+create or replace function field.undo_op(p_op uuid) returns jsonb
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  -- 親から子の順。fields.active_plan_id は plans を指すので、入れる順で断られた行は、あとでもう一度試す
+  v_order constant text[] := array[
+    'fields', 'backdrops', 'plans', 'work_types', 'fertilizers', 'crops', 'zones', 'blocks', 'beds', 'plantings', 'works',
+    'work_logs', 'work_log_targets', 'work_log_inputs'];
+  v_rows jsonb;      -- [{ t: 表, id: 行の ID, before: 操作の前の中身か null, last: その操作の最後の記録の番号 }]
+  v_conflicts jsonb;
+  v_headers jsonb;
+  v_new uuid;
+  v_mark bigint;
+  v_pending jsonb;
+  v_next jsonb;
+  v_item jsonb;
+  v_now jsonb;
+  v_pk text;
+  v_set text;
+  v_progress boolean;
+begin
+  if not field.is_owner() then
+    raise exception '元に戻せるのは、持ち主だけです' using errcode = '42501';
+  end if;
+  if p_op is null then
+    raise exception '操作の ID がありません';
+  end if;
+  -- 戻す処理を 1 つずつ行う（同じ操作を 2 回続けて戻さない）
+  perform pg_advisory_xact_lock(hashtext('field.undo_op'));
+
+  select jsonb_agg(jsonb_build_object('t', table_name, 'id', row_id, 'before', before, 'last', last)
+                   order by array_position(v_order, table_name), row_id)
+  into v_rows
+  from (
+    select table_name, row_id, (array_agg(old_row order by id))[1] as before, max(id) as last
+    from field.audit_log
+    where op_id = p_op
+    group by table_name, row_id
+  ) g;
+  if v_rows is null then
+    return jsonb_build_object('status', 'empty');
+  end if;
+  if exists (select 1 from jsonb_array_elements(v_rows) r where not (r ->> 't') = any (v_order)) then
+    raise exception '戻し方を決めていない表の変更があります: %',
+      (select string_agg(distinct r ->> 't', ', ') from jsonb_array_elements(v_rows) r where not (r ->> 't') = any (v_order));
+  end if;
+
+  -- 1. その操作のあとに変わった行があれば、戻さない
+  select jsonb_agg(distinct jsonb_build_object('table', a.table_name, 'row_id', a.row_id))
+  into v_conflicts
+  from jsonb_array_elements(v_rows) r
+  join field.audit_log a on a.table_name = r ->> 't' and a.row_id = r ->> 'id' and a.id > (r ->> 'last')::bigint;
+  if v_conflicts is not null then
+    return jsonb_build_object('status', 'conflict', 'rows', v_conflicts);
+  end if;
+
+  -- 戻す処理の ID。write_audit_log は request.headers の x-op-id を読むので、このトランザクションの中だけ置き換える
+  begin
+    v_headers := nullif(current_setting('request.headers', true), '')::jsonb;
+    v_new := (v_headers ->> 'x-op-id')::uuid;
+  exception when others then
+    v_new := null;
+  end;
+  if v_new is null or v_new = p_op then
+    v_new := gen_random_uuid();
+  end if;
+  perform set_config('request.headers', (coalesce(v_headers, '{}'::jsonb) || jsonb_build_object('x-op-id', v_new))::text, true);
+  v_mark := coalesce((select max(id) from field.audit_log), 0);
+
+  begin
+    -- 2. 操作の前にあった行を、親から順に、操作の前の中身にする。外部キーか一意の制約で断られた行は、あとでもう一度試す
+    select jsonb_agg(x order by n) into v_pending
+    from jsonb_array_elements(v_rows) with ordinality e(x, n)
+    where jsonb_typeof(x -> 'before') = 'object';
+    while v_pending is not null loop
+      v_next := null;
+      v_progress := false;
+      for v_item in select x from jsonb_array_elements(v_pending) e(x) loop
+        select string_agg(format('%I = excluded.%I', a.attname, a.attname), ', ' order by a.attnum)
+        into v_set
+        from pg_attribute a
+        where a.attrelid = format('field.%I', v_item ->> 't')::regclass and a.attnum > 0 and not a.attisdropped and a.attgenerated = '';
+        select a.attname into v_pk
+        from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = i.indkey[0]
+        where i.indrelid = format('field.%I', v_item ->> 't')::regclass and i.indisprimary;
+        begin
+          execute format(
+            'insert into field.%1$I select * from jsonb_populate_record(null::field.%1$I, $1) on conflict (%2$I) do update set %3$s',
+            v_item ->> 't', v_pk, v_set)
+          using v_item -> 'before';
+          v_progress := true;
+        exception when foreign_key_violation or unique_violation then
+          v_next := coalesce(v_next, '[]'::jsonb) || jsonb_build_array(v_item);
+        end;
+      end loop;
+      if v_next is not null and not v_progress then
+        -- どの行も入れられない。最初の行をもう一度入れて、その誤りをそのまま返す
+        v_item := v_next -> 0;
+        execute format('insert into field.%1$I select * from jsonb_populate_record(null::field.%1$I, $1)', v_item ->> 't')
+        using v_item -> 'before';
+      end if;
+      v_pending := v_next;
+    end loop;
+
+    -- 3. 操作で足した行（操作の前になかった行）を、子から順に消す
+    for v_item in
+      select x from jsonb_array_elements(v_rows) with ordinality e(x, n)
+      where jsonb_typeof(x -> 'before') <> 'object'
+      order by n desc
+    loop
+      select a.attname into v_pk
+      from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = i.indkey[0]
+      where i.indrelid = format('field.%I', v_item ->> 't')::regclass and i.indisprimary;
+      begin
+        execute format('delete from field.%I where %I::text = $1', v_item ->> 't', v_pk) using v_item ->> 'id';
+      exception when foreign_key_violation then
+        -- 操作に入っていない行が、消す行を指している
+        v_conflicts := jsonb_build_array(jsonb_build_object('table', v_item ->> 't', 'row_id', v_item ->> 'id'));
+        raise exception using errcode = 'FP001';
+      end;
+    end loop;
+
+    -- 4. 操作に入っていない行まで変わったら（連鎖の削除、SET NULL など）、すべて取り消す
+    select jsonb_agg(distinct jsonb_build_object('table', a.table_name, 'row_id', a.row_id))
+    into v_conflicts
+    from field.audit_log a
+    where a.id > v_mark and a.op_id = v_new
+      and not exists (select 1 from jsonb_array_elements(v_rows) r where r ->> 't' = a.table_name and r ->> 'id' = a.row_id);
+    if v_conflicts is not null then
+      raise exception using errcode = 'FP001';
+    end if;
+
+    -- 5. どの行も、操作の前の中身になったかを確かめる。違えば、すべて取り消す
+    for v_item in select x from jsonb_array_elements(v_rows) e(x) loop
+      select a.attname into v_pk
+      from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = i.indkey[0]
+      where i.indrelid = format('field.%I', v_item ->> 't')::regclass and i.indisprimary;
+      execute format('select to_jsonb(t) from field.%I t where %I::text = $1', v_item ->> 't', v_pk) into v_now using v_item ->> 'id';
+      if v_now is distinct from (case when jsonb_typeof(v_item -> 'before') = 'object' then v_item -> 'before' end) then
+        raise exception '戻したあとの中身が、操作の前と違います: % %', v_item ->> 't', v_item ->> 'id';
+      end if;
+    end loop;
+  exception when sqlstate 'FP001' then
+    -- この begin の中の変更（戻す処理の記録も含む）は、取り消されている
+    return jsonb_build_object('status', 'conflict', 'rows', v_conflicts);
+  end;
+
+  return jsonb_build_object('status', 'done', 'op_id', v_new, 'rows', jsonb_array_length(v_rows));
+end;
+$$;
+
 -- 起動、戻ってきたときの読み直し、圃場の切り替えで読む中身を、1 回でまとめて返す（要求を 1 つにし、すべてを同じ時点の DB から読む）。
 -- 返す形は、画面の表ごとの読み込み（app/store.js の composeLoadField）と同じ。表は行ごと返すので、列を足しても直さなくてよい。
 -- 表を足す、読む行の絞り方や並び順を変えるときは、ここと composeLoadField の両方を直す（tests/load-field.test.mjs が表の食い違いを確かめる）。
@@ -897,6 +1056,8 @@ revoke all on function field.audit_last() from public, anon;
 revoke all on function field.load_field(uuid, uuid, bigint) from public, anon;
 grant execute on function field.load_field(uuid, uuid, bigint) to authenticated;
 grant execute on function field.audit_last() to authenticated;
+revoke all on function field.undo_op(uuid) from public, anon;
+grant execute on function field.undo_op(uuid) to authenticated;
 grant execute on function field.plan_last_changes() to authenticated;
 revoke all on field.importers from authenticated;
 alter table field.importers enable row level security;

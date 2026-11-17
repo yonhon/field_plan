@@ -103,6 +103,7 @@ def main():
             out = sys.argv[sys.argv.index("--dump") + 1]
             dump(c, out)
         check_copy_plan(c)
+        check_undo_op(c)
     if "--whole" in sys.argv:
         # SQL Editor と同じに、ファイルを 1 つの問い合わせとして流す
         with psycopg.connect(ADMIN, autocommit=True) as c:
@@ -202,6 +203,180 @@ def check_copy_plan(c):
             refused = True
         expect(label, refused and c.execute(COUNTS).fetchone() == after)
     print("copy_plan:", "all ok" if ok else "FAILED")
+
+
+UNDO_TABLES = (
+    "fields", "backdrops", "plans", "work_types", "fertilizers", "crops", "zones", "blocks", "beds", "plantings", "works",
+    "work_logs", "work_log_targets", "work_log_inputs",
+)
+
+
+def check_undo_op(c):
+    """field.undo_op() を確かめる。画面と同じに、操作の ID（x-op-id）を付けて、ログインした利用者の役割で書く"""
+    import json
+    import uuid
+
+    ok = True
+
+    def expect(label, passed):
+        nonlocal ok
+        ok = ok and passed
+        print(f"undo_op: {'ok  ' if passed else 'FAIL'} {label}")
+
+    def snapshot():
+        # 戻す対象の表の、すべての行
+        return {t: c.execute(f"select coalesce(jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text), '[]') from field.{t} x").fetchone()[0] for t in UNDO_TABLES}
+
+    def audit_count():
+        return c.execute("select count(*) from field.audit_log").fetchone()[0]
+
+    def run(uid, op, statements):
+        # 1 回の操作。statements は (SQL, 引数) の並び。最後の文の 1 行目を返す
+        with c.transaction():
+            c.execute("select set_config('test.uid', %s, true)", (uid,))
+            c.execute("select set_config('request.headers', %s, true)", (json.dumps({"x-op-id": op}) if op else "",))
+            c.execute("set local role authenticated")
+            row = None
+            for sql, args in statements:
+                cur = c.execute(sql, args)
+                row = cur.fetchone() if cur.description else None
+            return row
+
+    def operation(statements):
+        op = str(uuid.uuid4())
+        run(OWNER, op, statements)
+        return op
+
+    def undo(op, header=None, uid=OWNER):
+        return run(uid, header, [("select field.undo_op(%s)", (op,))])[0]
+
+    # 試験の圃場。品目は、2 つのプランの作付から指す
+    field = c.execute("insert into field.fields (name) values ('戻す試験の圃場') returning id").fetchone()[0]
+    plan = c.execute("insert into field.plans (field_id, name) values (%s, 'プラン1') returning id", (field,)).fetchone()[0]
+    plan2 = c.execute("insert into field.plans (field_id, name) values (%s, 'プラン2') returning id", (field,)).fetchone()[0]
+    crop = c.execute("insert into field.crops (name) values ('戻す試験の品目') returning id").fetchone()[0]
+    kind = c.execute("select code from field.work_types order by sort limit 1").fetchone()[0]
+
+    def build(p):
+        zone = c.execute("insert into field.zones (plan_id, kind, name, shape) values (%s, 'tillable', 'z', %s) returning id", (p, SHAPE)).fetchone()[0]
+        block = c.execute("insert into field.blocks (plan_id, zone_id, name, shape) values (%s, %s, 'A', %s) returning id", (p, zone, SHAPE)).fetchone()[0]
+        bed = c.execute("insert into field.beds (plan_id, block_id, seq, shape) values (%s, %s, 1, %s) returning id", (p, block, SHAPE)).fetchone()[0]
+        planting = c.execute("insert into field.plantings (plan_id, bed_id, seq, crop_id, crop_name) values (%s, %s, 1, %s, '戻す試験の品目') returning id", (p, bed, crop)).fetchone()[0]
+        work = c.execute("insert into field.works (plan_id, planting_id, work_type, seq, plan_start, plan_end) values (%s, %s, %s, 1, '2026-04-01', '2026-04-02') returning id", (p, planting, kind)).fetchone()[0]
+        return zone, block, bed, planting, work
+
+    zone, block, bed, planting, work = build(plan)
+    build(plan2)
+    log = c.execute("insert into field.work_logs (field_id, date, work_type) values (%s, '2026-04-01', %s) returning id", (field, kind)).fetchone()[0]
+    c.execute("insert into field.work_log_targets (log_id, planting_id, bed_id, block_id, work_id) values (%s, %s, %s, %s, %s)", (log, planting, bed, block, work))
+
+    start = snapshot()
+
+    # 親子の行を足す操作を戻し、やり直し、もう一度戻す（繰り返しても同じ中身）
+    new_block, new_bed, new_planting = (str(uuid.uuid4()) for _ in range(3))
+    added = operation([
+        ("insert into field.blocks (id, plan_id, zone_id, name, shape) values (%s, %s, %s, 'B', %s)", (new_block, plan, zone, SHAPE)),
+        ("insert into field.beds (id, plan_id, block_id, seq, shape) values (%s, %s, %s, 1, %s)", (new_bed, plan, new_block, SHAPE)),
+        ("insert into field.plantings (id, plan_id, bed_id, seq, crop_name) values (%s, %s, %s, 1, '足した作付')", (new_planting, plan, new_bed)),
+        ("insert into field.works (plan_id, planting_id, work_type, seq, plan_start, plan_end) values (%s, %s, %s, 1, '2026-05-01', '2026-05-02')", (plan, new_planting, kind)),
+    ])
+    with_added = snapshot()
+    result = undo(added)
+    expect("足した親子の行（区画、畝、作付、作業）を戻すと、すべて消える", result["status"] == "done" and result["rows"] == 4 and snapshot() == start)
+    same = True
+    for _ in range(3):
+        redo = undo(result["op_id"])
+        same = same and redo["status"] == "done" and snapshot() == with_added
+        result = undo(redo["op_id"])
+        same = same and result["status"] == "done" and snapshot() == start
+    expect("戻す、やり直す、を 3 回繰り返しても、同じ中身になる", same)
+
+    # 区画を消す（畝、作付、作業は CASCADE、実績の対象は SET NULL で変わる）操作を戻す
+    removed = operation([("delete from field.blocks where id = %s", (block,))])
+    changed = c.execute("select count(*) from field.audit_log where op_id = %s", (removed,)).fetchone()[0]
+    result = undo(removed)
+    expect(f"区画を消した操作（連鎖で {changed} 行）を戻すと、畝、作付、作業、実績の対象のつながりが戻る", changed >= 5 and result["status"] == "done" and snapshot() == start)
+
+    # 同じ行を 1 回の操作で何度も変える
+    edited = operation([
+        ("update field.beds set shape = %s where id = %s", ("[[0, 0], [2, 0], [2, 2], [0, 2]]", bed)),
+        ("update field.beds set seq = 5 where id = %s", (bed,)),
+        ("update field.beds set shape = %s where id = %s", ("[[0, 0], [3, 0], [3, 3], [0, 3]]", bed)),
+    ])
+    result = undo(edited)
+    expect("同じ行を 1 回の操作で何度も変えても、操作の前の中身に戻る", result["status"] == "done" and result["rows"] == 1 and snapshot() == start)
+
+    # 2 つのプランの作付が指す品目を消す（どちらの作付も SET NULL）
+    dropped = operation([("delete from field.crops where id = %s", (crop,))])
+    nulled = c.execute("select count(*) from field.plantings where crop_id is null and crop_name = '戻す試験の品目'").fetchone()[0]
+    result = undo(dropped)
+    expect("2 つのプランの作付が指す品目を消した操作を戻すと、どちらの作付も品目を指し直す", nulled == 2 and result["status"] == "done" and snapshot() == start)
+
+    # 実際に使うプラン（fields.active_plan_id）を消す。圃場の行は、プランを入れ直したあとでないと戻せない
+    c.execute("update field.fields set active_plan_id = %s where id = %s", (plan2, field))
+    start = snapshot()
+    plan_gone = operation([("delete from field.plans where id = %s", (plan2,))])
+    result = undo(plan_gone)
+    expect("実際に使うプランを消した操作を戻すと、プランと、圃場が指すプランが戻る", result["status"] == "done" and snapshot() == start)
+
+    # その操作のあとに変わった行があれば、戻さない
+    first = operation([("update field.beds set seq = 7 where id = %s", (bed,))])
+    later = operation([("update field.beds set seq = 8 where id = %s", (bed,))])
+    before, count = snapshot(), audit_count()
+    result = undo(first)
+    expect("戻す行が、そのあとの操作で変わっていたら、戻さずに知らせる", result["status"] == "conflict" and result["rows"] == [{"table": "beds", "row_id": str(bed)}] and snapshot() == before and audit_count() == count)
+    undo(later)
+    undo(first)
+
+    # 戻すと、操作に入っていない行まで変わる（あとで足した作付が、連鎖で消える）
+    other_bed = str(uuid.uuid4())
+    made = operation([("insert into field.beds (id, plan_id, block_id, seq, shape) values (%s, %s, %s, 9, %s)", (other_bed, plan, block, SHAPE))])
+    child = operation([("insert into field.plantings (plan_id, bed_id, seq, crop_name) values (%s, %s, 1, 'あとの作付')", (plan, other_bed))])
+    before, count = snapshot(), audit_count()
+    result = undo(made)
+    expect("戻すと、操作に入っていない行まで変わるなら、戻さずに知らせる", result["status"] == "conflict" and snapshot() == before and audit_count() == count)
+    undo(child)
+    undo(made)
+
+    # 1 つの操作の ID に、2 つの操作の変更が入っている（保存に失敗しているあいだに、予約の ID が書き換わった形）。
+    # 前の操作は区画だけ、あとの操作は、前の操作の分も含めて畝を書いた
+    start = snapshot()
+    earlier = operation([("update field.blocks set name = '前の操作' where id = %s", (block,))])
+    merged = operation([("update field.beds set seq = 3 where id = %s", (bed,)), ("update field.beds set seq = 4 where id = %s", (bed,))])
+    a, b = undo(merged), undo(earlier)
+    expect("2 つの操作の変更が 1 つの ID に入っていても、新しい順に戻せば、両方の前に戻る", a["status"] == "done" and b["status"] == "done" and snapshot() == start)
+    expect("記録のない操作の ID は、戻すものがないと返す", undo(str(uuid.uuid4()))["status"] == "empty")
+
+    # 画面が送る操作の ID を、戻す処理の ID に使う
+    renamed = operation([("update field.blocks set name = 'ID の試験' where id = %s", (block,))])
+    header = str(uuid.uuid4())
+    result = undo(renamed, header=header)
+    tagged = c.execute("select count(*) from field.audit_log where op_id = %s", (header,)).fetchone()[0]
+    expect("画面が送る操作の ID で、戻す処理を記録する", result["status"] == "done" and result["op_id"] == header and tagged == 1)
+
+    # 途中で失敗したら、何も変わらない
+    removed = operation([("delete from field.beds where id = %s", (bed,))])
+    before, count = snapshot(), audit_count()
+    c.execute("create function field.zz_fail() returns trigger language plpgsql as $$ begin raise exception '保存の失敗'; end $$")
+    c.execute("create trigger zz_fail before insert on field.plantings for each row execute function field.zz_fail()")
+    try:
+        undo(removed)
+        failed = False
+    except Exception:
+        failed = True
+    c.execute("drop trigger zz_fail on field.plantings")
+    c.execute("drop function field.zz_fail()")
+    expect("途中で失敗したら、何も変わらない（戻す処理の記録も残らない）", failed and snapshot() == before and audit_count() == count)
+    undo(removed)
+
+    # 他人は戻せない
+    try:
+        undo(renamed, uid=OTHER)
+        refused = False
+    except Exception:
+        refused = True
+    expect("他人は、戻せない", refused)
+    print("undo_op:", "all ok" if ok else "FAILED")
 
 
 SCHEMA_SQL = """
