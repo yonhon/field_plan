@@ -5023,3 +5023,90 @@ svg .undo-flash {
     fill-opacity: 0.55;
   }
 }
+
+/* スマホの元に戻す・やり直す。ロゴのメニューの矢印と押しピン、押しピンで出す小さな窓（undo-pad.js）。
+   パソコンの幅では出さない（ヘッダーに「元に戻す」「やり直す」がある） */
+@media (min-width: 801px) {
+  .phone-only,
+  .undo-pad {
+    display: none !important;
+  }
+}
+
+.user-menu-history {
+  display: flex;
+  gap: 4px;
+  padding: 2px 6px;
+}
+
+.user-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.user-menu-icon:hover:not(:disabled) {
+  background: var(--bg);
+}
+
+.user-menu-icon:disabled {
+  opacity: 0.35;
+}
+
+/* 見た目は「新しい版があります」のお知らせ（.toast）にそろえる。窓の中に移っても同じ姿になるよう、文字と色をここで決める */
+.undo-pad {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 60;
+  display: flex;
+  gap: 2px;
+  width: fit-content;
+  margin: 0 auto;
+  padding: 2px 4px;
+  border-radius: 12px;
+  background: var(--text);
+  color: #fff;
+  font-family: inherit;
+  font-size: 22px;
+  line-height: 1;
+  box-shadow: 0 6px 20px rgba(19, 38, 42, 0.22);
+}
+
+.undo-pad-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 22px;
+}
+
+.undo-pad-btn:disabled {
+  opacity: 0.35;
+}
+
+.undo-pad-close {
+  font-size: 20px;
+}
+
+/* 幅の狭いスマホで、右下の「＋ 入力する」が出ているときは、重ならないように、その上の高さに上げる */
+@media (max-width: 410px) {
+  body:has(#logAddBtn:not([hidden])) .undo-pad {
+    bottom: calc(80px + env(safe-area-inset-bottom));
+  }
+}
+
+/* 小さな窓を中に出している窓は、下の方が隠れないように余白を足す */
+dialog.has-undo-pad {
+  padding-bottom: 64px;
+}

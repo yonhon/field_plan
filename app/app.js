@@ -42,7 +42,8 @@ import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
 import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
-import { UNDO_APPLY, initHistory, markSettingsOperation, renderHistoryButtons, resetHistory } from "./history.js";
+import { UNDO_APPLY, historyState, initHistory, markSettingsOperation, redo as redoStep, renderHistoryButtons, resetHistory, undo as undoStep } from "./history.js";
+import { showUndoPad } from "./undo-pad.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { plantingOnDate } from "./logs.js";
@@ -4464,7 +4465,14 @@ async function startApp(user = "local") {
   $("appView").hidden = false;
   $("viewTabs").hidden = false;
   initFieldPlans({ state, notify, ops: fieldPlanOps });
-  setPlaceActions({ choose: afterMapEditing(openFieldPlans), settings: afterMapEditing(openFieldSettings) });
+  setPlaceActions({
+    choose: afterMapEditing(openFieldPlans),
+    settings: afterMapEditing(openFieldSettings),
+    undo: undoStep,
+    redo: redoStep,
+    undoPad: showUndoPad,
+    historyState,
+  });
   renderPlans();
   fitView();
   setMode("select");

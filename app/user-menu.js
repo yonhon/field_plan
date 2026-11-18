@@ -1,10 +1,12 @@
 // ヘッダーの左上（ロゴと、開いている圃場とプランの名前）と、そこを押すと開くメニュー。
-// メニューには、上から、開いている圃場とプラン、「圃場とプランを選ぶ…」「圃場の設定…」（PC だけ）、
+// メニューには、上から、開いている圃場とプラン、スマホだけの「元に戻す」「やり直す」と押しピン（小さな窓を出す）、
+// 「圃場とプランを選ぶ…」「圃場の設定…」（PC だけ）、
 // ログインしているアカウントとログアウトを並べる。
 // 閉じるのは、メニューの外を押したとき、Esc を押したとき、ロゴと名前をもう一度押したとき。
 // ログインする前は開かない。DB を使わないモード（?local=1）では、ログアウトの代わりに、そのことを出す
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
+import { PIN_ICON } from "./undo-pad.js";
 
 const $ = (id) => document.getElementById(id);
 const TITLE = "圃場計画"; // 圃場を開く前（ログインの画面など）に出す名前
@@ -12,16 +14,34 @@ const MIN_NAME_PX = 80; // 名前の欄の幅の下限。前に出していた�
 
 let account = null; // { email, local, logout }。null のあいだは開かない
 let place = null; // { field, plan, trial, activeName }。開いている圃場とプラン
-let actions = {}; // { choose, settings }。メニューの項目を押したときに呼ぶ
+let actions = {}; // { choose, settings, undo, redo, undoPad, historyState }。メニューの項目を押したときに呼ぶ
 
 // ログインが済んだら呼ぶ。logout は、ログアウトを押したときに呼ぶ関数
 export function setUserMenu({ email = "", local = false, logout = null }) {
   account = { email, local, logout };
 }
 
-// 「圃場とプランを選ぶ…」「圃場の設定…」を押したときに呼ぶ関数
-export function setPlaceActions({ choose, settings }) {
-  actions = { choose, settings };
+// 「圃場とプランを選ぶ…」「圃場の設定…」、スマホの「元に戻す」「やり直す」と押しピンを押したときに呼ぶ関数。
+// historyState は、いま元に戻せるか・やり直せるか（{ canUndo, canRedo }）を返す
+export function setPlaceActions({ choose, settings, undo = null, redo = null, undoPad = null, historyState = null }) {
+  actions = { choose, settings, undo, redo, undoPad, historyState };
+}
+
+// スマホの幅だけに出す、元に戻す・やり直すと押しピンの並び。押すと、メニューを閉じてから 1 回だけ戻す。
+// 押しピンは、元に戻す・やり直すの小さな窓を出し、× で閉じるまで出しておく（undo-pad.js）
+function historyHtml() {
+  if (!actions.undo) {
+    return "";
+  }
+  const { canUndo = false, canRedo = false } = actions.historyState?.() || {};
+  return (
+    '<div class="user-menu-history phone-only">' +
+    `<button type="button" class="user-menu-icon" data-action="undo" data-history="undo" title="元に戻す" aria-label="元に戻す"${canUndo ? "" : " disabled"}>↶</button>` +
+    `<button type="button" class="user-menu-icon" data-action="redo" data-history="redo" title="やり直す" aria-label="やり直す"${canRedo ? "" : " disabled"}>↷</button>` +
+    `<button type="button" class="user-menu-icon" data-action="undoPad" title="元に戻す・やり直すの窓を出したままにする" aria-label="元に戻す・やり直すの窓を出したままにする">${PIN_ICON}</button>` +
+    "</div>" +
+    '<hr class="user-menu-sep phone-only" />'
+  );
 }
 
 // 開いている圃場とプランを、ヘッダーに出す。trial は、実際に使うプランでないとき true
@@ -110,6 +130,7 @@ function open() {
     ? `<div class="user-menu-place"><strong>${escapeHtml(place.field)}</strong>` +
       `<span${place.trial ? ' class="is-trial"' : ""}>${escapeHtml(place.plan)}${place.trial ? "（実際に使うプランではありません）" : "（実際に使うプラン）"}</span></div>` +
       '<hr class="user-menu-sep" />' +
+      historyHtml() +
       '<button type="button" class="user-menu-item" role="menuitem" data-action="choose">圃場とプランを選ぶ…</button>' +
       // 圃場の設定は PC だけ（下絵の調整と気象の設定。スマホの幅では出さない）
       (actions.settings ? '<button type="button" class="user-menu-item edit-only" role="menuitem" data-action="settings">圃場の設定…</button>' : "") +

@@ -73,10 +73,23 @@ function typing() {
   return element.tagName === "INPUT" && ["text", "number", "email", "password", "search", ""].includes(element.type);
 }
 
-function renderButtons() {
+// いま元に戻せるか、やり直せるか。ヘッダーのボタン、スマホのメニューと小さな窓（undo-pad.js）の矢印が使う
+export function historyState() {
+  if (!ctx) {
+    return { canUndo: false, canRedo: false };
+  }
   const draft = ctx.draft?.();
-  $("undoBtn").disabled = busy || !(draft?.canUndo || undoStack.length);
-  $("redoBtn").disabled = busy || !(draft?.canRedo || redoStack.length);
+  return { canUndo: !busy && Boolean(draft?.canUndo || undoStack.length), canRedo: !busy && Boolean(draft?.canRedo || redoStack.length) };
+}
+
+// ヘッダーのボタンと、data-history="undo" / "redo" の付いた矢印（スマホのメニューと小さな窓）を、押せるかどうかに合わせる
+function renderButtons() {
+  const { canUndo, canRedo } = historyState();
+  $("undoBtn").disabled = !canUndo;
+  $("redoBtn").disabled = !canRedo;
+  for (const button of document.querySelectorAll("[data-history]")) {
+    button.disabled = button.dataset.history === "undo" ? !canUndo : !canRedo;
+  }
 }
 
 // 図の編集の書きかけの履歴が変わったときに、ボタンを描き直す

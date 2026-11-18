@@ -42,6 +42,7 @@ const FILES = [
   "field-plans.js",
   "news-view.js",
   "toast.js",
+  "undo-pad.js",
   "html.js",
   "google-photos.js",
   "google-photos.html",
