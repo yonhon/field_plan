@@ -95,6 +95,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `tests/` | 図形、日程、苗数と施肥量の計算、作業の実績の計算、元に戻すと、MCP サーバーのテスト |
 | `tests/e2e/` | 主な操作と、DB からの読み直しを、Chrome で通して動かすテスト |
 | `stryker.config.json` | 計算のテストが計算の誤りに気づくかを確かめる、Mutation testing（StrykerJS）の設定（12 章） |
+| `scripts/mutation.mjs` | Mutation testing を、指定したファイルを読み込むテストだけで動かす（12 章） |
 | `data/` | 下絵の画像など、圃場ごとの資料。**Git の対象外** |
 
 画面のコードは公開されますが、データはログインした本人しか読めません。
@@ -646,11 +647,15 @@ node --test "tests/e2e/*.test.mjs"
 計算のテストが、計算の誤りに本当に気づくかは、Mutation testing（StrykerJS）で確かめます。計算のコードを 1 か所ずつ書き換え（`<` を `<=` に、`+` を `-` にする、など）、そのたびに `node --test` を動かして、テストが失敗するかを見ます。失敗しなかった書き換え（Survived）は、テストが確かめていない所です。Node.js（npm）が要ります。package.json は置かず、版を決めて `npx` で動かします。
 
 ```
-npx -y -p @stryker-mutator/core@10.1.1 stryker run
-npx -y -p @stryker-mutator/core@10.1.1 stryker run --mutate app/geometry.js
+node scripts/mutation.mjs app/geometry.js app/schedule.js
+node scripts/mutation.mjs app/pesticide.js:289-547
+node scripts/mutation.mjs --list app/logs.js
+node scripts/mutation.mjs
 ```
 
-対象は `stryker.config.json` の `mutate` です（計算のテストが行の 9 割以上を通るファイル）。書き換え 1 つにつき、計算のテスト全体を 1 回動かすので、全体では 1 時間ほどかかります。ふだんは、直したファイルだけを `--mutate` で指定します（`app/pesticide.js:289-547` のように行も指定できます）。結果は `.stryker/report.html` を開いて見ます。`push` のたびには動かしません。
+ふだんは、直したファイルだけを指定します（`app/pesticide.js:289-547` のように行も指定できます）。何も指定しなければ、`stryker.config.json` の `mutate`（計算のテストが行の 9 割以上を通るファイル）をすべて対象にします。結果は `.stryker/report.html` を開いて見ます。`push` のたびには動かしません。
+
+書き換え 1 つにつき、そのファイルを直接・間接に読み込むテストファイルだけを動かします（`import` をたどって選ぶ。`--list` で、選んだテストを出すだけにする）。計算のテスト全体は 1 回 1.6 秒かかり、そのほとんどは保存の順序を確かめる `tests/store.test.mjs` の待ち時間です。これを読み込まないファイルほど速く、`app/pesticide.js` の計算の部分は 20 秒ほど、`store.js` が使う部品を読み込む `app/geometry.js` と `app/schedule.js` は 5 分ほどです（2026-11-18）。
 
 `lib/ の写しは、app/ の部品と同じ内容` のテストだけは飛ばします。Stryker が `app/` のファイルを書き換えるので、必ず失敗するためです。
 
