@@ -6,7 +6,7 @@
 // ログインする前は開かない。DB を使わないモード（?local=1）では、ログアウトの代わりに、そのことを出す
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
-import { PIN_ICON } from "./undo-pad.js";
+import { PIN_ICON, REDO_ICON, UNDO_ICON } from "./undo-pad.js";
 
 const $ = (id) => document.getElementById(id);
 const TITLE = "圃場計画"; // 圃場を開く前（ログインの画面など）に出す名前
@@ -36,8 +36,8 @@ function historyHtml() {
   const { canUndo = false, canRedo = false } = actions.historyState?.() || {};
   return (
     '<div class="user-menu-history phone-only">' +
-    `<button type="button" class="user-menu-icon" data-action="undo" data-history="undo" title="元に戻す" aria-label="元に戻す"${canUndo ? "" : " disabled"}>↶</button>` +
-    `<button type="button" class="user-menu-icon" data-action="redo" data-history="redo" title="やり直す" aria-label="やり直す"${canRedo ? "" : " disabled"}>↷</button>` +
+    `<button type="button" class="user-menu-icon" data-action="undo" data-history="undo" title="元に戻す" aria-label="元に戻す"${canUndo ? "" : " disabled"}>${UNDO_ICON}</button>` +
+    `<button type="button" class="user-menu-icon" data-action="redo" data-history="redo" title="やり直す" aria-label="やり直す"${canRedo ? "" : " disabled"}>${REDO_ICON}</button>` +
     `<button type="button" class="user-menu-icon" data-action="undoPad" title="元に戻す・やり直すの窓を出したままにする" aria-label="元に戻す・やり直すの窓を出したままにする">${PIN_ICON}</button>` +
     "</div>" +
     '<hr class="user-menu-sep phone-only" />'

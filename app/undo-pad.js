@@ -10,10 +10,21 @@ import { historyState, redo, undo } from "./history.js";
 let pad = null;
 let watcher = null;
 
-// 押しピンの形。線の太さをほかの印にそろえる
-export const PIN_ICON =
-  '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-  '<path d="M9 3h6"/><path d="M10 3v6l-3 4h10l-3-4V3"/><path d="M12 13v8"/></svg>';
+// スマホの矢印と押しピンの形。文字の ↶ ↷ は、書体に入っていないので端末の別の書体で描かれ、端末ごとに形が変わる。
+// そこで絵（SVG）で描く。矢印の形は、パソコンのヘッダーの ↶ ↷（Windows の Chrome で描いたもの）に合わせる。
+// どれも同じ枠（24 × 24）、同じ線の太さで描き、線の上下の端（枠の 7〜17 のあたり）をそろえる
+const icon = (paths) =>
+  '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+  `${paths}</svg>`;
+// 右下から上を回って左へ下りる弧と、左下を向いた矢じり
+export const UNDO_ICON = icon('<path d="M19.5 16A6.3 6.3 0 0 0 7.2 13.8"/><path d="M5.5 11v4.5H10"/>');
+// ↶ を左右に裏返した形
+export const REDO_ICON = icon('<path d="M4.5 16A6.3 6.3 0 0 1 16.8 13.8"/><path d="M18.5 11v4.5H14"/>');
+// 押しピンは、矢印と同じ高さに収めると線では潰れるので、頭と胴を塗りつぶし、針だけを線で描く
+export const PIN_ICON = icon(
+  '<path d="M9.3 7.1h5.4v1.6h-1v2.1l2.2 2.5H8.1l2.2-2.5V8.7h-1z" fill="currentColor" stroke="none"/><path d="M12 13.3v3.8"/>'
+);
+export const CLOSE_ICON = icon('<path d="M8 8.2l8 8M16 8.2l-8 8"/>');
 
 function build() {
   pad = document.createElement("div");
@@ -22,9 +33,9 @@ function build() {
   pad.setAttribute("aria-label", "元に戻す・やり直す");
   draw(
     pad,
-    '<button type="button" class="undo-pad-btn" data-history="undo" title="元に戻す" aria-label="元に戻す">↶</button>' +
-    '<button type="button" class="undo-pad-btn" data-history="redo" title="やり直す" aria-label="やり直す">↷</button>' +
-    '<button type="button" class="undo-pad-btn undo-pad-close" data-act="close" title="閉じる" aria-label="閉じる">×</button>'
+    `<button type="button" class="undo-pad-btn" data-history="undo" title="元に戻す" aria-label="元に戻す">${UNDO_ICON}</button>` +
+    `<button type="button" class="undo-pad-btn" data-history="redo" title="やり直す" aria-label="やり直す">${REDO_ICON}</button>` +
+    `<button type="button" class="undo-pad-btn undo-pad-close" data-act="close" title="閉じる" aria-label="閉じる">${CLOSE_ICON}</button>`
   );
   pad.addEventListener("click", (event) => {
     const button = event.target.closest("button");
