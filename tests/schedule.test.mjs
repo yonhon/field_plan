@@ -12,6 +12,8 @@ import {
   addDays,
   diffDays,
   dueWorks,
+  isPlannable,
+  typesForCrop,
   existsOn,
   harvestEnd,
   planProblems,
@@ -243,4 +245,180 @@ test("工程表の表示期間と、1 日の幅", () => {
   assert.equal(dayWidth(910, 91), 10);
   assert.equal(dayWidth(1000, 365), 5);
   assert.equal(dayWidth(1000, 10), 60);
+});
+
+// 以下は、Mutation testing（stryker.config.json）で、テストが気づかなかった書き換えを確かめる
+
+// 作業 1 つ。seq は並びの順（配列の順とは別）
+const job = (id, code, start, end, owner = {}, seq = 1) => ({ id, block_id: null, planting_id: null, ...owner, work_type: code, seq, plan_start: start, plan_end: end });
+
+test("並びの指摘: 終了日が開始日より前、期間に意味がある作業の短すぎ、片方の日付だけ、名前のない種類", () => {
+  assert.deepEqual(sequenceProblems([job("a", "ridge", "2027-06-03", "2027-06-01")], types), [{ index: 0, message: "終了日が開始日より前です。" }]);
+  // 太陽熱消毒（目安 28 日）は、短いと言う。28 日ちょうどは言わない
+  assert.deepEqual(sequenceProblems([job("a", "solar", "2027-06-01", "2027-06-20")], types), [{ index: 0, message: "太陽熱消毒は 28 日が目安です（いま 20 日）。" }]);
+  assert.deepEqual(sequenceProblems([job("a", "solar", "2027-06-01", "2027-06-28")], types), []);
+  // 収穫と、目安の短い作業（畝立て 2 日）は、短くても言わない
+  assert.deepEqual(sequenceProblems([job("a", "harvest", "2027-06-01", "2027-06-05")], types), []);
+  assert.deepEqual(sequenceProblems([job("a", "ridge", "2027-06-01", "2027-06-01")], types), []);
+  // 開始日だけ、終了日だけ
+  assert.deepEqual(
+    sequenceProblems([job("a", "ridge", "2027-06-01", null), job("b", "ridge", null, "2027-06-01")], types).map((problem) => problem.message),
+    ["日付が入っていません。", "日付が入っていません。"]
+  );
+  // 種類の表にない作業は、コードで書く
+  const custom = sequenceProblems([job("a", "custom", "2027-06-01", "2027-06-02"), job("b", "ridge", "2027-06-02", "2027-06-03")], types);
+  assert.deepEqual(custom, [{ index: 1, message: "前の作業（custom）と重なっているか、順番が逆です。" }]);
+});
+
+test("プランの指摘: 区画が始まる日より前、なくなる日以降の作業。区画の日がなければ見ない", () => {
+  const check = (block, works) =>
+    planProblems({ blocks: [{ id: "b1", start_date: null, end_date: null, ...block }], beds: [], plantings: [], works, workTypes: types }).map((problem) => problem.message);
+  const dates = { start_date: "2027-05-01", end_date: "2027-09-01" };
+  assert.deepEqual(check(dates, [job("a", "rotary", "2027-05-01", "2027-05-01", { block_id: "b1" }), job("b", "amend", "2027-08-31", "2027-08-31", { block_id: "b1" }, 2)]), []);
+  assert.deepEqual(check(dates, [job("a", "rotary", "2027-04-30", "2027-04-30", { block_id: "b1" })]), ["区画が始まる日（5/1）より前に作業があります。"]);
+  assert.deepEqual(check(dates, [job("a", "rotary", "2027-09-01", "2027-09-01", { block_id: "b1" })]), ["区画がなくなる日（9/1）以降に作業があります。"]);
+  assert.deepEqual(check(dates, []), []);
+  assert.deepEqual(check({}, [job("a", "rotary", "2027-04-30", "2027-04-30", { block_id: "b1" })]), []);
+});
+
+// 区画 2 つに、畝 1 本ずつ、作付 1 つずつ。配列の順は、並びの順（seq）と逆にしてある
+function twoBlocks(p1Start = "2027-05-03") {
+  const p1 = scheduleForward([job("p1-ridge", "ridge", null, null, { planting_id: "p1" }, 1), job("p1-mulch", "mulch", null, null, { planting_id: "p1" }, 2)], types, p1Start);
+  return {
+    blocks: [{ id: "b1" }, { id: "b2" }],
+    beds: [{ id: "bed1", block_id: "b1" }, { id: "bed2", block_id: "b2" }],
+    plantings: [{ id: "p2", bed_id: "bed2", seq: 1 }, { id: "p1", bed_id: "bed1", seq: 1 }],
+    works: [
+      job("b1-amend", "amend", "2027-05-02", "2027-05-02", { block_id: "b1" }, 2),
+      job("b1-rotary", "rotary", "2027-05-01", "2027-05-01", { block_id: "b1" }, 1),
+      job("b2-rotary", "rotary", "2027-05-20", "2027-05-20", { block_id: "b2" }, 1),
+      p1[1],
+      p1[0],
+      // 区画 2 のロータリー（5/20）が終わる前に始まる
+      job("p2-ridge", "ridge", "2027-05-19", "2027-05-20", { planting_id: "p2" }, 1),
+    ],
+    workTypes: types,
+  };
+}
+
+test("プランの指摘は、区画ごと、畝ごと、作付ごとに、並びの順で見る", () => {
+  assert.deepEqual(planProblems(twoBlocks()), [
+    { block_id: null, planting_id: "p2", work_id: "p2-ridge", message: "区画の作業（ロータリー、5/20 まで）が終わる前に始まっています。" },
+  ]);
+  // 区画の最後の作業（1 日の堆肥・石灰・基肥、5/2）と同じ日に、畝立てを始めてよい
+  assert.equal(planProblems(twoBlocks("2027-05-02")).length, 1);
+});
+
+test("プランの指摘: 畝ができる日より前、畝をなくす日以降の作業", () => {
+  const withBed = (bed) => {
+    const data = twoBlocks();
+    data.beds[0] = { ...data.beds[0], ...bed };
+    return planProblems(data).filter((problem) => problem.planting_id === "p1").map((problem) => problem.message);
+  };
+  // 作付 p1 は 5/3 から 5/6 まで
+  assert.deepEqual(withBed({ start_date: "2027-05-03", removed_on: "2027-05-07" }), []);
+  assert.deepEqual(withBed({ start_date: "2027-05-04" }), ["畝ができる日（5/4）より前に作業があります。"]);
+  assert.deepEqual(withBed({ removed_on: "2027-05-06" }), ["畝をなくす日（5/6）以降に作業があります。"]);
+});
+
+test("プランの指摘: 畝幅が品目の設定と 1 cm 以上違う", () => {
+  const withCrop = (crop) => {
+    const data = twoBlocks();
+    data.beds[0] = { ...data.beds[0], shape: [[0, 0], [10, 0], [10, 0.6], [0, 0.6]] };
+    data.plantings[1] = { ...data.plantings[1], crop_id: "c1" };
+    return planProblems({ ...data, crops: [{ id: "c0", bed_width_cm: 90 }, { id: "c1", ...crop }] })
+      .filter((problem) => problem.planting_id === "p1")
+      .map((problem) => problem.message);
+  };
+  assert.deepEqual(withCrop({ bed_width_cm: 60 }), []);
+  assert.deepEqual(withCrop({ bed_width_cm: 60.5 }), []);
+  assert.deepEqual(withCrop({ bed_width_cm: 61 }), ["畝幅が、品目の設定（61 cm）と違います（いま 60 cm）。"]);
+  assert.deepEqual(withCrop({ bed_width_cm: 0 }), []);
+  assert.deepEqual(withCrop({}), []);
+});
+
+test("プランの指摘: 日付のない作業の件数は、日付のある作業の指摘と別に数える", () => {
+  const data = twoBlocks();
+  data.works.push(
+    job("p1-plant", "plant", null, null, { planting_id: "p1" }, 3),
+    job("p1-harvest", "harvest", null, null, { planting_id: "p1" }, 4),
+    // マルチ張り（5/5〜5/6）と重なる
+    job("p1-residue", "residue", "2027-05-06", "2027-05-07", { planting_id: "p1" }, 5)
+  );
+  const mine = planProblems(data).filter((problem) => problem.planting_id === "p1").map((problem) => problem.message);
+  assert.deepEqual(mine, ["前の作業（マルチ張り）と重なっているか、順番が逆です。", "日付の入っていない作業が 2 件あります。"]);
+});
+
+test("プランの指摘: 前の作付の最後の日に、次の作付を始めてよいのは、どちらかが 1 日の作業のとき", () => {
+  const follow = (previous, next) =>
+    planProblems({
+      blocks: [{ id: "b1" }],
+      beds: [{ id: "bed1", block_id: "b1" }],
+      plantings: [{ id: "p1", bed_id: "bed1", seq: 1 }, { id: "p2", bed_id: "bed1", seq: 2 }],
+      works: [...previous.map((work, i) => ({ ...work, planting_id: "p1", seq: i + 1 })), { ...next, planting_id: "p2" }],
+      workTypes: types,
+    }).map((problem) => problem.message);
+  const harvest = job("h", "harvest", "2027-06-01", "2027-06-10");
+  // 収穫（10 日）の最後の日に、1 日の定植
+  assert.deepEqual(follow([harvest], job("n", "plant", "2027-06-10", "2027-06-10")), []);
+  // 1 日の収穫の日に、2 日の畝立て
+  assert.deepEqual(follow([job("h", "harvest", "2027-06-10", "2027-06-10")], job("n", "ridge", "2027-06-10", "2027-06-11")), []);
+  // 収穫のあとの 2 日の残渣処理の最後の日に、2 日の畝立て
+  const residue = job("r", "residue", "2027-06-12", "2027-06-13");
+  assert.deepEqual(follow([harvest, residue], job("n", "ridge", "2027-06-13", "2027-06-14")), ["前の作付の作業が終わる日（6/13）より前に始まっています。"]);
+  assert.deepEqual(follow([harvest, residue], job("n", "ridge", "2027-06-14", "2027-06-15")), []);
+});
+
+test("作業の期間、収穫完了予定日、日数: 片方の日付しかない作業は数えない。並びの順によらない", () => {
+  const works = [job("b", "harvest", "2027-07-05", "2027-07-20"), job("a", "harvest", "2027-07-01", "2027-07-10"), job("c", "residue", "2027-07-21", null)];
+  assert.deepEqual(worksRange(works), { start: "2027-07-01", end: "2027-07-20" });
+  assert.equal(harvestEnd([works[1], works[0]]), "2027-07-20");
+  assert.equal(harvestEnd(works), "2027-07-20");
+  assert.equal(workDays(works[2]), null);
+  assert.equal(workDays(job("d", "ridge", null, "2027-07-01")), null);
+});
+
+test("並べるときの日数: 日付が逆さまの作業は、目安の日数にする。表にない種類は 1 日", () => {
+  const placed = scheduleForward([job("a", "ridge", "2027-06-05", "2027-06-04"), job("b", "custom", null, null, {}, 2)], types, "2027-07-01");
+  assert.deepEqual(
+    placed.map((work) => [work.plan_start, work.plan_end]),
+    [
+      ["2027-07-01", "2027-07-02"],
+      ["2027-07-03", "2027-07-03"],
+    ]
+  );
+  assert.equal(isPlannable({ code: "spray", plannable: false }), false);
+  assert.equal(isPlannable({ code: "ridge" }), true);
+});
+
+test("品目に合わせた作業の目安: 定植・播種のあとの日数と、収穫の日数", () => {
+  const of = (list, code) => list.find((type) => type.code === code);
+  assert.equal(typesForCrop(types, null), types);
+  // 定植・播種から収穫開始まで 40 日。定植に 5 日かけるなら、あとに 35 日あける
+  const planted = typesForCrop(types, { grow_days: 40, harvest_days: 20 }, [job("p", "plant", "2027-06-01", "2027-06-05")]);
+  assert.equal(of(planted, "plant").min_gap_days, 35);
+  assert.equal(of(planted, "harvest").default_days, 20);
+  // 定植の日がない、または日付が逆さまなら、定植の目安（3 日）で決める
+  assert.equal(of(typesForCrop(types, { grow_days: 40 }), "plant").min_gap_days, 37);
+  assert.equal(of(typesForCrop(types, { grow_days: 40 }, [job("p", "plant", "2027-06-05", "2027-06-01")]), "plant").min_gap_days, 37);
+  // 日数の決まりがなければ、そのまま
+  const plain = typesForCrop(types, { grow_days: null }, []);
+  assert.equal(of(plain, "plant").min_gap_days, 0);
+  assert.equal(of(plain, "harvest").default_days, 30);
+  assert.equal(of(typesForCrop(types, { grow_days: 2 }), "plant").min_gap_days, 0);
+});
+
+test("今週の作業の境目: 7 日目に始まる作業は入り、8 日目は入らない。今日終わる作業も入る", () => {
+  const works = [
+    job("c", "ridge", "2027-07-08", "2027-07-08"),
+    job("b", "ridge", "2027-07-07", "2027-07-07"),
+    job("e", "ridge", "2027-06-25", "2027-07-01"),
+    job("d", "ridge", null, null),
+    job("a", "ridge", "2027-07-01", "2027-07-01"),
+  ];
+  assert.deepEqual(dueWorks(works, "2027-07-01").due.map((work) => work.id), ["e", "a", "b"]);
+  assert.deepEqual(dueWorks(works, "2027-07-02", 1).due.map((work) => work.id), []);
+  // 次の作業は、同じ日に始まる作業をまとめて返す
+  const next = dueWorks([...works, job("f", "mulch", "2027-06-25", "2027-06-26")], "2027-06-01");
+  assert.deepEqual(next.upcoming.map((work) => work.id), ["e", "f"]);
 });

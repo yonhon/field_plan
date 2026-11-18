@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   bedAngle,
+  boundingBox,
   viewAxes,
   centroid,
   crossRange,
@@ -182,6 +183,127 @@ test("区画の中に畝を並べる", () => {
 
   // 入らない寸法では 1 本も並ばない
   assert.equal(layoutBeds(block, { ...options, width: 12 }).beds.length, 0);
+});
+
+// 以下は、Mutation testing（stryker.config.json）で、テストが気づかなかった書き換えを確かめる。
+// 軸に平行な長方形だけでは、x と y の取り違えや符号の誤りに気づけないので、傾いた図形と、L 字の図形も使う
+
+const nearPoints = (actual, expected) => {
+  assert.equal(actual.length, expected.length);
+  actual.forEach((point, i) => point.forEach((value, k) => assert.ok(Math.abs(value - expected[i][k]) < 1e-6, `${JSON.stringify(actual)} != ${JSON.stringify(expected)}`)));
+};
+
+test("重心: L 字の図形では、頂点の平均ではなく面積の重心。つぶれた図形は頂点の平均", () => {
+  // 4×1 の長方形（重心 (2, 0.5)）と 1×3 の長方形（重心 (0.5, 2.5)）を合わせた L 字。面積 7
+  const ell = [[0, 0], [4, 0], [4, 1], [1, 1], [1, 4], [0, 4]];
+  nearPoints([centroid(ell)], [[9.5 / 7, 9.5 / 7]]);
+  nearPoints([centroid([...ell].reverse())], [[9.5 / 7, 9.5 / 7]]);
+  // 一直線に並んだ点
+  nearPoints([centroid([[1, 1], [3, 1], [5, 1]])], [[3, 1]]);
+  assert.deepEqual(centroid([]), [0, 0]);
+});
+
+test("内外の判定と外接する長方形: 斜めの辺", () => {
+  const triangle = [[0, 0], [4, 0], [0, 4]];
+  assert.equal(pointInPolygon([1, 1], triangle), true);
+  assert.equal(pointInPolygon([1.9, 2], triangle), true);
+  assert.equal(pointInPolygon([2.1, 2], triangle), false);
+  assert.equal(pointInPolygon([-0.1, 2], triangle), false);
+  assert.deepEqual(boundingBox([[1, 5], [-2, 3], [4, -1]]), { minX: -2, maxX: 4, minY: -1, maxY: 5 });
+});
+
+test("すき間: 線分の端が辺の途中に向き合うとき。ほぼ同じ近さの頂点は、中ほどで測る", () => {
+  const square = [[0, 0], [2, 0], [2, 2], [0, 2]];
+  // 上の辺の途中（1.5, 2）に、縦の線分の端（1.5, 3）が向き合う
+  const facing = gapToSegment(square, [1.5, 3], [1.5, 5]);
+  near(facing.distance, 1);
+  nearPoints([facing.from, facing.to], [[1.5, 2], [1.5, 3]]);
+  // 斜めの線分は、いちばん近い頂点で測る
+  const corner = gapToSegment(square, [3, 3], [5, 5]);
+  near(corner.distance, Math.SQRT2);
+  nearPoints([corner.from, corner.to], [[2, 2], [3, 3]]);
+  assert.ok(!corner.parallel);
+  // 近さの差が 5 mm より小さい頂点どうしは、同じ近さとみなし、その中ほどで測る
+  const almost = gapToSegment([[0, 0], [2, 0], [2, 2], [0, 2.003]], [-1, 3], [3, 3]);
+  assert.equal(almost.parallel, true);
+  nearPoints([almost.from, almost.to], [[1, 2.0015], [1, 3]]);
+  // 差が 5 mm より大きければ、近いほうの頂点で測る
+  const apart = gapToSegment([[0, 0], [2, 0], [2, 2], [0, 2.01]], [-1, 3], [3, 3]);
+  assert.ok(!apart.parallel);
+  nearPoints([apart.from, apart.to], [[0, 2.01], [0, 3]]);
+  // 多角形どうしは、同じ距離なら、平行な辺どうしで測ったほうを選ぶ（先に見つかった角どうしではなく）
+  const between = gapBetweenPolygons(square, [[3, 0], [5, 0], [5, 2], [3, 2]]);
+  near(between.distance, 1);
+  assert.equal(between.parallel, true);
+  nearPoints([between.from, between.to], [[2, 1], [3, 1]]);
+});
+
+test("線で分ける: 傾いていても分けた面積は同じ。頂点を通る線と、辺に重なる線", () => {
+  const zone = [[0, 0], [26, 0], [26, 20], [0, 20]];
+  const tilted = rotatePoints(zone, -25);
+  const parts = splitPolygon(tilted, rotatePoints([[10, 5]], -25)[0], edgeAngles(tilted).short);
+  assert.deepEqual(parts.map((part) => Math.round(polygonArea(part))).sort((a, b) => a - b), [200, 320]);
+  // 対角線で分けると、三角形が 2 つ（対角線の両端の頂点は、両方に入る）
+  const square = [[0, 0], [4, 0], [4, 4], [0, 4]];
+  const halves = splitPolygon(square, [0, 0], Math.PI / 4);
+  assert.deepEqual(halves.map((part) => part.length), [3, 3]);
+  halves.forEach((part) => near(polygonArea(part), 8));
+  // 辺に重なる線では分けられない。つぶれた側は null
+  const edge = splitPolygon(square, [4, 0], Math.PI / 2);
+  assert.equal(edge.filter(Boolean).length, 1);
+  near(polygonArea(edge.find(Boolean)), 16);
+});
+
+test("面の重なり: 中に収まる、十字に交わる、少しだけ重なる", () => {
+  const big = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  const inner = [[4, 4], [6, 4], [6, 6], [4, 6]];
+  assert.equal(polygonsOverlap(inner, big), true);
+  assert.equal(polygonsOverlap(big, inner), true);
+  // 頂点はどれも相手の中にないが、辺が交わる
+  const across = [[0, 4], [10, 4], [10, 6], [0, 6]];
+  const down = [[4, -2], [6, -2], [6, 12], [4, 12]];
+  assert.equal(polygonsOverlap(across, down), true);
+  // 5 cm だけ重なる（辺を共有するだけの図形を重なりと数えないための寄せ幅は 2 cm）
+  assert.equal(polygonsOverlap(big, [[9.95, 0], [20, 0], [20, 10], [9.95, 10]]), true);
+  // 離れている、角が触れているだけ
+  assert.equal(polygonsOverlap(big, [[11, 0], [20, 0], [20, 10], [11, 10]]), false);
+  assert.equal(polygonsOverlap(big, [[10, 10], [20, 10], [20, 20], [10, 20]]), false);
+});
+
+test("畝を並べる位置: 区画の端から、隙間をあけて順に置く。傾いていても同じ", () => {
+  // 原点から離れた 10 m × 20 m の区画。長い辺（南北）に沿って、東の端から西へ並ぶ
+  const block = [[5, 3], [15, 3], [15, 23], [5, 23]];
+  const options = { angle: edgeAngles(block).long, width: 0.7, aisle: 0.6, endGap: 0.5, count: 2 };
+  const expected = [
+    [[14.4, 3.5], [14.4, 22.5], [13.7, 22.5], [13.7, 3.5]],
+    [[13.1, 3.5], [13.1, 22.5], [12.4, 22.5], [12.4, 3.5]],
+  ];
+  const full = layoutBeds(block, options);
+  full.beds.forEach((bed, i) => nearPoints(bed, expected[i]));
+  // 長さ 6 m なら、前と、縦に並ぶ畝どうしに 0.5 m あけて 3 つ
+  const short = layoutBeds(block, { ...options, length: 6, count: 1 });
+  short.beds.forEach((bed, i) => nearPoints(bed, [[14.4, 3.5 + 6.5 * i], [14.4, 9.5 + 6.5 * i], [13.7, 9.5 + 6.5 * i], [13.7, 3.5 + 6.5 * i]]));
+  // 25 度傾けた区画に並べ、戻すと同じ位置
+  const tilted = rotatePoints(block, -25);
+  const turned = layoutBeds(tilted, { ...options, angle: edgeAngles(tilted).long });
+  assert.equal(turned.outside, 0);
+  turned.beds.forEach((bed, i) => nearPoints(rotatePoints(bed, 25), expected[i]));
+});
+
+test("畝を並べる: 幅ちょうどまで入れる。入らない寸法は並べない。区画からはみ出した数", () => {
+  // 東西に長い 20 m × 10 m。幅 1 m・隙間 1 m なら、y = 1, 3, 5, 7, 9 から 5 本（最後の畝は区画の端にちょうど届く）
+  const block = [[0, 0], [20, 0], [20, 10], [0, 10]];
+  const options = { angle: 0, width: 1, aisle: 1, endGap: 0.5 };
+  assert.equal(layoutBeds(block, options).strips, 5);
+  // 前後の隙間で長さがなくなる、畝が長すぎる、畝幅が 0
+  assert.equal(layoutBeds(block, { ...options, endGap: 10 }).beds.length, 0);
+  assert.equal(layoutBeds(block, { ...options, length: 25 }).beds.length, 0);
+  assert.equal(layoutBeds(block, { ...options, width: 0 }).beds.length, 0);
+  // 北の辺が斜め（西の端は 5 m、東の端は 10 m）。y = 5 より北の畝は、西の端がはみ出す
+  const trapezoid = [[0, 0], [20, 0], [20, 10], [0, 5]];
+  const placed = layoutBeds(trapezoid, options);
+  assert.equal(placed.beds.length, 5);
+  assert.equal(placed.outside, 3);
 });
 
 const nearPair = (actual, expected) => actual.forEach((value, i) => assert.ok(Math.abs(value - expected[i]) < 1e-9, `${actual} != ${expected}`));
