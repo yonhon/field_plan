@@ -167,11 +167,9 @@ export function photoSize(width, height, short = PHOTO_SHORT_SIDE) {
   return { width: Math.round(width * scale), height: Math.round(height * scale) };
 }
 
-// 写真を本文に入れる Markdown。1 枚ならそのまま、何枚かなら、いまの日記と同じく 1 行に並べた表にする
+// 写真を本文に入れる Markdown。いまの日記と同じく 1 行に並べた表にする。
+// 1 枚でも表にし、何枚かのときと同じ大きさ（高さをそろえる）で出す
 export function photoMarkdown(names) {
-  if (names.length === 1) {
-    return `![](images/${names[0]})`;
-  }
   return `| ${names.map((name) => `![](images/${name})`).join(" | ")} |\n| ${names.map(() => ":----").join(" | ")} |`;
 }
 

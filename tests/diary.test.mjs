@@ -141,8 +141,8 @@ test("写真は短辺を 1080 px にし、元が小さければ広げない", ()
   assert.deepEqual(photoSize(800, 600), { width: 800, height: 600 });
 });
 
-test("何枚かの写真は、1 行に並べた表にする", () => {
-  assert.equal(photoMarkdown(["a.jpg"]), "![](images/a.jpg)");
+test("写真は、1 枚でも 1 行に並べた表にする", () => {
+  assert.equal(photoMarkdown(["a.jpg"]), "| ![](images/a.jpg) |\n| :---- |");
   assert.equal(photoMarkdown(["a.jpg", "b.jpg"]), "| ![](images/a.jpg) | ![](images/b.jpg) |\n| :---- | :---- |");
 });
 

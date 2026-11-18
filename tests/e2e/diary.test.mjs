@@ -88,7 +88,7 @@ test("日記: 写真を入れて書き、保存して読み、探し、種類を
   const stored = await diary();
   const day = stored.days[TODAY];
   assert.equal(day.title, "試験の日");
-  assert.equal(day.body, `## オクラ\nトマトに追肥した。\n\n![](images/${TODAY}_01.jpg)`);
+  assert.equal(day.body, `## オクラ\nトマトに追肥した。\n\n| ![](images/${TODAY}_01.jpg) |\n| :---- |`);
   // 語では種類を付けない（Claude Code に頼んだときに付く）
   assert.deepEqual(stored.sections[TODAY].map((section) => [section.path, section.crops, section.tag_source]), [[["オクラ"], [], null]]);
   const photo = stored.photos[`${TODAY}_01.jpg`];
@@ -98,6 +98,8 @@ test("日記: 写真を入れて書き、保存して読み、探し、種類を
 
   // 日の表示: 写真と、節の札（まだ種類なし）。カレンダーに印
   await page.waitFor(`Boolean(document.querySelector('#diaryMain .diary-photo img'))`, "写真の表示");
+  // 1 枚でも写真の表に入り、何枚かのときと同じ高さで出る
+  assert.equal(await page.run(`Boolean(document.querySelector("#diaryMain .diary-table.is-photos .diary-photo img"))`), true);
   assert.match(await page.run(`document.querySelector("#diaryMain .diary-tags").textContent`), /種類なし/);
   assert.equal(await page.run(`document.querySelector('#diaryCalendar [data-date="${TODAY}"]').classList.contains("has-entry")`), true);
 
