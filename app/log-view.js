@@ -14,7 +14,6 @@ const $ = (id) => document.getElementById(id);
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 const RECENT = 5; // 「最近の記録」に出す件数
 const QUICK_TYPES = ["spray", "topdress", "weed", "water", "care", "plant"]; // 大きめのボタンで並べる種類
-const COPY_DAYS = 7; // 計画の「コピーして足す」の初めの日数
 const METHODS = ["散布", "土壌混和", "種子・種球の浸漬", "株元散布", "灌注", "その他"];
 const FERTILIZER_TYPES = new Set(["amend", "topdress"]);
 
@@ -433,7 +432,6 @@ function makeDraft(log, preset) {
     planWork,
     planWorks,
     onlyThis: false, // 計画を直すとき、この畝だけ直すか（一緒に入力した全部か）
-    copyDays: COPY_DAYS,
     // 実績がつながる計画の作業（5.5）。計画の「完了」「修正」から開いたときと、実績の窓で印を付けたときだけ
     linked: new Set(log ? log.targets.map((target) => target.work_id).filter(Boolean) : presetWorks.map((work) => work.id)),
     // 計画の作業から開いたときは、計画の開始日と終了日（「この日で終わり」に印が付く）。それ以外は今日
@@ -725,7 +723,6 @@ function renderDialog() {
     `<label>メモ<textarea data-f="note" rows="2">${escapeHtml(draft.note)}</textarea></label>` +
     `<p class="error" id="logError" role="alert"></p>` +
     `</div>` +
-    planCopySection() +
     `<div class="log-foot">${draft.id ? `<button type="button" class="text-btn danger" data-act="delete">${savedLinked() ? "この実績を削除して計画に戻す" : "この実績を削除"}</button>` : ""}` +
     `${draft.planWorks.length ? '<button type="button" class="text-btn danger" data-act="deletePlan">この計画を消す</button>' : ""}` +
     `${!draft.id && draft.cancellable.length ? '<button type="button" class="text-btn danger" data-act="cancelWork">この作業を取りやめる</button>' : ""}` +
@@ -768,17 +765,6 @@ function planScopeSection() {
   return (
     `<div class="log-section"><p class="muted">一緒に入力した計画が ${draft.planWorks.length} か所あります。</p>` +
     `<label class="check"><input type="checkbox" data-f="onlyThis"${draft.onlyThis ? " checked" : ""} />${escapeHtml(targetForWork(draft.planWork, draft.date).label)}の計画だけを直す（消す）</label></div>`
-  );
-}
-
-// 計画を直すとき: 同じ内容の計画を、何日か後ろに足す（繰り返しの計画）
-function planCopySection() {
-  if (!draft.planWorks.length) {
-    return "";
-  }
-  return (
-    `<div class="log-section log-copy"><label class="inline-field">この内容の計画を<input type="number" min="1" step="1" data-f="copyDays" value="${draft.copyDays}" aria-label="何日後" /> 日後に</label>` +
-    `<button type="button" class="chip-btn" data-act="copyPlan">コピーして足す</button></div>`
   );
 }
 
@@ -1207,8 +1193,6 @@ function onClick(event) {
     renderDialog();
   } else if (act === "deletePlan") {
     deletePlan();
-  } else if (act === "copyPlan") {
-    copyPlan();
   } else if (act === "mode") {
     draft.mode = button.dataset.mode;
     renderDialog();
@@ -1379,8 +1363,6 @@ function onChange(event) {
       draft.blocks = new Set(!target.bed_id && target.block_id ? [target.block_id] : []);
     }
     renderDialog();
-  } else if (el.dataset.f === "copyDays") {
-    draft.copyDays = Math.max(1, Math.round(num(el.value) || COPY_DAYS));
   } else if (el.dataset.f === "end_date") {
     draft.end_date = el.value && el.value > draft.date ? el.value : "";
     renderDialog();
@@ -1631,14 +1613,13 @@ async function save() {
 // 計画の作業を付ける先（作付か区画）
 const workOwner = (item) => (item.bed_id ? { planting_id: item.planting_id, block_id: null } : { block_id: item.block_id, planting_id: null });
 
-// 窓の内容から、計画の作業の値（日付、メモ、予定の中身）を作る。shift 日だけ後ろにずらせる（コピー）
-function planFields(shift = 0) {
+// 窓の内容から、計画の作業の値（日付、メモ、予定の中身）を作る
+function planFields() {
   const { log, inputs } = buildLog();
-  const end = log.end_date || draft.date;
   return {
     work_type: draft.work_type,
-    plan_start: addDays(draft.date, shift),
-    plan_end: addDays(end, shift),
+    plan_start: draft.date,
+    plan_end: log.end_date || draft.date,
     note: log.note,
     detail: { spec: log.spec, inputs },
   };
@@ -1753,30 +1734,6 @@ async function deletePlan() {
     ctx.onLogsChanged?.();
   } catch (error) {
     showError(`計画を消せませんでした: ${error.message}`);
-  }
-}
-
-// 窓の内容の計画を、何日か後ろに足す（繰り返しの計画）。足した計画は、新しいまとまりになる
-async function copyPlan() {
-  const items = draft.onlyThis ? pickedItems().filter((item) => ownsWork(item, draft.planWork)) : pickedItems();
-  if (!items.length || !draft.work_type) {
-    showError("対象の畝か区画を選んでください。");
-    return;
-  }
-  const fields = planFields(draft.copyDays);
-  try {
-    await addPlanWorks(items, fields, crypto.randomUUID());
-    record({
-      kind: "work.plan",
-      target: ["work", null],
-      plan: activePlan(),
-      text: `${workName(typeLabel(draft.work_type), fields.detail.spec)}の計画を ${draft.copyDays} 日後（${formatDay(fields.plan_start)}）に ${items.length} か所コピー`,
-    });
-    dialog.close();
-    ctx.setStatus(`${draft.copyDays} 日後に計画を足しました`);
-    ctx.onLogsChanged?.();
-  } catch (error) {
-    showError(`計画を足せませんでした: ${error.message}`);
   }
 }
 
