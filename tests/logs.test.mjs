@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  areaStandard,
   bedAreas,
   compressedAxis,
   dayGap,
@@ -17,6 +18,7 @@ import {
   matchWork,
   pesticideCounts,
   previousChoice,
+  sprayCounts,
   sprayWarnings,
   standardChoice,
   usageTable,
@@ -494,6 +496,34 @@ test("防除の指摘: まとまりに作付が 2 つ以上あれば、回数は
   assert.ok(warnings.includes("レタス: 成分A を含む農薬の使用回数が、この防除で 4 回になり、上限（3 回）を超えます"));
   assert.ok(warnings.includes("レタス: 成分B を含む農薬の使用回数が、この防除で 3 回になり、上限（2 回）を超えます"));
   assert.ok(warnings.includes("レタス: 収穫の開始（03/24）まで 4 日で、使用時期（収穫 7 日前まで）を満たしません"));
+});
+
+test("この防除が何回目か: 作付ごとの回数のうち、いちばん多いものに 1 を足す。作付がなければ 1 回目", () => {
+  const counts = {
+    p1: { products: new Map([["100", 1]]), ingredients: new Map([["成分A", 1]]) },
+    p2: { products: new Map([["100", 3]]), ingredients: new Map([["成分A", 3], ["成分B", 2]]) },
+  };
+  const countsOf = (id) => counts[id];
+  assert.deepEqual(sprayCounts({ regNo: 100, ingredients: ["成分A", "", "成分B"], plantingIds: ["p1", "p2"], countsOf }), { product: 4, ingredients: [4, null, 3] });
+  assert.deepEqual(sprayCounts({ regNo: "100", ingredients: ["成分A"], plantingIds: ["p1"], countsOf }), { product: 2, ingredients: [2] });
+  assert.deepEqual(sprayCounts({ regNo: 200, ingredients: ["成分C"], plantingIds: ["p2"], countsOf }), { product: 1, ingredients: [1] });
+  assert.deepEqual(sprayCounts({ regNo: 100, ingredients: ["成分A", ""], plantingIds: [], countsOf }), { product: 1, ingredients: [1, null] });
+  assert.deepEqual(sprayCounts({ regNo: 100, plantingIds: ["p1"], countsOf }), { product: 2, ingredients: [] });
+  // 作付のないまとまりでは、使用回数の指摘（総使用回数の条件を含む）を出さない
+  assert.deepEqual(
+    sprayWarnings({ date: "2026-03-20", dilution: 2000, regNo: 100, ingredients: ["成分A", "成分B"], groups: [{ name: "区画1", area: 100, liters: 0, row: useRow, plantings: [] }], countsOf }),
+    []
+  );
+});
+
+test("まとまりの面積の基準の量: 散布液量の基準があれば基準散布量（L）、なければ面積あたりの使用量", () => {
+  assert.deepEqual(areaStandard(useRow, 100), { kind: "liquid", min: 10, max: 30, unit: "L" });
+  assert.deepEqual(areaStandard({ ...useRow, liquid_min: 0, liquid_max: 50 }, 100), { kind: "liquid", min: 0, max: 5, unit: "L" });
+  assert.deepEqual(areaStandard({ dilution_text: "4~6kg/10a", liquid_min: null }, 50), { kind: "usage", min: 200, max: 300, unit: "g" });
+  assert.deepEqual(areaStandard({ dilution_text: "500mL/10a" }, 100), { kind: "usage", min: 50, max: 50, unit: "mL" });
+  assert.equal(areaStandard({ dilution_text: "1000倍", liquid_min: null }, 100), null);
+  assert.equal(areaStandard(useRow, 0), null);
+  assert.equal(areaStandard(null, 100), null);
 });
 
 test("農薬の使用回数に、肥料と、登録番号のない農薬（名前を手で入れた）は数えない", () => {

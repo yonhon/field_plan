@@ -18,6 +18,7 @@ import {
   rowFor,
   searchKey,
   snapshot,
+  standardsHtml,
   suggestedDilution,
   unpick,
   useKeys,
@@ -44,13 +45,13 @@ const LIQUID = [
     total_max: [3, 2],
   },
   { crop: "レタス", target: "ヨトウムシ類", method: "散布", dilution_text: "2000倍", dilution_min: 2000, dilution_max: 2000, liquid_min: 100, liquid_max: 300, times_max: 3, total_max: [3, 2] },
-  { crop: "キャベツ", target: "アブラムシ類", method: "散布", dilution_text: "1500倍", dilution_min: 1500, dilution_max: 1500, liquid_min: 100, liquid_max: 300, times_max: 2, total_max: [3, 2] },
+  { crop: "キャベツ", target: "アブラムシ類", method: "散布", dilution_text: "1500倍", times_text: "2回以内", dilution_min: 1500, dilution_max: 1500, liquid_min: 100, liquid_max: 300, times_max: 2, total_max: [3, 2] },
 ];
 
 // 粒剤（面積あたりの使用量で使う）の使用基準の行
 const GRANULE = [
-  { crop: "レタス", target: "ネキリムシ類", method: "株元散布", dilution_text: "6kg/10a", dilution_min: null, liquid_min: null, liquid_max: null },
-  { crop: "キャベツ", target: "ネキリムシ類", method: "株元散布", dilution_text: "4~6kg/10a", dilution_min: null, liquid_min: null, liquid_max: null },
+  { crop: "レタス", target: "ネキリムシ類", method: "株元散布", dilution_text: "6kg/10a", times_text: "1回", dilution_min: null, liquid_min: null, liquid_max: null },
+  { crop: "キャベツ", target: "ネキリムシ類", method: "株元散布", dilution_text: "4~6kg/10a", times_text: "1回", dilution_min: null, liquid_min: null, liquid_max: null },
 ];
 
 // 品目のまとまり 2 つ。面積は ㎡
@@ -414,4 +415,52 @@ test("防除の指摘: 失効の可能性、粒剤の使用量。農薬が 2 つ
   // 名前は HTML として安全に入れる
   const tagged = liquid({}, { name: "<b>剤", _product: { missing: true, ingredients: [] } });
   assert.deepEqual(warnings(context([tagged])), ["&lt;b&gt;剤: 登録番号 100 は最新の農薬登録情報にありません（失効している可能性があります）"]);
+});
+
+test("使用基準の表示: まとまりごとに、選んだ基準、この防除が何回目か、この面積の基準の量", () => {
+  const lettuce = (lines) => `<div class="famic-group"><strong>レタス</strong><span class="muted">100.0 ㎡</span>${lines}</div>`;
+  const cabbage = (lines) => `<div class="famic-group"><strong>キャベツ</strong><span class="muted">50.0 ㎡</span>${lines}</div>`;
+  // 液剤。作付 p1（レタス）には、この農薬を 3 回使った。p2（キャベツ）にはまだ使っていない
+  assert.equal(
+    standardsHtml([liquid(BOTH_LIQUID)], GROUPS, LOGS, null),
+    lettuce(
+      "<span>テスト乳剤（レタス）: 1000~2000倍・100~300L/10a・収穫7日前まで</span>" +
+        '<span class="muted">本剤 4 回目（3回以内）・成分A 4 回目（上限 3 回）・成分B 4 回目（上限 2 回）</span>' +
+        "<span>この面積の基準散布量 <b>10.0〜30.0 L</b></span>"
+    ) +
+      cabbage(
+        "<span>テスト乳剤（キャベツ）: 1500倍</span>" +
+          '<span class="muted">本剤 1 回目（2回以内）・成分A 1 回目（上限 3 回）・成分B 1 回目（上限 2 回）</span>' +
+          "<span>この面積の基準散布量 <b>5.0〜15.0 L</b></span>"
+      )
+  );
+  // 直している記録は数えない
+  assert.match(standardsHtml([liquid(BOTH_LIQUID)], GROUPS, LOGS, "l3"), /本剤 3 回目（3回以内）・成分A 3 回目（上限 3 回）・成分B 3 回目（上限 2 回）/);
+  // 粒剤は、面積あたりの使用量 × 面積
+  assert.equal(
+    standardsHtml([granule(BOTH_GRANULE)], GROUPS, [], null),
+    lettuce(
+      "<span>テスト粒剤（レタス）: 6kg/10a</span>" + '<span class="muted">本剤 1 回目（1回）・成分C 1 回目</span>' + "<span>この面積の基準使用量 6kg/10a × 100.0 ㎡ → <b>600 g</b></span>"
+    ) +
+      cabbage(
+        "<span>テスト粒剤（キャベツ）: 4~6kg/10a</span>" +
+          '<span class="muted">本剤 1 回目（1回）・成分C 1 回目</span>' +
+          "<span>この面積の基準使用量 4~6kg/10a × 50.0 ㎡ → <b>200 g〜300 g</b></span>"
+      )
+  );
+  // 作付のないまとまり（作付のない区画）は 1 回目。面積がなければ、量は出さない
+  const empty = [{ ...GROUPS[0], area: 0, plantingIds: [] }];
+  assert.equal(
+    standardsHtml([liquid(BOTH_LIQUID)], empty, LOGS, null),
+    '<div class="famic-group"><strong>レタス</strong><span class="muted"></span>' +
+      "<span>テスト乳剤（レタス）: 1000~2000倍・100~300L/10a・収穫7日前まで</span>" +
+      '<span class="muted">本剤 1 回目（3回以内）・成分A 1 回目（上限 3 回）・成分B 1 回目（上限 2 回）</span></div>'
+  );
+  // 数えない成分（空の位置）は書かない
+  assert.match(standardsHtml([liquid(BOTH_LIQUID, { _product: { ingredients: ["", "成分B"] } })], GROUPS, LOGS, null), /本剤 4 回目（3回以内）・成分B 4 回目（上限 2 回）<\/span>/);
+  // まだ選んでいない
+  assert.match(standardsHtml([liquid({ g2: BOTH_LIQUID.g2 })], GROUPS, [], null), /<span class="muted">テスト乳剤: 作物名と使い方・適用病害虫を選ぶと、基準が出ます<\/span>/);
+  // 使用基準を読めた農薬がない、まとまりがない
+  assert.equal(standardsHtml([liquid(BOTH_LIQUID, { _uses: null })], GROUPS, [], null), "");
+  assert.equal(standardsHtml([liquid(BOTH_LIQUID)], [], [], null), "");
 });

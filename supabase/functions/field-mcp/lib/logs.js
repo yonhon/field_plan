@@ -385,6 +385,31 @@ export function pesticideCounts(logs, plantingId, excludeLogId = null) {
   return { products, ingredients };
 }
 
+// 品目のまとまりで、この防除が何回目になるか。作付ごとのこれまでの回数のうち、いちばん多いものに 1 を足す。
+// 作付のないまとまり（作付のない区画）は 1 回目。ingredients は総使用回数に数える有効成分（①〜⑤の順。数えないものは空）で、
+// 返り値の ingredients も同じ位置に回数を入れる（数えない成分は null）。countsOf(作付の ID) は pesticideCounts の結果
+export function sprayCounts({ regNo, ingredients = [], plantingIds, countsOf }) {
+  const counts = plantingIds.map(countsOf);
+  const next = (get) => Math.max(0, ...counts.map(get)) + 1;
+  return {
+    product: next((item) => item.products.get(String(regNo)) || 0),
+    ingredients: ingredients.map((name) => (name ? next((item) => item.ingredients.get(name) || 0) : null)),
+  };
+}
+
+// まとまりの面積に対する、使用基準の量。散布液量の基準があれば基準散布量（L）、なければ面積あたりの使用量（g か mL）。
+// 面積がない、どちらの基準もないときは null。kind は "liquid"（散布液量）か "usage"（面積あたりの使用量）
+export function areaStandard(row, area) {
+  if (!row || !area) {
+    return null;
+  }
+  if (row.liquid_min !== null && row.liquid_min !== undefined) {
+    return { kind: "liquid", min: (row.liquid_min * area) / 1000, max: (row.liquid_max * area) / 1000, unit: "L" };
+  }
+  const usage = parseUsage(row.dilution_text);
+  return usage ? { kind: "usage", min: usage.min * area, max: usage.max * area, unit: usage.unit } : null;
+}
+
 // 作付の、有効成分ごとの使用回数と上限の表。上限は、その作付の品目の使用基準の写しのうち、いちばん新しい記録のもの。
 // 有効成分と本剤は、最初に使った順（記録の日の古い順。同じ日は記録の中の資材の順）に並べる。
 // 本剤には、総使用回数に数える有効成分（ingredients）を付ける。画面は、有効成分の行の下に、その成分を含む本剤を出す
@@ -484,31 +509,29 @@ export function sprayWarnings({ date, dilution, regNo, ingredients = [], groups,
         warnings.push(`${group.name}: 散布液量が 10 a あたり ${Math.round(per10a)} L で、基準（${row.liquid_min}〜${row.liquid_max} L）の外です`);
       }
     }
-    let product = 0;
-    const totals = new Map();
-    let soonest = null;
-    for (const planting of group.plantings) {
-      const counts = countsOf(planting.id);
-      product = Math.max(product, (counts.products.get(String(regNo)) || 0) + 1);
-      ingredients.forEach((name, k) => {
-        if (name) {
-          totals.set(k, Math.max(totals.get(k) || 0, (counts.ingredients.get(name) || 0) + 1));
+    // 使用回数は作付ごとに数えるので、作付のないまとまり（作付のない区画）では見ない
+    if (group.plantings.length) {
+      const counts = sprayCounts({ regNo, ingredients, plantingIds: group.plantings.map((planting) => planting.id), countsOf });
+      if (row.times_max && counts.product > row.times_max) {
+        warnings.push(`${group.name}: 本剤の使用回数が、この防除で ${counts.product} 回になり、上限（${row.times_max} 回）を超えます`);
+      }
+      counts.ingredients.forEach((count, k) => {
+        if (count === null) {
+          return;
+        }
+        const max = row.total_max?.[k];
+        if (max && count > max) {
+          warnings.push(`${group.name}: ${ingredients[k]} を含む農薬の使用回数が、この防除で ${count} 回になり、上限（${max} 回）を超えます`);
+        }
+        if ((row.totals?.[k] || "").includes("(")) {
+          warnings.push(`${group.name}: ${ingredients[k]} の総使用回数には条件があります。確かめてください: ${row.totals[k]}`);
         }
       });
+    }
+    let soonest = null;
+    for (const planting of group.plantings) {
       if (planting.harvestStart && (!soonest || planting.harvestStart < soonest)) {
         soonest = planting.harvestStart;
-      }
-    }
-    if (row.times_max && product > row.times_max) {
-      warnings.push(`${group.name}: 本剤の使用回数が、この防除で ${product} 回になり、上限（${row.times_max} 回）を超えます`);
-    }
-    for (const [k, count] of totals) {
-      const max = row.total_max?.[k];
-      if (max && count > max) {
-        warnings.push(`${group.name}: ${ingredients[k]} を含む農薬の使用回数が、この防除で ${count} 回になり、上限（${max} 回）を超えます`);
-      }
-      if ((row.totals?.[k] || "").includes("(")) {
-        warnings.push(`${group.name}: ${ingredients[k]} の総使用回数には条件があります。確かめてください: ${row.totals[k]}`);
       }
     }
     if (row.preharvest_days && soonest) {

@@ -2,7 +2,7 @@
 // この部分は切り離せるように、1 つのファイルにまとめている。config.js の famic を false にするか、
 // DB を使わないモードでは使わない（防除の記録は、名前と量を文字と数で入れるだけになる）。
 // 農薬の情報の扱いには責任が伴うので、ほかの人に使ってもらうときは、ここを外すこと。
-import { defaultDilution, formatAmount, inputText, parseUsage, pesticideCounts, previousChoice, sprayWarnings, standardChoice, usageRange, usageWarnings } from "./logs.js";
+import { areaStandard, defaultDilution, formatAmount, inputText, parseUsage, pesticideCounts, previousChoice, sprayCounts, sprayWarnings, standardChoice, usageRange, usageWarnings } from "./logs.js";
 import { draw } from "./draw.js";
 import { UNKNOWN_PRODUCT, codesText, describeHtml, iconsHtml, productCodes } from "./rac.js";
 import { escapeHtml } from "./html.js";
@@ -465,29 +465,28 @@ export function standardsHtml(inputs, groups, logs, excludeLogId) {
         if (!row) {
           return `<span class="muted">${nameHtml(input.name, input.reg_no)}: 作物名と使い方・適用病害虫を選ぶと、基準が出ます</span>`;
         }
-        const counts = group.plantingIds.map((id) => pesticideCounts(logs, id, excludeLogId));
-        const product = Math.max(0, ...counts.map((item) => item.products.get(String(input.reg_no)) || 0)) + 1;
-        const ingredients = (input._product?.ingredients || [])
-          .map((name, k) => {
-            if (!name) {
+        const names = input._product?.ingredients || [];
+        const counts = sprayCounts({ regNo: input.reg_no, ingredients: names, plantingIds: group.plantingIds, countsOf: (id) => pesticideCounts(logs, id, excludeLogId) });
+        const ingredients = counts.ingredients
+          .map((count, k) => {
+            if (count === null) {
               return "";
             }
-            const count = Math.max(0, ...counts.map((item) => item.ingredients.get(name) || 0)) + 1;
             const max = row.total_max?.[k];
-            return `${name} ${count} 回目${max ? `（上限 ${max} 回）` : ""}`;
+            return `${names[k]} ${count} 回目${max ? `（上限 ${max} 回）` : ""}`;
           })
           .filter(Boolean);
-        const usage = parseUsage(row.dilution_text);
+        const amount = areaStandard(row, group.area);
         const span = (low, high, unit) => (low === high ? formatAmount(high, unit) : `${formatAmount(low, unit)}〜${formatAmount(high, unit)}`);
         const liquid =
-          row.liquid_min !== null && row.liquid_min !== undefined && group.area
-            ? `この面積の基準散布量 <b>${((row.liquid_min * group.area) / 1000).toFixed(1)}〜${((row.liquid_max * group.area) / 1000).toFixed(1)} L</b>`
-            : usage && group.area
-              ? `この面積の基準使用量 ${escapeHtml(row.dilution_text)} × ${group.area.toFixed(1)} ㎡ → <b>${span(usage.min * group.area, usage.max * group.area, usage.unit)}</b>`
+          amount?.kind === "liquid"
+            ? `この面積の基準散布量 <b>${amount.min.toFixed(1)}〜${amount.max.toFixed(1)} L</b>`
+            : amount?.kind === "usage"
+              ? `この面積の基準使用量 ${escapeHtml(row.dilution_text)} × ${group.area.toFixed(1)} ㎡ → <b>${span(amount.min, amount.max, amount.unit)}</b>`
               : "";
         return (
           `<span>${nameHtml(input.name, input.reg_no)}（${escapeHtml(row.crop)}）: ${escapeHtml([row.dilution_text, row.liquid_text, row.timing_text].filter((text) => text && text !== "-").join("・"))}</span>` +
-          `<span class="muted">本剤 ${product} 回目（${escapeHtml(row.times_text)}）${ingredients.length ? `・${escapeHtml(ingredients.join("・"))}` : ""}</span>` +
+          `<span class="muted">本剤 ${counts.product} 回目（${escapeHtml(row.times_text)}）${ingredients.length ? `・${escapeHtml(ingredients.join("・"))}` : ""}</span>` +
           (liquid ? `<span>${liquid}</span>` : "")
         );
       });
@@ -505,12 +504,12 @@ export function baselineLiters(inputs, groups) {
   let low = 0;
   let high = 0;
   for (const group of groups) {
-    const row = rowFor(input, group);
-    if (!row || row.liquid_min === null || row.liquid_min === undefined || !group.area) {
+    const amount = areaStandard(rowFor(input, group), group.area);
+    if (amount?.kind !== "liquid") {
       return null;
     }
-    low += (row.liquid_min * group.area) / 1000;
-    high += (row.liquid_max * group.area) / 1000;
+    low += amount.min;
+    high += amount.max;
   }
   return groups.length ? { low, high } : null;
 }
