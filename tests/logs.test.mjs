@@ -23,6 +23,7 @@ import {
   shiftAfterActual,
   cropDiffText,
   specDiff,
+  specText,
   layoutBars,
   stackLanes,
   withActualDates,
@@ -498,4 +499,9 @@ test("資材の文: 1 穴あたりの量で決めたものは、1 穴の量も�
   assert.equal(inputText({ kind: "fertilizer", name: "化成肥料", amount: 20, unit: "kg" }), "化成肥料 20 kg");
   // DB の数は文字で届くことがある
   assert.equal(inputText({ kind: "pesticide", name: "試験粒剤", method: "植穴処理", amount: 2468, unit: "g", per_hole: "2.0" }), "試験粒剤 植穴処理 1 穴 2 g");
+});
+
+test("株の手入れの仕様の文に、抜き取った株数と理由を入れる", () => {
+  assert.equal(specText("care", { items: ["抜き取り"], pulled_plants: 3, pull_reason: "青枯病" }), "抜き取った株数 3・抜き取りの理由 青枯病");
+  assert.equal(specText("care", { items: ["間引き"], thin_gap_cm: 30 }), "間引きで残した株間 30cm");
 });

@@ -326,7 +326,11 @@ export const SPEC_FIELDS = {
     ["width_cm", "幅（cm）"],
   ],
   harvest: [["harvest_kg", "収穫量（kg）"]],
-  care: [["thin_gap_cm", "間引きで残した株間（cm）"]],
+  care: [
+    ["thin_gap_cm", "間引きで残した株間（cm）"],
+    ["pulled_plants", "抜き取った株数"],
+    ["pull_reason", "抜き取りの理由（例: 青枯病）", "text"],
+  ],
 };
 
 // 記録の仕様を短い文にする。例: 株間（cm） 30・条数 3・千鳥
