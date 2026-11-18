@@ -1,4 +1,4 @@
-# 半年に 1 度、画面の速さの確かめの Issue を開く（docs/performance.md）。
+# 半年に 1 度、画面の速さと、計算のテストの効き目（Mutation testing）の確かめの Issue を開く（docs/performance.md、README の 12 章）。
 # 1 月と 7 月の 1 日、9:00（日本時間）。手で動かすこともできる
 name: Performance check reminder
 
@@ -23,6 +23,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue create \
-            --title "定期の確かめ: 速さ（$(TZ=Asia/Tokyo date +%Y-%m)）" \
+            --title "定期の確かめ: 速さとテストの効き目（$(TZ=Asia/Tokyo date +%Y-%m)）" \
             --body-file .github/perf-check.md \
             --label performance

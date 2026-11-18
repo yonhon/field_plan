@@ -1,4 +1,6 @@
-半年に 1 度の、画面の速さの確かめです（`docs/performance.md`）。
+半年に 1 度の、画面の速さと、計算のテストの効き目の確かめです。
+
+画面の速さの確かめです（`docs/performance.md`）。
 
 - [ ] main を最新にし、ほかの重い処理を止める
 - [ ] `node scripts/perf/run.mjs --record` で測る（いまの量と 1 年後の量）。前回と大きく違えば測り直す
@@ -7,4 +9,11 @@
 - [ ] Android の Chrome で、しばらく使っていなかったあとの起動のネットワークの記録を取り、`docs/perf-runs.md` の「実機の起動」の表に足す（取り方は `docs/performance.md` の「実機の起動のログ」）
 - [ ] 本番のデータの件数が、前のレビューのときの 2 倍ほどになっていないかを確かめる（件数は、この Issue に書かない）
 - [ ] 目安に当たったら、本物のデータでレビューし、直す候補を `performance` のラベルの Issue にする
+
+計算のテストの効き目の確かめです（Mutation testing。README の 12 章）。
+
+- [ ] `stryker.config.json` の `mutate` のファイルごとに `node scripts/mutation.mjs <ファイル>` を回し、ファイルごとの点数（Mutation score）と Survived の数を、この Issue に書く。まとめて 1 回で回すと、どのファイルにも全部のテストを動かすので遅い
+- [ ] 前回の Issue の点数より下がったファイルは、`.stryker/report.html` で Survived を見て、直した所に当たるものにテストを足す
+- [ ] 前回から増えた計算のファイルで、テストが行の 9 割以上を通るものは、`mutate` に足す
+
 - [ ] 記録をコミットし、この Issue を閉じる
