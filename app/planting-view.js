@@ -4,7 +4,7 @@
 import { plantingNumbers, plantingSpec, summarize } from "./crops.js";
 import { notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { openLogEditor, openPlanEditor, uncancelWork } from "./log-view.js";
+import { openLogEditor, openPlanEditor, revertWorks, uncancelWork } from "./log-view.js";
 import { bedAreas, compressedAxis, cropDiffText, dayGap, firstHarvestDay, logEnd, shiftAfterActual, specText, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled, ingredientIconsHtml, inputHtml, nameHtml } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, isManagement, localToday, workName } from "./schedule.js";
@@ -808,6 +808,7 @@ function workRow(c, { work, linked, actual }, mode, today) {
           .map((log) => `${logLink(log)}${logLines(log).map((line) => `<br><span class="detail-line">${line}</span>`).join("")}${logNote(c, log)}`)
           .join("<br>") +
         (actual && !actual.end ? '<br><span class="log-going">作業中</span>' : "") +
+        `<br><button type="button" class="text-btn danger detail-revert" data-revert="${work.id}" title="実績を削除して、未完了の計画に戻します">計画に戻す</button>` +
         "</td>";
     } else if (work.plan_end && work.plan_end < today) {
       actualCell = '<td><span class="detail-badge is-missing">未実施</span></td>';
@@ -951,7 +952,7 @@ function onClick(event) {
     openProblemTarget(problem.dataset.kind, problem.dataset.id);
     return;
   }
-  const el = event.target.closest("[data-act], [data-log], [data-plan-edit], [data-uncancel], [data-gantt-mode], [data-plan]");
+  const el = event.target.closest("[data-act], [data-log], [data-plan-edit], [data-uncancel], [data-revert], [data-gantt-mode], [data-plan]");
   if (!el) {
     return;
   }
@@ -988,6 +989,13 @@ function onClick(event) {
     const work = state().works.find((item) => item.id === el.dataset.uncancel);
     if (work) {
       uncancelWork(work);
+    }
+    return;
+  }
+  if (el.dataset.revert) {
+    const work = state().works.find((item) => item.id === el.dataset.revert);
+    if (work) {
+      revertWorks([work]);
     }
     return;
   }

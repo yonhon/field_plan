@@ -159,3 +159,27 @@ test("スマホの幅: 図の右に配置と面積の合計を並べ、木はた
   await page.viewport(null);
   assert.deepEqual(page.errors, []);
 });
+
+test("今週やること: 完了した行の「計画に戻す」で、実績を消して完了と修正のボタンに戻る", options, async () => {
+  await page.viewport(1280, 800);
+  const data = seed();
+  // 2 本の畝の収穫を、まとめて完了にした実績
+  data.workLogs = [{
+    id: "l1", field_id: "f1", date: today, end_date: null, work_type: "harvest", finishes: true, spec: {}, note: "", created_at: AT,
+    targets: ["1", "2"].map((n) => ({ id: `t${n}`, log_id: "l1", planting_id: `pl${n}`, bed_id: `bed${n}`, block_id: null, work_id: `w${n}`, label: `畝${n}`, crop_name: "試験菜", area_m2: null, spray_l: null })),
+    inputs: [],
+  }];
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="map"]');
+  await page.click('.wt-tab[data-wtab="week"]');
+  await page.waitFor(`Boolean(document.querySelector('#weekList li.is-done [data-week="revert"]'))`, "完了した行に計画に戻すのボタン");
+  await page.click('#weekList [data-week="revert"]');
+  await page.waitFor(`document.querySelector("dialog.notice[open] .notice-text")?.textContent.includes("未完了に戻します")`, "確かめの窓");
+  assert.equal(await page.run(`document.querySelector("dialog.notice[open] .notice-target").textContent`), "収穫（畝1、畝2）");
+  assert.equal(await page.run(`document.querySelector('dialog.notice[open] [data-action="delete"]').textContent`), "計画に戻す");
+  await page.click('dialog.notice[open] [data-action="delete"]');
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).workLogs.length === 0`, "実績が消える");
+  await page.waitFor(`Boolean(document.querySelector('#weekList [data-week="done"]'))`, "完了のボタンに戻る");
+  assert.equal(await page.run(`Boolean(document.querySelector("#weekList li.is-done"))`), false);
+  assert.deepEqual(page.errors, []);
+});

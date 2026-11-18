@@ -2056,6 +2056,13 @@ body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
   font-weight: 500;
 }
 
+/* 作付の詳細の実績の欄の「計画に戻す」。実績の日付と行頭をそろえる */
+.detail-revert {
+  margin-top: 2px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
 .log-date-note {
   margin: -4px 0 8px;
   font-size: 12px;

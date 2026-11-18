@@ -3319,7 +3319,7 @@ const EDIT_GUARDED = [
   "#cropTable :is(input, select, textarea, button)",
   "#fertilizerTable :is(input, select, textarea, button)",
   ...["#plantingBody", "#blockRecord", "#blockHead"].map(
-    (box) => `${box} :is([data-log], [data-plan-edit], [data-uncancel], [data-plan], [data-act="record"], [data-act="reschedule"])`
+    (box) => `${box} :is([data-log], [data-plan-edit], [data-uncancel], [data-revert], [data-plan], [data-act="record"], [data-act="reschedule"])`
   ),
 ].join(", ");
 const EDIT_GUARD_FREE = "#strip [data-open], #strip [data-planting]"; // 畝の図の中でも、作付の詳細を開くのは止めない

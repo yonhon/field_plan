@@ -254,3 +254,41 @@ test("作付の詳細で計画の日付を直し、別の画面で元に戻す�
   await page.waitFor(`document.querySelector('td.detail-plan[data-plan="w-pl1"]')?.classList.contains("undo-flash")`, "計画の日付の欄が光る");
   assert.deepEqual(page.errors, []);
 });
+
+const savedLogs = () => page.run(`JSON.parse(localStorage.getItem("field_plan_local")).workLogs`);
+
+test("作付の詳細の「計画に戻す」: つながった実績を消して未完了に戻し、元に戻すで実績が戻る", options, async () => {
+  await page.loadApp(seed());
+  await openFromMap("pl1");
+  await page.click('#plantingBody [data-gantt-mode="both"]');
+  await page.click('#plantingBody [data-revert="w-pl1"]');
+  await page.waitFor(`document.querySelector("dialog.notice[open] .notice-text")?.textContent.includes("未完了に戻します")`, "確かめの窓");
+  await page.click('dialog.notice[open] [data-action="delete"]');
+  await page.waitFor(`!JSON.parse(localStorage.getItem("field_plan_local")).workLogs.some((log) => log.id === "l1")`, "実績が消える");
+  assert.deepEqual((await savedLogs()).map((log) => log.id), ["l2"], "ほかの作付の実績は残る");
+  await page.waitFor(`!document.querySelector('#plantingBody [data-revert="w-pl1"]')`, "計画に戻すのボタンが消える");
+  assert.equal(await page.run(`Boolean(document.querySelector("#plantingBody .detail-badge.is-missing"))`), true, "予定日を過ぎた未実施の計画に戻る");
+
+  await page.click("#undoBtn");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).workLogs.some((log) => log.id === "l1")`, "元に戻すで実績が戻る");
+  await page.waitFor(`Boolean(document.querySelector('#plantingBody [data-revert="w-pl1"]'))`, "完了の表示に戻る");
+  assert.deepEqual(page.errors, []);
+});
+
+test("「計画に戻す」: 実績がほかの畝にも付いていれば範囲を尋ね、この畝だけなら実績からその畝を外す", options, async () => {
+  const data = seed();
+  // 2 本の畝をまとめて完了にした実績 1 件
+  data.workLogs = [{ ...data.workLogs[0], targets: [data.workLogs[0].targets[0], { ...data.workLogs[1].targets[0], id: "l1t2", log_id: "l1" }] }];
+  await page.loadApp(data);
+  await openFromMap("pl1");
+  await page.click('#plantingBody [data-gantt-mode="both"]');
+  await page.click('#plantingBody [data-revert="w-pl1"]');
+  await page.waitFor(`document.querySelector("dialog.notice[open] .notice-text")?.textContent.includes("ほかの 1 か所")`, "範囲を尋ねる");
+  assert.equal(await page.run(`document.querySelector('dialog.notice[open] [data-scope="all"]').textContent`), "実績ごと消して計画に戻す（2 か所）");
+  await page.click('dialog.notice[open] [data-scope="one"]');
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).workLogs[0]?.targets.length === 1`, "その畝だけ外す");
+  const [log] = await savedLogs();
+  assert.equal(log.id, "l1", "実績は残す");
+  assert.deepEqual(log.targets.map((target) => target.work_id), ["w-pl2"], "ほかの畝の計画は完了のまま");
+  assert.deepEqual(page.errors, []);
+});

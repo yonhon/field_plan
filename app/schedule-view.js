@@ -21,7 +21,7 @@ import {
 import { summarize } from "./crops.js";
 import { confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor } from "./log-view.js";
+import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor, revertWorks } from "./log-view.js";
 import { isBlockTarget, lateWorks, layoutBars, logEnd, plantingOnDate, withActualDates, workActuals, workStatus } from "./logs.js";
 import { loadPref, savePref } from "./prefs.js";
 import { PAGE_PX, printPage } from "./print.js";
@@ -394,7 +394,7 @@ function weekLines(works) {
 }
 
 // 今週やることと遅れている作業の 1 行。実際に使うプランなら「完了」と「修正」のボタンを付ける。
-// 完了した行は ✓ と実施日を付けて薄くし、「修正」でその記録を開く
+// 完了した行は ✓ と実施日を付けて薄くし、「修正」でその記録を開く。「計画に戻す」で実績を消して未完了に戻す
 function weekItem({ work, works, places }, actuals, late) {
   const today = localToday();
   const where = places.length > 4 ? `${places[0]} ほか ${places.length - 1} か所` : places.join("、");
@@ -414,7 +414,8 @@ function weekItem({ work, works, places }, actuals, late) {
   const buttons = !isActivePlan()
     ? ""
     : done
-      ? `<button class="text-btn" data-week="edit-log" data-ids="${ids}">修正</button>`
+      ? `<button class="text-btn" data-week="edit-log" data-ids="${ids}">修正</button>` +
+        `<button class="text-btn danger" data-week="revert" data-ids="${ids}" title="実績を削除して、未完了の計画に戻します">計画に戻す</button>`
       : `<button class="chip-btn" data-week="edit" data-ids="${ids}" title="日付や内容を入れて、実績を入力します（初めは計画の日）">修正</button>` +
         `<button class="primary-btn" data-week="done" data-ids="${ids}" title="計画どおりの日に行ったものとして、実績を入力します">完了</button>`;
   return (
@@ -447,7 +448,7 @@ function renderWeek() {
   draw($("weekList"), items.length ? items.join("") : '<li class="muted">予定はありません</li>');
 }
 
-// 今週やることの「完了」「修正」
+// 今週やることの「完了」「修正」「計画に戻す」
 async function onWeekClick(event) {
   const button = event.target.closest("[data-week]");
   if (!button) {
@@ -466,6 +467,8 @@ async function onWeekClick(event) {
     }
     button.disabled = true;
     await completeWorks(works);
+  } else if (button.dataset.week === "revert") {
+    await revertWorks(works);
   } else if (button.dataset.week === "edit") {
     // 作業中の記録（まだ終わっていない、何日かにわたる記録）があれば、それを開いて続きを入れる
     const going = (state().logs || []).find((log) => !log.finishes && log.targets.some((target) => works.some((work) => work.id === target.work_id)));

@@ -220,8 +220,8 @@ export async function completeWorks(works) {
   }
 }
 
-// 記録がほかの畝にも付いているときに、動かす範囲を尋ねる。"one"（この畝だけ）、"all"（記録ごと）、null（やめる）
-function chooseScope(rowName, others) {
+// 記録がほかの畝にも付いているときに、動かす（または計画に戻す）範囲を尋ねる。"one"（この畝だけ）、"all"（記録ごと）、null（やめる）
+function chooseScope(rowName, others, { question = "どこまで日付を動かしますか。", one = "動かす", all = "実績ごと動かす" } = {}) {
   const box = document.createElement("dialog");
   box.className = "notice";
   draw(
@@ -230,9 +230,9 @@ function chooseScope(rowName, others) {
     '<button class="primary-btn" data-scope="one"></button><button class="chip-btn" data-scope="all"></button>' +
     '<button class="text-btn" data-scope="">キャンセル</button></div>'
   );
-  box.querySelector(".notice-text").textContent = `この実績は、ほかの ${others} か所の畝（区画）にも付いています。どこまで日付を動かしますか。`;
-  box.querySelector('[data-scope="one"]').textContent = `${rowName}だけ動かす`;
-  box.querySelector('[data-scope="all"]').textContent = `実績ごと動かす（${others + 1} か所）`;
+  box.querySelector(".notice-text").textContent = `この実績は、ほかの ${others} か所の畝（区画）にも付いています。${question}`;
+  box.querySelector('[data-scope="one"]').textContent = `${rowName}だけ${one}`;
+  box.querySelector('[data-scope="all"]').textContent = `${all}（${others + 1} か所）`;
   document.body.append(box);
   return new Promise((resolve) => {
     box.addEventListener("click", (event) => {
@@ -290,6 +290,63 @@ export async function moveLogs(logIds, days, matches, rowName) {
   } catch (error) {
     ctx.setStatus("");
     notify(`実績の日付を動かせませんでした: ${error.message}`);
+    await reload().catch(() => {});
+    return false;
+  }
+}
+
+// 計画の作業を、実績のない計画に戻す（完了や作業中を取り消す）。つながった実績を消す。
+// 実績がほかの畝（区画）にも付いているときは、この作業の畝の分だけ実績から外すか、実績ごと消すかを尋ねる
+export async function revertWorks(works) {
+  if (!works.length || !(await loadData())) {
+    return false;
+  }
+  const ids = new Set(works.map((work) => work.id));
+  const linked = (target) => ids.has(target.work_id);
+  const logs = (state().logs || []).filter((log) => log.targets.some(linked));
+  if (!logs.length) {
+    return false;
+  }
+  const label = typeLabel(works[0].work_type);
+  const places = [...new Set(logs.flatMap((log) => log.targets.filter(linked).map((target) => target.label)))].filter(Boolean);
+  const rowName = places.length > 2 ? `${places[0]} ほか ${places.length - 1} か所` : places.join("、") || "この畝";
+  const others = Math.max(0, ...logs.map((log) => log.targets.filter((target) => !linked(target)).length));
+  let scope = "all";
+  if (others) {
+    scope = await chooseScope(rowName, others, { question: "どこまで計画に戻しますか。", one: "計画に戻す（実績から外す）", all: "実績ごと消して計画に戻す" });
+  } else {
+    const ok = await confirmAction({
+      message: `実績を削除して、計画の作業を未完了に戻します（実績 ${logs.length} 件）。`,
+      name: `${label}（${rowName}）`,
+      action: "計画に戻す",
+    });
+    scope = ok ? "all" : null;
+  }
+  if (!scope) {
+    return false;
+  }
+  const fields = (log) => ({ id: log.id, field_id: log.field_id, date: log.date, end_date: log.end_date || null, work_type: log.work_type, finishes: log.finishes, spec: log.spec, note: log.note });
+  ctx.setStatus("計画に戻しています…");
+  try {
+    const saved = [];
+    const removed = new Set();
+    for (const log of logs) {
+      const rest = log.targets.filter((target) => !linked(target));
+      if (scope === "all" || !rest.length) {
+        await state().store.deleteLog(log.id);
+        removed.add(log.id);
+      } else {
+        saved.push(await state().store.saveLog({ ...fields(log), targets: rest, inputs: log.inputs || [] }));
+      }
+    }
+    state().logs = (state().logs || []).filter((log) => !removed.has(log.id));
+    await showSaved(saved);
+    record({ kind: "log.revert", target: ["work", works[0].id], plan: activePlan(), text: `${rowName}の作業「${label}」の実績を消し、計画に戻した` });
+    ctx.setStatus(`${label}を計画に戻しました`);
+    return true;
+  } catch (error) {
+    ctx.setStatus("");
+    notify(`計画に戻せませんでした: ${error.message}`);
     await reload().catch(() => {});
     return false;
   }
@@ -669,7 +726,7 @@ function renderDialog() {
     `<p class="error" id="logError" role="alert"></p>` +
     `</div>` +
     planCopySection() +
-    `<div class="log-foot">${draft.id ? '<button type="button" class="text-btn danger" data-act="delete">この実績を削除</button>' : ""}` +
+    `<div class="log-foot">${draft.id ? `<button type="button" class="text-btn danger" data-act="delete">${savedLinked() ? "この実績を削除して計画に戻す" : "この実績を削除"}</button>` : ""}` +
     `${draft.planWorks.length ? '<button type="button" class="text-btn danger" data-act="deletePlan">この計画を消す</button>' : ""}` +
     `${!draft.id && draft.cancellable.length ? '<button type="button" class="text-btn danger" data-act="cancelWork">この作業を取りやめる</button>' : ""}` +
     `${footButtons()}</div>`
@@ -1763,12 +1820,16 @@ export async function copyPlanWorks(works, days) {
   }
 }
 
+// 直している実績が、保存した時点で計画の作業につながっているか（削除すると、その計画は未完了に戻る）
+const savedLinked = () => Boolean((state().logs || []).find((log) => log.id === draft.id)?.targets.some((target) => target.work_id));
+
 async function remove() {
   const log = (state().logs || []).find((item) => item.id === draft.id);
   if (!log) {
     return;
   }
-  const ok = await confirmDelete("この実績を削除します。", `${logDays(log)} ${typeLabel(log.work_type)}（${targetSummary(log.targets)}）`);
+  const message = log.targets.some((target) => target.work_id) ? "この実績を削除します。つながった計画の作業は、未完了に戻ります。" : "この実績を削除します。";
+  const ok = await confirmDelete(message, `${logDays(log)} ${typeLabel(log.work_type)}（${targetSummary(log.targets)}）`);
   if (!ok) {
     return;
   }
