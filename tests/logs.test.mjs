@@ -509,10 +509,10 @@ test("この防除が何回目か: 作付ごとの回数のうち、いちばん
   assert.deepEqual(sprayCounts({ regNo: 200, ingredients: ["成分C"], plantingIds: ["p2"], countsOf }), { product: 1, ingredients: [1] });
   assert.deepEqual(sprayCounts({ regNo: 100, ingredients: ["成分A", ""], plantingIds: [], countsOf }), { product: 1, ingredients: [1, null] });
   assert.deepEqual(sprayCounts({ regNo: 100, plantingIds: ["p1"], countsOf }), { product: 2, ingredients: [] });
-  // 作付のないまとまりでは、使用回数の指摘（総使用回数の条件を含む）を出さない
+  // 作付のないまとまりは 1 回目なので、回数の上限は超えない。総使用回数の条件は知らせる
   assert.deepEqual(
     sprayWarnings({ date: "2026-03-20", dilution: 2000, regNo: 100, ingredients: ["成分A", "成分B"], groups: [{ name: "区画1", area: 100, liters: 0, row: useRow, plantings: [] }], countsOf }),
-    []
+    ["区画1: 成分B の総使用回数には条件があります。確かめてください: 2回以内(定植後は1回以内)"]
   );
 });
 

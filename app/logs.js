@@ -509,25 +509,23 @@ export function sprayWarnings({ date, dilution, regNo, ingredients = [], groups,
         warnings.push(`${group.name}: 散布液量が 10 a あたり ${Math.round(per10a)} L で、基準（${row.liquid_min}〜${row.liquid_max} L）の外です`);
       }
     }
-    // 使用回数は作付ごとに数えるので、作付のないまとまり（作付のない区画）では見ない
-    if (group.plantings.length) {
-      const counts = sprayCounts({ regNo, ingredients, plantingIds: group.plantings.map((planting) => planting.id), countsOf });
-      if (row.times_max && counts.product > row.times_max) {
-        warnings.push(`${group.name}: 本剤の使用回数が、この防除で ${counts.product} 回になり、上限（${row.times_max} 回）を超えます`);
-      }
-      counts.ingredients.forEach((count, k) => {
-        if (count === null) {
-          return;
-        }
-        const max = row.total_max?.[k];
-        if (max && count > max) {
-          warnings.push(`${group.name}: ${ingredients[k]} を含む農薬の使用回数が、この防除で ${count} 回になり、上限（${max} 回）を超えます`);
-        }
-        if ((row.totals?.[k] || "").includes("(")) {
-          warnings.push(`${group.name}: ${ingredients[k]} の総使用回数には条件があります。確かめてください: ${row.totals[k]}`);
-        }
-      });
+    // 作付のないまとまり（作付のない区画）は 1 回目なので、回数の上限は超えない。総使用回数の条件（定植前・定植後など）は知らせる
+    const counts = sprayCounts({ regNo, ingredients, plantingIds: group.plantings.map((planting) => planting.id), countsOf });
+    if (row.times_max && counts.product > row.times_max) {
+      warnings.push(`${group.name}: 本剤の使用回数が、この防除で ${counts.product} 回になり、上限（${row.times_max} 回）を超えます`);
     }
+    counts.ingredients.forEach((count, k) => {
+      if (count === null) {
+        return;
+      }
+      const max = row.total_max?.[k];
+      if (max && count > max) {
+        warnings.push(`${group.name}: ${ingredients[k]} を含む農薬の使用回数が、この防除で ${count} 回になり、上限（${max} 回）を超えます`);
+      }
+      if ((row.totals?.[k] || "").includes("(")) {
+        warnings.push(`${group.name}: ${ingredients[k]} の総使用回数には条件があります。確かめてください: ${row.totals[k]}`);
+      }
+    });
     let soonest = null;
     for (const planting of group.plantings) {
       if (planting.harvestStart && (!soonest || planting.harvestStart < soonest)) {
