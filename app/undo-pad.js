@@ -6,24 +6,11 @@
 // パソコンの幅では出さない（ヘッダーに「元に戻す」「やり直す」がある。styles.css）
 import { draw } from "./draw.js";
 import { historyState, redo, undo } from "./history.js";
+import { CLOSE_ICON, REDO_ICON, UNDO_ICON } from "./icons.js";
 
 let pad = null;
 let watcher = null;
 
-// スマホの矢印と押しピンの形。文字の ↶ ↷ は、書体に入っていないので端末の別の書体で描かれ、端末ごとに形が変わる。
-// そこで絵（SVG）で描く。矢印の形は、パソコンのヘッダーの ↶ ↷（Windows の Chrome で描いたもの）に合わせる。
-// どれも高さ 22 ピクセル、同じ線の太さで描き、線の上下の端（枠の 2〜22 のあたり）を押しピンにそろえる。
-// 矢印は横に長いので、押しピンと同じ高さにすると 24 × 24 の枠に収まらない。矢印だけ横に広い枠（38 × 24）で描く
-const icon = (paths, width = 24) =>
-  `<svg viewBox="0 0 ${width} 24" width="${Math.round((22 * width) / 24)}" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">` +
-  `${paths}</svg>`;
-// 右の端から上へ立ち上がって上を回り、左下の矢じりの先へ斜め 45 度で入る弧（円ではなく、パソコンの ↶ の形に合わせた曲線）と、
-// 矢じり（先から上向きの線と右向きの線。入ってくる弧の両側に開く）
-export const UNDO_ICON = icon('<path d="M35 20.9C35 -2.5 13 -1.5 4.5 20.4"/><path d="M4 13.9v7h7"/>', 38);
-// ↶ を左右に裏返した形
-export const REDO_ICON = icon('<path d="M3 20.9C3 -2.5 25 -1.5 33.5 20.4"/><path d="M34 13.9v7h-7"/>', 38);
-export const PIN_ICON = icon('<path d="M9 3h6"/><path d="M10 3v6l-3 4h10l-3-4V3"/><path d="M12 13v8"/>');
-export const CLOSE_ICON = icon('<path d="M6 6l12 12M18 6L6 18"/>');
 
 function build() {
   pad = document.createElement("div");

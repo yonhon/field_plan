@@ -44,6 +44,7 @@ import { initToasts } from "./toast.js";
 import { confirmAction, confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { UNDO_APPLY, historyState, initHistory, markSettingsOperation, redo as redoStep, renderHistoryButtons, resetHistory, undo as undoStep } from "./history.js";
 import { showUndoPad } from "./undo-pad.js";
+import { decorateIcons } from "./icons.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { plantingOnDate } from "./logs.js";
@@ -4541,6 +4542,8 @@ async function startApp(user = "local") {
   if (route?.view === "journal") {
     openRoute(route, "replace");
   }
+  // ヘッダーと圃場の設定の窓の「元に戻す」「やり直す」に、印の絵を入れる（icons.js）
+  decorateIcons();
   initHistory({
     state,
     // プランを読み込んでいるあいだは、元に戻さない

@@ -5110,3 +5110,26 @@ svg .undo-flash {
 dialog.has-undo-pad {
   padding-bottom: 64px;
 }
+
+/* 印の絵（icons.js）。ヘッダーや窓の、文字を添えたボタンでは文字の高さに合わせ、スマホの印だけのボタンでは大きくする */
+.icon {
+  flex: none;
+  display: block;
+}
+
+.icon-text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-text-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.user-menu-icon .icon,
+.undo-pad-btn .icon {
+  width: 24px;
+  height: 24px;
+}

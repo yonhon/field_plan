@@ -38,8 +38,8 @@
         <button class="tab-btn" data-view="journal">履歴</button>
       </nav>
       <div class="header-right">
-        <button id="undoBtn" class="text-btn edit-only" title="元に戻す（Ctrl+Z）" hidden>↶ 元に戻す</button>
-        <button id="redoBtn" class="text-btn edit-only" title="やり直す（Ctrl+Y）" hidden>↷ やり直す</button>
+        <button id="undoBtn" class="text-btn edit-only icon-text-btn" data-icon="undo" title="元に戻す（Ctrl+Z）" hidden>元に戻す</button>
+        <button id="redoBtn" class="text-btn edit-only icon-text-btn" data-icon="redo" title="やり直す（Ctrl+Y）" hidden>やり直す</button>
         <!-- 保存の状態の記録の欄。目には見せず、書かれた文を app/toast.js がお知らせに出す -->
         <span id="saveStatus" hidden></span>
       </div>
@@ -385,8 +385,8 @@
         <div class="fs-map" id="settingsMapSlot"></div>
         <div class="fs-side">
           <div class="fs-undo">
-            <button type="button" class="chip-btn" id="settingsUndo">↶ 元に戻す</button>
-            <button type="button" class="chip-btn" id="settingsRedo">↷ やり直す</button>
+            <button type="button" class="chip-btn icon-text-btn" id="settingsUndo" data-icon="undo">元に戻す</button>
+            <button type="button" class="chip-btn icon-text-btn" id="settingsRedo" data-icon="redo">やり直す</button>
           </div>
           <!-- 日記の「編集 ｜ プレビュー」と同じ、中身の枠の真上につなげたタブ -->
           <div class="fs-tabs" role="tablist" aria-label="圃場の設定">

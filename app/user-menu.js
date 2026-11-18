@@ -6,7 +6,7 @@
 // ログインする前は開かない。DB を使わないモード（?local=1）では、ログアウトの代わりに、そのことを出す
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
-import { PIN_ICON, REDO_ICON, UNDO_ICON } from "./undo-pad.js";
+import { PIN_ICON, REDO_ICON, UNDO_ICON } from "./icons.js";
 
 const $ = (id) => document.getElementById(id);
 const TITLE = "圃場計画"; // 圃場を開く前（ログインの画面など）に出す名前
