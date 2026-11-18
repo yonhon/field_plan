@@ -94,6 +94,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
 | `tests/` | 図形、日程、苗数と施肥量の計算、作業の実績の計算、元に戻すと、MCP サーバーのテスト |
 | `tests/e2e/` | 主な操作と、DB からの読み直しを、Chrome で通して動かすテスト |
+| `stryker.config.json` | 計算のテストが計算の誤りに気づくかを確かめる、Mutation testing（StrykerJS）の設定（12 章） |
 | `data/` | 下絵の画像など、圃場ごとの資料。**Git の対象外** |
 
 画面のコードは公開されますが、データはログインした本人しか読めません。
@@ -641,6 +642,17 @@ node --test "tests/*.test.mjs"
 ```
 node --test "tests/e2e/*.test.mjs"
 ```
+
+計算のテストが、計算の誤りに本当に気づくかは、Mutation testing（StrykerJS）で確かめます。計算のコードを 1 か所ずつ書き換え（`<` を `<=` に、`+` を `-` にする、など）、そのたびに `node --test` を動かして、テストが失敗するかを見ます。失敗しなかった書き換え（Survived）は、テストが確かめていない所です。Node.js（npm）が要ります。package.json は置かず、版を決めて `npx` で動かします。
+
+```
+npx -y -p @stryker-mutator/core@10.1.1 stryker run
+npx -y -p @stryker-mutator/core@10.1.1 stryker run --mutate app/geometry.js
+```
+
+対象は `stryker.config.json` の `mutate` です（計算のテストが行の 9 割以上を通るファイル）。書き換え 1 つにつき、計算のテスト全体を 1 回動かすので、全体では 1 時間ほどかかります。ふだんは、直したファイルだけを `--mutate` で指定します（`app/pesticide.js:289-547` のように行も指定できます）。結果は `.stryker/report.html` を開いて見ます。`push` のたびには動かしません。
+
+`lib/ の写しは、app/ の部品と同じ内容` のテストだけは飛ばします。Stryker が `app/` のファイルを書き換えるので、必ず失敗するためです。
 
 supabase-js（DB とログインのライブラリー）は、版を決めたファイルを `app/vendor/` に置いています。版を上げるときは、npm のパッケージ `@supabase/supabase-js` のその版から `dist/umd/supabase.js` を取り、`app/vendor/supabase-js-<版>.js` として置き、古いファイルを消して、`app/index.html` と `app/sw.js` の `FILES` のファイル名を直します。`LICENSE` が変わっていれば、`app/vendor/supabase-js.LICENSE.txt` も置き換えます。そのあと、ログインして、読み込みと保存ができることを確かめます。
 

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --test --test-skip-pattern=\"lib/ の写し\" \"tests/*.test.mjs\""
+  },
+  "mutate": [
+    "app/crops.js",
+    "app/diary.js",
+    "app/geometry.js",
+    "app/logs.js",
+    "app/pesticide.js:289-547",
+    "app/rac.js",
+    "app/schedule.js",
+    "app/upload.js",
+    "app/weather.js"
+  ],
+  "ignorePatterns": ["data", "docs", ".claude"],
+  "concurrency": 8,
+  "coverageAnalysis": "off",
+  "reporters": ["clear-text", "progress", "html", "json"],
+  "htmlReporter": { "fileName": ".stryker/report.html" },
+  "jsonReporter": { "fileName": ".stryker/report.json" },
+  "tempDirName": ".stryker/tmp"
+}
