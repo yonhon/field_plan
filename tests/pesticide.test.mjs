@@ -155,9 +155,18 @@ test("作物名と使い方を選ぶ: 使い方が 1 つなら一緒に選ぶ。
   chooseCrop(input, "g1", "レタス", GROUPS);
   assert.deepEqual(input.choices.g1, { crop: "レタス", use_key: "" });
   assert.ok(!input._prefilled.has("g1"));
+  input._prefilled.add("g1");
   chooseUse(input, "g1", "ヨトウムシ類|散布", GROUPS);
   assert.deepEqual(input.choices.g1, { crop: "レタス", use_key: "ヨトウムシ類|散布" });
   assert.equal(rowFor(input, GROUPS[0]), LIQUID[1]);
+  assert.ok(!input._prefilled.has("g1"));
+
+  // 使い方を選んだときも、記録の使い方の欄を合わせる
+  const twoWays = granule({}, { _uses: { rows: [...GRANULE, { crop: "レタス", target: "アブラムシ類", method: "散布" }] } });
+  chooseCrop(twoWays, "g1", "レタス", GROUPS);
+  assert.equal(twoWays.method, undefined);
+  chooseUse(twoWays, "g1", "アブラムシ類|散布", GROUPS);
+  assert.equal(twoWays.method, "散布");
 
   // 最初のまとまりの使用方法を、記録の使い方にする（あとのまとまりではない）
   const mixed = granule({}, { _uses: { rows: [...GRANULE, { crop: "キャベツ", target: "アブラムシ類", method: "散布" }] } });
@@ -166,9 +175,11 @@ test("作物名と使い方を選ぶ: 使い方が 1 つなら一緒に選ぶ。
   chooseUse(mixed, "g2", "アブラムシ類|散布", GROUPS);
   assert.equal(mixed.method, "株元散布");
 
+  input._prefilled.add("g1");
   resetCrop(input, "g1");
   assert.deepEqual(input.choices.g1, { crop: "", use_key: "" });
   assert.equal(rowFor(input, GROUPS[0]), null);
+  assert.ok(!input._prefilled.has("g1"));
 
   unpick(input);
   assert.equal(input.reg_no, null);
@@ -204,7 +215,7 @@ test("記録を直すときの初めの選択は、その記録の写しの選�
 test("作物名と使い方を選び終えていないまとまり", () => {
   const done = liquid(BOTH_LIQUID);
   const half = granule({ g1: BOTH_GRANULE.g1 });
-  const fertilizer = { kind: "fertilizer", name: "肥料", choices: {} };
+  const fertilizer = { kind: "fertilizer", reg_no: "F1", name: "肥料", choices: {} };
   const unnamed = { kind: "pesticide", reg_no: null, name: "手で入れた農薬", choices: {} };
   const missing = missingChoices([done, half, fertilizer, unnamed], GROUPS);
   assert.deepEqual(
@@ -261,6 +272,7 @@ test("記録に写す使用基準: まとまりごとに、選んだ作物名と
   // 登録番号のない農薬（名前を手で入れた）は、写しを作らない
   assert.equal(snapshot({ kind: "pesticide", reg_no: null, standard: old }, GROUPS), old);
   assert.equal(snapshot({ kind: "pesticide", reg_no: null }, GROUPS), null);
+  assert.equal(snapshot({ ...liquid(BOTH_LIQUID), reg_no: null }, GROUPS), null);
 });
 
 test("面積あたりの使用量で使う農薬か: 選んだ基準で決める。選ぶ前は剤型で決める", () => {
@@ -301,6 +313,8 @@ test("初めの希釈倍率: 選んだ品目の基準の下限のうち、いち
   // レタス 1000 倍以上、キャベツ 1500 倍以上 → 1500 倍（キャベツ）
   assert.deepEqual(suggestedDilution(liquid(BOTH_LIQUID), GROUPS), { value: 1500, by: "キャベツ" });
   assert.deepEqual(suggestedDilution(liquid({ g1: BOTH_LIQUID.g1 }), GROUPS), { value: 1000, by: "レタス" });
+  // 選んでいないまとまりが先にあっても、選んだまとまりで決める
+  assert.deepEqual(suggestedDilution(liquid({ g2: BOTH_LIQUID.g2 }), GROUPS), { value: 1500, by: "キャベツ" });
   assert.deepEqual(
     suggestedDilution(liquid({ g1: { crop: "レタス", use_key: "ヨトウムシ類|散布" }, g2: BOTH_LIQUID.g2 }), GROUPS),
     { value: 2000, by: "レタス" }
@@ -320,6 +334,8 @@ test("基準散布量の合計（L）: 10 a あたりの散布液量 × 面積",
   assert.equal(baselineLiters([liquid({ g1: BOTH_LIQUID.g1 })], GROUPS), null);
   assert.equal(baselineLiters([liquid(BOTH_LIQUID)], [GROUPS[0], { ...GROUPS[1], area: 0 }]), null);
   assert.equal(baselineLiters([granule(BOTH_GRANULE)], GROUPS), null);
+  const noKey = liquid(BOTH_LIQUID, { _uses: { rows: LIQUID.map(({ liquid_min, ...row }) => row) } });
+  assert.equal(baselineLiters([noKey], GROUPS), null);
   assert.equal(baselineLiters([liquid(BOTH_LIQUID)], []), null);
   assert.equal(baselineLiters([], GROUPS), null);
   // 散布液量の基準が 0 L から始まるときも求める
@@ -390,8 +406,11 @@ test("防除の指摘: 失効の可能性、粒剤の使用量。農薬が 2 つ
   assert.ok(two.includes("テスト粒剤・使用量 1 kg は、この面積の基準（800 g〜900 g）を超えます"));
   const one = warnings(context([liquid(BOTH_LIQUID, { dilution: 1200 }), { kind: "fertilizer", name: "肥料" }]));
   assert.ok(one.includes("キャベツ: 希釈倍率 1200 倍は、基準（1500 倍以上）より濃くなります"));
-  // 登録番号のない農薬（名前を手で入れた）は照らさない
-  assert.deepEqual(warnings(context([{ kind: "pesticide", reg_no: null, name: "手で入れた農薬", dilution: 1 }])), []);
+  // 登録番号のない農薬（名前を手で入れた）と、農薬でない資材は照らさない
+  assert.deepEqual(warnings(context([{ ...liquid(BOTH_LIQUID), reg_no: null, name: "手で入れた農薬", dilution: 1 }])), []);
+  assert.deepEqual(warnings(context([{ ...liquid(BOTH_LIQUID), kind: "fertilizer", name: "肥料", dilution: 1 }])), []);
+  // 製品をまだ読めていなくても、選んだ基準で照らす
+  assert.deepEqual(warnings(context([liquid(BOTH_LIQUID, { _product: null, dilution: 1200 })])), ["キャベツ: 希釈倍率 1200 倍は、基準（1500 倍以上）より濃くなります"]);
   // 名前は HTML として安全に入れる
   const tagged = liquid({}, { name: "<b>剤", _product: { missing: true, ingredients: [] } });
   assert.deepEqual(warnings(context([tagged])), ["&lt;b&gt;剤: 登録番号 100 は最新の農薬登録情報にありません（失効している可能性があります）"]);
