@@ -446,7 +446,8 @@ function makeDraft(log, preset) {
       ? log.targets.some((target) => target.bed_id || target.planting_id) || !log.targets.length
         ? "crops"
         : "blocks"
-      : presetWorks.some((work) => work.block_id) || (!presetWorks.length && preset.blockId)
+      : // 計画を直すときは、直す計画（まとまり）の対象で決める
+        (planWorks.length ? planWorks : presetWorks).some((work) => work.block_id) || (!presetWorks.length && !planWorks.length && preset.blockId)
         ? "blocks"
         : "crops",
     beds: new Set(),

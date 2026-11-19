@@ -350,6 +350,36 @@ test("入力の窓: 実績と管理作業の計画は、入れた内容のまま
   assert.deepEqual(page.errors, []);
 });
 
+// 区画に入れた管理作業の計画を開き直すと、「品目で選ぶ」で開いていたため、区画に印があっても対象が 0 件になり保存できなかった
+test("区画の管理作業の計画: 開き直すと区画で選ぶになり、日を直して保存できる", options, async () => {
+  // 工程表は今日からの期間を描くので、計画の日は今日から数える
+  const day = (offset) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offset);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  };
+  const data = seed();
+  data.works = [{ id: "wb", plan_id: "p1", block_id: "b1", planting_id: null, work_type: "spray", seq: 1, plan_start: day(10), plan_end: day(10), note: "", batch_id: "batch1", cancelled_on: null, detail: { spec: {}, inputs: [] } }];
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.click('#gantt .gantt-bar[data-id="wb"]');
+  const DIALOG = "dialog.log-dialog[open]";
+  await page.waitFor(`Boolean(document.querySelector('${DIALOG} [data-act="mode"][data-mode="blocks"].is-on'))`, "区画で選ぶで開く");
+  assert.equal(await page.run(`document.querySelector('${DIALOG} [data-act="block"][data-id="b1"]').checked`), true);
+  await page.run(`(() => {
+    const el = document.querySelector('${DIALOG} [data-f="date"]');
+    el.value = "${day(11)}";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await page.click(`${DIALOG} [data-act="save"]`);
+  await page.waitFor(`!document.querySelector("dialog.log-dialog[open]")`, "保存して窓が閉じる");
+  const works = (await page.saved()).works;
+  assert.deepEqual(works.map((work) => [work.id, work.block_id, work.plan_start]), [["wb", "b1", day(11)]]);
+  await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
+  assert.deepEqual(page.errors, []);
+});
+
 test("実績の保存・削除のあとは、記録を全件読み直さず、その 1 件だけを差し替える", options, async () => {
   await page.loadApp(seed());
   // ほかの画面で入れた記録のつもりで、ブラウザーの保存にだけ 1 件足す。読み直すと、一覧に出てしまう
