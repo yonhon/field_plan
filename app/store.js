@@ -1254,9 +1254,11 @@ const AUDITED_LOCAL = ["fields", "backdrops", "plans", "zones", "blocks", "beds"
 // 通しテストで、ローカルの保存の書き込みを遅らせたり、失敗させたりする（回線の遅さや、保存の失敗を確かめる）。
 // ブラウザーの保存の LOCAL_TEST_KEY に { "delay": ミリ秒, "fail": true } を入れる。書き込みのたびに読むので、起動のあとで切り替えられる。
 // "readDelay": ミリ秒 は、変更の履歴の読み込み（SLOW_READS）を遅らせる（起動がそれを待たないことを確かめる）。
-// 圃場の読み込み（loadFields。起動と、戻ってきたときの読み直しで読む）の回数を、LOCAL_READS_KEY に数える
+// 圃場の読み込み（loadFields。起動と、戻ってきたときの読み直しで読む）の回数を LOCAL_READS_KEY に、
+// ニュースの読み込み（loadNews）の回数を LOCAL_NEWS_READS_KEY に数える
 const LOCAL_TEST_KEY = "field_plan_local_test";
 const LOCAL_READS_KEY = "field_plan_local_reads";
+const LOCAL_NEWS_READS_KEY = "field_plan_local_reads_news";
 const SLOW_READS = ["listChanges", "listNotes", "planLastChanges"];
 
 function withTestControl(store) {
@@ -1291,13 +1293,20 @@ function withTestControl(store) {
       return read(...args);
     },
   ]);
-  const loadFields = store.loadFields;
   const counted = [
-    "loadFields",
-    async (...args) => {
-      localStorage.setItem(LOCAL_READS_KEY, String(Number(localStorage.getItem(LOCAL_READS_KEY) || 0) + 1));
-      return loadFields(...args);
-    },
-  ];
-  return Object.defineProperties(store, Object.fromEntries([...writes, ...reads, counted].map(([name, wrapped]) => [name, { value: wrapped, enumerable: true }])));
+    ["loadFields", LOCAL_READS_KEY],
+    ["loadNews", LOCAL_NEWS_READS_KEY],
+  ]
+    .filter(([name]) => store[name])
+    .map(([name, key]) => {
+      const read = store[name];
+      return [
+        name,
+        async (...args) => {
+          localStorage.setItem(key, String(Number(localStorage.getItem(key) || 0) + 1));
+          return read(...args);
+        },
+      ];
+    });
+  return Object.defineProperties(store, Object.fromEntries([...writes, ...reads, ...counted].map(([name, wrapped]) => [name, { value: wrapped, enumerable: true }])));
 }

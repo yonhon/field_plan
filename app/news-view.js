@@ -105,12 +105,9 @@ export function initNews(context) {
       mark(row.dataset.news, button.dataset.newsAct === "read" ? new Date().toISOString() : null);
     }
   });
-  // しばらく開いたままの画面に戻ったときも、新しい記事を拾う
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      loadNews();
-    }
-  });
+  // しばらく隠れていたあとに戻ってきたときも、新しい記事を拾う（app.js が、60 秒以上隠れていたときに知らせる）。
+  // 短く行き来しただけでは読まない（そのたびに携帯の回線を起こさない）
+  document.addEventListener("app-returned", () => loadNews());
   renderNews();
   loadNews();
 }

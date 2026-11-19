@@ -375,3 +375,18 @@ test("書き込みに失敗したあとは、DB が変わっていなくても�
   await waitBeds("bed1,bed2,bed3");
   assert.deepEqual(page.errors, []);
 });
+
+test("戻ってきたとき: ニュースの読み直しと、戻ってきたことの知らせは、60 秒以上隠れていたときだけ", options, async () => {
+  await openStrip(2);
+  await page.run(`window.returnedCount = 0; document.addEventListener("app-returned", () => (window.returnedCount += 1))`);
+  const news = () => page.run('Number(localStorage.getItem("field_plan_local_reads_news") || 0)');
+  const first = await news();
+  await awayFor(30);
+  await settle();
+  assert.equal(await news(), first, "短く行き来しただけでは、ニュースを読まない");
+  assert.equal(await page.run("window.returnedCount"), 0);
+  await awayFor(61);
+  await page.waitFor(`Number(localStorage.getItem("field_plan_local_reads_news") || 0) === ${first + 1}`, "60 秒以上隠れていたら、ニュースを読み直す");
+  assert.equal(await page.run("window.returnedCount"), 1, "戻ってきたことを知らせる（アプリの更新の確かめは、これを受けて行う）");
+  assert.deepEqual(page.errors, []);
+});

@@ -73,6 +73,10 @@ if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("l
   });
   // 更新の確認は、画面が出てから行う。起動の読み込みと回線を取り合わないように
   document.addEventListener("app-ready", checkUpdate, { once: true });
+  // しばらく隠れていたあとに戻ってきたときも確かめる（app.js が、60 秒以上隠れていたときに知らせる）。
+  // 開いたままのタブ（PC で何日も開いておく、など）にも、新しい版を届ける。使っている途中なので、自動では読み込み直さず、
+  // 知らせと利用者のメニューで伝える。確かめは版の印（version.json）を 1 つ読むだけ（sw.js）
+  document.addEventListener("app-returned", checkUpdate);
   document.addEventListener("app-outdated", () => {
     outdated = true;
     fatal.textContent = "この DB を使うには、アプリの新しい版が要ります。新しい版を読み込んでいます。";

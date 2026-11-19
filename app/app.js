@@ -1742,6 +1742,9 @@ document.addEventListener("visibilitychange", () => {
   }
   if (hiddenAt !== null && Date.now() - hiddenAt >= RELOAD_AFTER_HIDDEN_MS) {
     reloadDue = true;
+    // しばらく隠れていたあとに戻ってきたことを、ほかの部品にも知らせる（ニュースの読み直し、アプリの更新の確かめ。
+    // news-view.js、boot.js）。どれも、戻ってきたときの通信は、この「60 秒以上隠れていた」ときだけにそろえる
+    document.dispatchEvent(new Event("app-returned"));
   }
   hiddenAt = null;
   reloadIfChanged();
