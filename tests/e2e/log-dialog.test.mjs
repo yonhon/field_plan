@@ -127,7 +127,8 @@ test("農薬名の後ろのアイコン: 実績の一覧、検索の結果、選
     targets: [{ id: "t1", log_id: "log1", planting_id: "pl1", bed_id: "bed1", block_id: null, work_id: null, label: "", crop_name: "試験菜", area_m2: null, spray_l: null }],
   }];
   await page.loadApp(data);
-  // 実績の一覧は、圃場図の「最近の実績」のタブの中。初めは「今週やること」のタブが開いているので、タブを押して開く
+  // 実績の一覧は、「今日」のタブの「最近の実績」のタブの中。初めは「今週やること」のタブが開いているので、タブを押して開く
+  await page.openView("today");
   assert.equal(await page.run(`document.querySelector('[data-wtab].is-on').dataset.wtab`), "week");
   await page.click('[data-wtab="log"]');
   await page.waitFor(`!document.querySelector('[data-wpanel="log"]').hidden`, "最近の実績のタブ");
@@ -373,6 +374,7 @@ test("実績の保存・削除のあとは、記録を全件読み直さず、�
   await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
 
   // 開き直して削除しても、読み直さない
+  await page.openView("today");
   await page.click('.wt-tab[data-wtab="log"]');
   await page.click(`#logList li[data-log="${saved.id}"]`);
   await page.waitFor(`Boolean(document.querySelector('dialog.log-dialog[open] [data-act="delete"]'))`, "保存した実績を開く");

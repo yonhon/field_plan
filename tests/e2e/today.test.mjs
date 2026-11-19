@@ -50,14 +50,15 @@ test("タブ: 今日・圃場図・日程・日記・収支の 5 つ。台帳と
   assert.deepEqual(page.errors, []);
 });
 
-test("今日: 今週やることの欄を、今日のタブと圃場図の上の両方で出す", options, async () => {
+test("今日: 今週やることなどの欄は今日のタブだけに出し、圃場図の上には出さない", options, async () => {
   await page.loadApp(seed());
   await page.openView("today");
-  await page.waitFor(`location.hash === "#today" && document.querySelector(".work-tabs").parentElement.id === "todayWorkSlot"`, "欄が今日のタブへ移る");
+  await page.waitFor(`location.hash === "#today" && Boolean(document.querySelector("#todayView .work-tabs"))`, "今日のタブに欄");
   await page.click('.wt-tab[data-wtab="week"]');
   await page.waitFor(`Boolean(document.querySelector('#weekList [data-week="start"]'))`, "今週やることの行に「始める」");
   await page.openView("map");
-  await page.waitFor(`document.querySelector(".work-tabs").parentElement.classList.contains("map-overview")`, "欄が圃場図の上に戻る");
+  await page.waitFor(`location.hash === "#map"`, "圃場図");
+  assert.equal(await page.run(`document.querySelectorAll(".work-tabs").length === 1 && !document.querySelector("#appView .work-tabs")`), true);
   assert.deepEqual(page.errors, []);
 });
 

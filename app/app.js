@@ -4283,13 +4283,6 @@ function showView(view, { history: mode = "push" } = {}) {
   $("journalView").hidden = view !== "journal";
   // 右下の「＋ 入力する」は今日と圃場図だけ（日程の画面と作付の詳細では、頭の「＋ 作業を入力」を使う）
   $("logAddBtn").hidden = view !== "map" && view !== "today";
-  // 遅れている作業・今週やること・最近の実績・ニュースの欄は、圃場図の上と「今日」のタブで同じものを使う。開くタブへ移す
-  const workTabs = document.querySelector(".work-tabs");
-  if (view === "today" && workTabs.parentElement !== $("todayWorkSlot")) {
-    $("todayWorkSlot").append(workTabs);
-  } else if (view === "map" && workTabs.parentElement === $("todayWorkSlot")) {
-    document.querySelector(".map-overview").append(workTabs);
-  }
   // 区画・畝の欄は、日程の画面と作付の詳細の上に出す
   if (view === "schedule" || view === "planting") {
     placePicker(view);
@@ -4300,8 +4293,7 @@ function showView(view, { history: mode = "push" } = {}) {
     renderToday();
   } else if (view === "map") {
     render();
-    renderSchedule(); // 今週やること、警告
-    renderLogs();
+    renderSchedule(); // 警告（日程の無理）
     renderWeatherSettings();
   } else if (view === "schedule") {
     renderSchedule();
@@ -4578,7 +4570,7 @@ async function startApp(user = "local") {
   renderWeatherSettings();
   syncWeather();
   initNews({ state, setStatus });
-  // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホも PC も圃場図（今週やることが図の上にある）。
+  // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホも PC も圃場図。
   // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）。履歴の画面は、履歴の用意（initJournal）のあとで開く
   const route = routeFromHash();
   if (route && route.view !== "journal") {

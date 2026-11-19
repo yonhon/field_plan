@@ -170,7 +170,7 @@ test("今週やること: 完了した行の「計画に戻す」で、実績を
     inputs: [],
   }];
   await page.loadApp(data);
-  await page.click('.tab-btn[data-view="map"]');
+  await page.openView("today");
   await page.click('.wt-tab[data-wtab="week"]');
   await page.waitFor(`Boolean(document.querySelector('#weekList li.is-done [data-week="revert"]'))`, "完了した行に計画に戻すのボタン");
   await page.click('#weekList [data-week="revert"]');

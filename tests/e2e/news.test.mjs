@@ -47,6 +47,7 @@ const titles = () => page.run(`[...document.querySelectorAll("#newsList .news-ti
 test("ニュース: 未読の件数をタブに出し、確認で既読へ移す", options, async () => {
   await page.loadApp(seed());
   await page.waitFor(`document.getElementById("newsBadge").textContent === "⚠2" && !document.getElementById("newsBadge").hidden`, "未読の件数");
+  await page.openView("today");
   await page.click('[data-wtab="news"]');
   await page.waitFor(`!document.querySelector('[data-wpanel="news"]').hidden`, "ニュースの欄");
   assert.deepEqual(await titles(), ["新しい記事", "古い記事"], "載った日の新しい順");

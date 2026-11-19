@@ -175,7 +175,8 @@ async function touch(fingers) {
 }
 
 test("ふだんの図: ホイールだけでは拡大・縮小せず、説明を出す。Ctrl + ホイールと ＋・− では拡大・縮小する", options, async () => {
-  await page.viewport(1280, 600); // ページがスクロールできる高さ
+  // ページがスクロールできる高さ（図の欄は最低 360px。図の上に今週やることの欄があったころは 600px でスクロールできた）
+  await page.viewport(1280, 420);
   await openMap();
   // PC の幅では、圃場図の画面（#appView）がスクロールする
   const scrollTop = () => page.run(`scrollY + document.getElementById("appView").scrollTop`);

@@ -4939,9 +4939,10 @@ dialog.field-settings::backdrop {
   font-weight: 700;
 }
 
-/* PC: 欄の高さを決め（作業の行で 3〜4 行ぶん）、はみ出す分は欄の中で送る */
+/* PC: 欄の高さに上限を決め、はみ出す分は欄の中で送る（「今日」のタブの主な中身なので、圃場図の上にあったころより高くした） */
 .wt-body {
-  height: 150px;
+  min-height: 150px;
+  max-height: 420px;
   overflow-y: auto;
   padding: 2px 12px;
   border: 1px solid var(--line);
@@ -4991,6 +4992,7 @@ dialog.field-settings::backdrop {
 @media (max-width: 800px) {
   .wt-body {
     height: auto;
+    max-height: none;
     overflow: visible;
   }
 
@@ -5200,13 +5202,6 @@ dialog.has-undo-pad {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-/* 今週やることの欄は、圃場図の上より高くする（タブの主な中身なので） */
-.today-view .wt-body {
-  height: auto;
-  min-height: 150px;
-  max-height: 420px;
 }
 
 .week-running {
