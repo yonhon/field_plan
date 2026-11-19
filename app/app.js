@@ -38,6 +38,8 @@ import {
 import { MASTER_TABS, currentMasterTab, initCrops, renderCrops, setMasterTab } from "./crops-view.js";
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
 import { setPlace, setPlaceActions, setUserMenu } from "./user-menu.js";
+import { initToday, renderToday, resetToday } from "./today-view.js";
+import { initRevenue, renderRevenue } from "./revenue-view.js";
 import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.js";
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
 import { initToasts } from "./toast.js";
@@ -55,7 +57,7 @@ import { initNews } from "./news-view.js";
 import { beginWeatherDraft, cancelWeatherDraft, commitWeatherDraft, initWeather, renderWeatherSettings, syncWeather } from "./weather-view.js";
 import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
-import { currentBlockId, ganttTakesKey, initSchedule, openInSchedule, openProcessPlan, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash } from "./schedule-view.js";
+import { anyTypeLabel, currentBlockId, ganttTakesKey, initSchedule, openInSchedule, openProcessPlan, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash } from "./schedule-view.js";
 import { bindOperation, createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
@@ -1267,6 +1269,7 @@ const currentData = () => ({
   crops: state.crops,
   fertilizers: state.fertilizers,
   logs: state.logs,
+  sessions: state.sessions,
   tables: Object.fromEntries(PLAN_TABLES.map((table) => [table, state[table]])),
 });
 
@@ -1279,6 +1282,7 @@ async function fetchCurrent(since = null) {
     return null;
   }
   const { fields, plans, workTypes: allWorkTypes, crops, fertilizers, logs, mark } = loaded;
+  const sessions = loaded.sessions || [];
   const field = fields.find((item) => item.id === state.field.id);
   if (field) {
     field.outline = outlineParts(field.outline);
@@ -1287,7 +1291,7 @@ async function fetchCurrent(since = null) {
   const tables = loaded.planId === state.plan.id ? loaded.tables : Object.fromEntries(PLAN_TABLES.map((table) => [table, []]));
   // 端末に取っておく分（DB から読んだそのままの中身）。画面に入れると中身が書き換わるので、いま写しを取る（field-cache.js）
   const copy = structuredClone(loaded);
-  return { fields, plans, allWorkTypes, crops, fertilizers, logs, tables, mark, keep: () => writeFieldCache({ user: cacheUser, version: APP_VERSION, loaded: copy }) };
+  return { fields, plans, allWorkTypes, crops, fertilizers, logs, sessions, tables, mark, keep: () => writeFieldCache({ user: cacheUser, version: APP_VERSION, loaded: copy }) };
 }
 
 // 読み直した内容を入れる。開いていた圃場かプランが DB にないとき（ほかの端末で消した）は、起動からやり直す
@@ -1415,6 +1419,10 @@ async function applyUndo({ changes = [], logs = [] }) {
       }
     } else if (table === "backdrops") {
       backdropChanged = true;
+    } else if (table === "work_sessions") {
+      // 作業時間の計測。開いている圃場の分と、ほかの圃場で計測中の分を持つ（load_field の sessions と同じ）
+      const keep = row && (row.field_id === state.field.id || !row.stopped_at);
+      state.sessions = put(state.sessions || [], "id", id, keep ? row : null).sort((a, b) => a.started_at.localeCompare(b.started_at));
     }
   }
   if (backdropChanged) {
@@ -1519,6 +1527,9 @@ function showUndone(targets) {
     if (table === "plans") {
       return [`dialog.field-plans .fp-plan[data-plan="${key}"]`];
     }
+    if (table === "work_sessions") {
+      return [`[data-session="${key}"]`];
+    }
     return [];
   });
   if (!selectors.length) {
@@ -1552,6 +1563,8 @@ function refreshViews() {
   renderJournal();
   renderLogs();
   renderPlantingDetail();
+  renderToday();
+  renderRevenue();
 }
 
 // 「元に戻す」が途中で失敗したあとに呼ぶ。画面は戻したあとの内容、DB は途中までなので、DB から読み直して画面を DB にそろえる。
@@ -2653,15 +2666,16 @@ async function fetchFieldData(fieldId) {
 // store.loadField の返事から、圃場の中身（loadFieldData が使う形）を作る。下絵の画像の URL は、ここで発行する（ふだんは覚えた URL を使う）
 async function fieldDataOf(loaded) {
   const { plans, tables, backdrop, logs } = loaded;
+  const sessions = loaded.sessions || [];
   const plan = plans.find((item) => item.id === loaded.planId) || null;
   const backdropUrl = backdrop ? await state.store.imageUrl(backdrop.storage_path) : "";
-  return { plans, plan, tables, backdrop, backdropUrl, logs };
+  return { plans, plan, tables, backdrop, backdropUrl, logs, sessions };
 }
 
 // 圃場を読み、中身とプランを一度に入れ替える。開いたプランを返す。
 // pending は、先に読み始めておいた fetchFieldData（startApp が、圃場の一覧と並べて読む）
 async function loadFieldData(field, pending = fetchFieldData(field.id)) {
-  let { plans, plan, tables, backdrop, backdropUrl, logs } = await pending;
+  let { plans, plan, tables, backdrop, backdropUrl, logs, sessions } = await pending;
   if (!plan) {
     plan = await state.store.createPlan({ field_id: field.id, name: "プラン1" });
     plans = [plan];
@@ -2670,7 +2684,8 @@ async function loadFieldData(field, pending = fetchFieldData(field.id)) {
   // 外形は多角形の並びで持つ。1 つしか持てなかったころの形も、ここで並びに直す
   field.outline = outlineParts(field.outline);
   // 表示日は、前にその圃場で見ていた日。覚えていなければ今日
-  Object.assign(state, { field, plans, backdrop, backdropUrl, logs, viewDate: savedViewDate(field.id), alignment: null });
+  Object.assign(state, { field, plans, backdrop, backdropUrl, logs, sessions, viewDate: savedViewDate(field.id), alignment: null });
+  resetToday();
   setPlanData(plan, tables);
   if (backdrop) {
     measureBackdrop(backdrop, backdropUrl);
@@ -4198,7 +4213,7 @@ $("fieldSettings").addEventListener("click", (event) => {
 // 日程の画面は、開いている区画を付けて #schedule/block/区画の ID、全体なら #schedule/all にする。
 // 前にあった区画の詳細（#detail/block/区画の ID）は、日程の画面でその区画を開く
 // 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）
-const VIEW_NAMES = ["map", "schedule", "master", "diary", "journal"];
+const VIEW_NAMES = ["today", "map", "schedule", "master", "diary", "revenue", "journal"];
 
 function routeFromHash(text = location.hash) {
   const hash = decodeURIComponent(text.slice(1));
@@ -4258,19 +4273,32 @@ function showView(view, { history: mode = "push" } = {}) {
   document.querySelectorAll(".tab-btn").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.view === tab);
   });
+  $("todayView").hidden = view !== "today";
   $("appView").hidden = view !== "map";
   $("scheduleView").hidden = view !== "schedule";
   $("plantingView").hidden = view !== "planting";
   $("masterView").hidden = view !== "master";
   $("diaryView").hidden = view !== "diary";
+  $("revenueView").hidden = view !== "revenue";
   $("journalView").hidden = view !== "journal";
-  // 右下の「＋ 入力する」は圃場図だけ（日程の画面と作付の詳細では、頭の「＋ 作業を入力」を使う）
-  $("logAddBtn").hidden = view !== "map";
+  // 右下の「＋ 入力する」は今日と圃場図だけ（日程の画面と作付の詳細では、頭の「＋ 作業を入力」を使う）
+  $("logAddBtn").hidden = view !== "map" && view !== "today";
+  // 遅れている作業・今週やること・最近の実績・ニュースの欄は、圃場図の上と「今日」のタブで同じものを使う。開くタブへ移す
+  const workTabs = document.querySelector(".work-tabs");
+  if (view === "today" && workTabs.parentElement !== $("todayWorkSlot")) {
+    $("todayWorkSlot").append(workTabs);
+  } else if (view === "map" && workTabs.parentElement === $("todayWorkSlot")) {
+    document.querySelector(".map-overview").append(workTabs);
+  }
   // 区画・畝の欄は、日程の画面と作付の詳細の上に出す
   if (view === "schedule" || view === "planting") {
     placePicker(view);
   }
-  if (view === "map") {
+  if (view === "today") {
+    renderSchedule(); // 今週やること
+    renderLogs();
+    renderToday();
+  } else if (view === "map") {
     render();
     renderSchedule(); // 今週やること、警告
     renderLogs();
@@ -4285,6 +4313,8 @@ function showView(view, { history: mode = "push" } = {}) {
     renderTypes();
   } else if (view === "diary") {
     renderDiary();
+  } else if (view === "revenue") {
+    renderRevenue();
   } else {
     renderJournal();
   }
@@ -4472,6 +4502,8 @@ async function startApp(user = "local") {
   setPlaceActions({
     choose: afterMapEditing(openFieldPlans),
     settings: afterMapEditing(openFieldSettings),
+    master: () => showView("master"),
+    journal: () => showView("journal"),
     undo: undoStep,
     redo: redoStep,
     undoPad: showUndoPad,
@@ -4510,13 +4542,29 @@ async function startApp(user = "local") {
       showView("planting");
     },
   });
-  // 記録や取りやめが変わったら、日程と作付の詳細を描き直す
+  // 記録や取りやめ、作業時間の計測が変わったら、日程と作付の詳細と収支の一覧を描き直す
   const refreshRecords = () => {
     renderSchedule();
     renderPlantingDetail();
     refreshDiaryWorks();
+    renderRevenue();
   };
-  initLogs({ state, activePlanData, setStatus, onLogsChanged: refreshRecords, selectedTarget: mapSelectionPreset });
+  initLogs({ state, activePlanData, setStatus, onLogsChanged: () => (refreshRecords(), renderToday()), selectedTarget: mapSelectionPreset });
+  initToday({
+    state,
+    setStatus,
+    refresh: refreshRecords,
+    typeLabel: anyTypeLabel,
+    fieldName: (id) => state.fields.find((field) => field.id === id)?.name || "ほかの圃場",
+  });
+  initRevenue({
+    state,
+    typeLabel: anyTypeLabel,
+    openDetail: (kind, id) => {
+      openPlantingDetail(kind, id);
+      showView("planting");
+    },
+  });
   initProcessEditor({ state, setStatus, refresh: refreshRecords, currentBlockId });
   initPlantingView({
     state,

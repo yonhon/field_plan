@@ -113,7 +113,7 @@ test("再読み込み: 品目の画面で読み込み直しても、品目と肥
     fertilizers: [{ id: "fe1", name: "試験の肥料", n_pct: 10, p_pct: 10, k_pct: 10 }],
   };
   await page.loadApp(data);
-  await page.click('.tab-btn[data-view="master"]');
+  await page.openView("master");
   const rows = () => page.run(`[...document.querySelectorAll("#cropTable tbody tr, #fertilizerTable tbody tr")].map((row) => row.dataset.id)`);
   assert.deepEqual(await rows(), ["c1", "fe1"]);
   await page.run("location.reload()");

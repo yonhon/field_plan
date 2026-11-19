@@ -17,7 +17,10 @@ const args = process.argv.slice(2);
 const record = args.includes("--record");
 const scales = args.includes("--scale") ? [args[args.indexOf("--scale") + 1]] : ["now", "1y"];
 const REPEAT = 7; // それぞれ何回測って中央値を取るか
-const VIEWS = ["schedule", "master", "diary", "journal"]; // 圃場図との行き来を測る画面
+// 圃場図との行き来を測る画面。今日と収支は、記録の表の列にはなく、結果の JSON にだけ出す
+const VIEWS = ["schedule", "master", "diary", "journal", "today", "revenue"];
+// ロゴのメニューから開く画面。メニューを開くのは測らず、メニューの項目を押してから次の描画までを測る
+const MENU_VIEWS = ["master", "journal"];
 const median = (list) => [...list].sort((a, b) => a - b)[Math.floor(list.length / 2)];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -49,8 +52,12 @@ async function measure(page, scale) {
   const metrics = async () => Object.fromEntries((await page.send("Performance.getMetrics")).metrics.map((item) => [item.name, item.value]));
   const switchTo = (view) =>
     page.run(`(async () => {
+      const menu = ${JSON.stringify(MENU_VIEWS)}.includes("${view}");
+      if (menu) {
+        document.getElementById("brandMenu").click();
+      }
       const t = performance.now();
-      document.querySelector('.tab-btn[data-view="${view}"]').click();
+      document.querySelector(menu ? '#userMenu [data-action="${view}"]' : '.tab-btn[data-view="${view}"]').click();
       await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
       return performance.now() - t;
     })()`);

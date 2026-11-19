@@ -44,7 +44,7 @@ const clearStatus = () => page.run(`document.getElementById("saveStatus").textCo
 
 test("品目の表: 値を変えて Tab を押すと、保存して作り直したあとも、右隣の欄に入っている", options, async () => {
   await page.loadApp(seed());
-  await page.click('.tab-btn[data-view="master"]');
+  await page.openView("master");
   // 2 行目の品目の名前を変えて、Tab で品種の欄へ
   await page.run(`document.querySelector('#cropTable tr[data-id="c2"] [data-field="name"]').select()`);
   await clearStatus();
@@ -80,9 +80,10 @@ const openOn = (tab) => page.waitFor(`location.hash === "#master/${tab}" && docu
 
 test("台帳: サブタブごとに URL を持ち、戻るで前のサブタブに戻る。最後に開いたサブタブを、次に台帳を開いたときと開き直したときに開く", options, async () => {
   await page.loadApp(seed());
-  await page.click('.tab-btn[data-view="master"]');
+  await page.openView("master");
   await openOn("crops");
-  assert.equal(await page.run(`document.querySelector(".tab-btn.is-active").textContent`), "台帳");
+  // 台帳はメニューから開く画面なので、上のタブはどれも選ばない
+  assert.equal(await page.run(`document.querySelector(".tab-btn.is-active") === null`), true);
   assert.deepEqual(await page.run(`[...document.querySelectorAll("[data-mastertab]")].map((tab) => tab.textContent)`), ["品目", "工程作業日数", "肥料"]);
 
   await page.click('[data-mastertab="fertilizers"]');
@@ -96,12 +97,12 @@ test("台帳: サブタブごとに URL を持ち、戻るで前のサブタブ�
 
   // ほかのタブに移ってから戻ると、最後に開いたサブタブ
   await page.click('.tab-btn[data-view="map"]');
-  await page.click('.tab-btn[data-view="master"]');
+  await page.openView("master");
   await openOn("fertilizers");
   // 開き直したとき（URL がないとき）も
   await page.run(`location.hash = ""; location.reload()`);
   await page.waitFor(`document.getElementById("viewTabs")?.hidden === false`, "開き直す");
-  await page.click('.tab-btn[data-view="master"]');
+  await page.openView("master");
   await openOn("fertilizers");
   assert.deepEqual(page.errors, []);
 });
@@ -117,7 +118,7 @@ test("台帳: 品目の表を横に送っても、品目の名前の列は左に
   await page.viewport(390);
   try {
     await page.loadApp(seed());
-    await page.click('.tab-btn[data-view="master"]');
+    await page.openView("master");
     await openOn("crops");
     const left = () => page.run(`Math.round(document.querySelector('#cropTable tr[data-id="c1"] td').getBoundingClientRect().left - document.querySelector("#cropTable").closest(".table-scroll").getBoundingClientRect().left)`);
     // 入力欄の代わりに、名前の文字を出す（欄の幅で切れない）

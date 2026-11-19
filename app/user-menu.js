@@ -1,6 +1,6 @@
 // ヘッダーの左上（ロゴと、開いている圃場とプランの名前）と、そこを押すと開くメニュー。
 // メニューには、上から、開いている圃場とプラン、スマホだけの「元に戻す」「やり直す」と押しピン（小さな窓を出す）、
-// 「圃場とプランを選ぶ…」「圃場の設定…」（PC だけ）、
+// 「圃場とプランを選ぶ…」「圃場の設定…」（PC だけ）、「台帳…」「変更の履歴…」（上のタブから移した画面）、
 // ログインしているアカウントとログアウトを並べる。
 // 閉じるのは、メニューの外を押したとき、Esc を押したとき、ロゴと名前をもう一度押したとき。
 // ログインする前は開かない。DB を使わないモード（?local=1）では、ログアウトの代わりに、そのことを出す
@@ -14,17 +14,17 @@ const MIN_NAME_PX = 80; // 名前の欄の幅の下限。前に出していた�
 
 let account = null; // { email, local, logout }。null のあいだは開かない
 let place = null; // { field, plan, trial, activeName }。開いている圃場とプラン
-let actions = {}; // { choose, settings, undo, redo, undoPad, historyState }。メニューの項目を押したときに呼ぶ
+let actions = {}; // { choose, settings, master, journal, undo, redo, undoPad, historyState }。メニューの項目を押したときに呼ぶ
 
 // ログインが済んだら呼ぶ。logout は、ログアウトを押したときに呼ぶ関数
 export function setUserMenu({ email = "", local = false, logout = null }) {
   account = { email, local, logout };
 }
 
-// 「圃場とプランを選ぶ…」「圃場の設定…」、スマホの「元に戻す」「やり直す」と押しピンを押したときに呼ぶ関数。
+// 「圃場とプランを選ぶ…」「圃場の設定…」「台帳…」「変更の履歴…」、スマホの「元に戻す」「やり直す」と押しピンを押したときに呼ぶ関数。
 // historyState は、いま元に戻せるか・やり直せるか（{ canUndo, canRedo }）を返す
-export function setPlaceActions({ choose, settings, undo = null, redo = null, undoPad = null, historyState = null }) {
-  actions = { choose, settings, undo, redo, undoPad, historyState };
+export function setPlaceActions({ choose, settings, master = null, journal = null, undo = null, redo = null, undoPad = null, historyState = null }) {
+  actions = { choose, settings, master, journal, undo, redo, undoPad, historyState };
 }
 
 // スマホの幅だけに出す、元に戻す・やり直すと押しピンの並び。押すと、メニューを閉じてから 1 回だけ戻す。
@@ -134,7 +134,11 @@ function open() {
       '<button type="button" class="user-menu-item" role="menuitem" data-action="choose">圃場とプランを選ぶ…</button>' +
       // 圃場の設定は PC だけ（下絵の調整と気象の設定。スマホの幅では出さない）
       (actions.settings ? '<button type="button" class="user-menu-item edit-only" role="menuitem" data-action="settings">圃場の設定…</button>' : "") +
-      '<hr class="user-menu-sep" />'
+      '<hr class="user-menu-sep" />' +
+      // 品目・工程作業日数・肥料の台帳と、変更の履歴（すべての圃場で共通）
+      (actions.master ? '<button type="button" class="user-menu-item" role="menuitem" data-action="master">台帳…</button>' : "") +
+      (actions.journal ? '<button type="button" class="user-menu-item" role="menuitem" data-action="journal">変更の履歴…</button>' : "") +
+      (actions.master || actions.journal ? '<hr class="user-menu-sep" />' : "")
     : "";
   draw($("userMenu"), placeHtml + versionHtml() + accountHtml);
   $("userMenu").hidden = false;

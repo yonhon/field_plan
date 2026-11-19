@@ -22,7 +22,7 @@ const $ = (id) => document.getElementById(id);
 const MAX_STEPS = 50;
 // 履歴に積む書き込み。DB の変更の記録の対象の表に書くもの
 const PLAN_WRITES = new Set(["createPlan", "copyPlan", "renamePlan", "deletePlan", "setActivePlan"]);
-const UNDOABLE_WRITES = new Set(["upsert", "remove", "saveField", "saveLog", "deleteLog", "saveWorkType", "saveBackdrop", "saveFieldWeather", ...PLAN_WRITES]);
+const UNDOABLE_WRITES = new Set(["upsert", "remove", "saveField", "saveLog", "deleteLog", "saveSession", "deleteSession", "saveWorkType", "saveBackdrop", "saveFieldWeather", ...PLAN_WRITES]);
 // 先に確かめてから消す行。区域・区画・品目・肥料は 1 件でも、畝・作付・作業・実績はふだんの 1 回ぶん
 // （畝 1 本、作付 1 つとその作業、記録 1 件）より多いとき。DB の関数に上限として渡す
 export const CONFIRM_FROM = { plans: 1, zones: 1, blocks: 1, crops: 1, fertilizers: 1, beds: 2, plantings: 2, works: 11, logs: 2 };
@@ -44,6 +44,7 @@ export const UNDO_APPLY = {
   work_logs: "logs",
   work_log_targets: "logs",
   work_log_inputs: "logs",
+  work_sessions: "sessions",
 };
 // 画面に当て方を決めていない表と、そこに書く操作。書く操作は、行ったあとに履歴を空にする（resetHistory）ので、戻すことはない。
 // 当てる行が返ったら、applyUndo は当てずに断り、DB から読み直す。いまはない

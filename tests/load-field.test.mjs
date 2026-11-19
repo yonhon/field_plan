@@ -23,6 +23,7 @@ const LOADERS = {
   "store.loadPlans(field.id)": ["plans"],
   "store.list(table, plan.id)": ["zones", "blocks", "beds", "plantings", "works"],
   "store.loadLogs(field.id)": ["work_logs", "work_log_targets", "work_log_inputs"],
+  "store.loadSessions(field.id)": ["work_sessions"],
   "store.loadBackdrop(field.id)": ["backdrops"],
 };
 

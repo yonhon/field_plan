@@ -69,9 +69,10 @@ const AUDITED = {
   fertilizers: { key: "id" },
   workTypes: { key: "code" },
   workLogs: { key: "id" },
+  workSessions: { key: "id" },
 };
 // 変更の記録の表の名前を、DB の表の名前（undo_op が返す名前）に直す。作業の記録は、記録・対象・資材をまとめて logs
-export const AUDIT_NAMES = { workTypes: "work_types", workLogs: "logs" };
+export const AUDIT_NAMES = { workTypes: "work_types", workLogs: "logs", workSessions: "work_sessions" };
 for (const table of Object.keys(AUDITED)) {
   AUDIT_NAMES[table] = AUDIT_NAMES[table] || table;
 }
@@ -106,7 +107,7 @@ const STRICT_TABLES = {
 // 起動、戻ってきたときの読み直し、圃場の切り替えで読む中身を、表ごとの読み込みを組み合わせて返す。
 // DB の関数 field.load_field（sql/field.sql）と同じ形を返す。?local=1 の店と、DB の関数がないときに使う。
 // 読む表、読む行の絞り方、並び順を変えるときは、load_field と両方を直す（tests/load-field.test.mjs が表の食い違いを確かめる）。
-// 返すのは { unchanged, mark, minVersion, fieldId, planId, fields, workTypes, crops, fertilizers, plans, tables, logs, backdrop }。
+// 返すのは { unchanged, mark, minVersion, fieldId, planId, fields, workTypes, crops, fertilizers, plans, tables, logs, sessions, backdrop }。
 // since が DB の変更の印（changeMark）と同じなら、{ unchanged: true, mark, minVersion } だけを返す
 export function composeLoadField(store) {
   return async ({ fieldId = null, planId = null, since = null } = {}) => {
@@ -126,12 +127,13 @@ export function composeLoadField(store) {
     const plans = field ? await store.loadPlans(field.id) : [];
     const plan = plans.find((item) => item.id === planId) || plans[0] || null;
     const names = Object.keys(PLAN_TABLES);
-    const [tables, logs, backdrop] = await Promise.all([
+    const [tables, logs, sessions, backdrop] = await Promise.all([
       plan ? Promise.all(names.map((table) => store.list(table, plan.id))).then((rows) => Object.fromEntries(names.map((table, index) => [table, rows[index]]))) : null,
       field ? store.loadLogs(field.id) : [],
+      field ? store.loadSessions(field.id) : [],
       field ? store.loadBackdrop(field.id) : null,
     ]);
-    return { unchanged: false, mark, minVersion, fieldId: field?.id ?? null, planId: plan?.id ?? null, fields, workTypes, crops, fertilizers, plans, tables, logs, backdrop };
+    return { unchanged: false, mark, minVersion, fieldId: field?.id ?? null, planId: plan?.id ?? null, fields, workTypes, crops, fertilizers, plans, tables, logs, sessions, backdrop };
   };
 }
 
@@ -341,6 +343,19 @@ export function createSupabaseStore(client, options) {
     },
     async deleteLog(id) {
       check(await client.from("work_logs").delete().eq("id", id));
+    },
+    // 作業時間の計測。圃場の分と、ほかの圃場で計測中の分を、始めた順に（load_field の sessions と同じ）
+    async loadSessions(fieldId) {
+      return allRows(() =>
+        client.from("work_sessions").select("*").or(`field_id.eq.${fieldId},stopped_at.is.null`).order("started_at").order("id")
+      );
+    },
+    // 計測を 1 件保存する（足す、止める、時刻を直す）。保存した行を返す
+    async saveSession(session) {
+      return check(await client.from("work_sessions").upsert(session).select().single());
+    },
+    async deleteSession(id) {
+      check(await client.from("work_sessions").delete().eq("id", id));
     },
     // 1 回の操作（DB の変更の記録の op_id）で変わった行を、操作の前に戻す（DB の関数 field.undo_op）。
     // 返すのは { status: "done", op_id, changes: [{ table, id, row }], logs: [{ id, row }] }、{ status: "empty" }、
@@ -553,6 +568,8 @@ export function createSupabaseStore(client, options) {
       plans: data.plans,
       tables: data.tables,
       logs: data.logs.map(logShape),
+      // 計測の表を足す前の DB の関数は、sessions を返さない
+      sessions: data.sessions || [],
       backdrop: data.backdrop,
     };
   };
@@ -599,7 +616,7 @@ export function fetchWithOperation(url, options = {}) {
 }
 
 const QUEUED_WRITES = [
-  "upsert", "remove", "saveField", "saveBackdrop", "saveLog", "deleteLog", "saveWorkType", "saveFieldWeather", "markNews",
+  "upsert", "remove", "saveField", "saveBackdrop", "saveLog", "deleteLog", "saveSession", "deleteSession", "saveWorkType", "saveFieldWeather", "markNews",
   "createField", "deleteField", "createPlan", "copyPlan", "renamePlan", "deletePlan", "setActivePlan",
   "diarySaveDay", "diaryAddPhoto", "undoOp",
 ];
@@ -941,6 +958,39 @@ function createLocalTables({ strict = false } = {}) {
     async deleteLog(id) {
       update((data) => {
         data.workLogs = (data.workLogs || []).filter((log) => log.id !== id);
+        // DB の外部キー（on delete set null）と同じく、つないでいた計測は残して、つながりだけを外す
+        for (const session of data.workSessions || []) {
+          if (session.log_id === id) {
+            session.log_id = null;
+          }
+        }
+      });
+    },
+    async loadSessions(fieldId) {
+      return (read().workSessions || [])
+        .filter((session) => session.field_id === fieldId || !session.stopped_at)
+        .sort((a, b) => a.started_at.localeCompare(b.started_at) || a.id.localeCompare(b.id));
+    },
+    async saveSession(session) {
+      let result;
+      update((data) => {
+        const id = session.id || crypto.randomUUID();
+        const old = (data.workSessions || []).find((item) => item.id === id);
+        const saved = {
+          kind: "work", work_type: null, work_ids: [], log_id: null, label: "", stopped_at: null, source: "measured",
+          created_at: new Date().toISOString(), ...old, ...session, id,
+        };
+        if (saved.stopped_at && saved.stopped_at < saved.started_at) {
+          throw Object.assign(new Error("止めた時刻が、始めた時刻より前です"), { code: "23514" });
+        }
+        data.workSessions = [...(data.workSessions || []).filter((item) => item.id !== id), saved];
+        result = structuredClone(saved);
+      });
+      return result;
+    },
+    async deleteSession(id) {
+      update((data) => {
+        data.workSessions = (data.workSessions || []).filter((session) => session.id !== id);
       });
     },
     // DB の field.undo_op と同じ戻し方と返し方を、このブラウザーの保存の、変更の記録（data.audit）で行う
@@ -1249,7 +1299,7 @@ function createLocalTables({ strict = false } = {}) {
 }
 
 // ローカルの保存のうち、DB で操作の記録（audit_log）の対象になる表に当たるもの（changeMark が見る）
-const AUDITED_LOCAL = ["fields", "backdrops", "plans", "zones", "blocks", "beds", "plantings", "works", "crops", "fertilizers", "workTypes", "workLogs"];
+const AUDITED_LOCAL = ["fields", "backdrops", "plans", "zones", "blocks", "beds", "plantings", "works", "crops", "fertilizers", "workTypes", "workLogs", "workSessions"];
 
 // 通しテストで、ローカルの保存の書き込みを遅らせたり、失敗させたりする（回線の遅さや、保存の失敗を確かめる）。
 // ブラウザーの保存の LOCAL_TEST_KEY に { "delay": ミリ秒, "fail": true } を入れる。書き込みのたびに読むので、起動のあとで切り替えられる。

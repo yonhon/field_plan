@@ -283,6 +283,29 @@ alter table field.work_log_inputs add column if not exists per_hole numeric;
 
 create index if not exists work_log_inputs_log_idx on field.work_log_inputs (log_id);
 
+-- 作業時間の計測。「始める」から「止める」（または次の作業の「始める」）までの 1 回で 1 行。
+-- 作業の記録と同じく、プランではなく圃場に付ける。止めても作業は終えたことにしない（終えたかは作業の記録で持つ）。
+-- kind: work（作業）、prep（準備・片付け）、move（移動）。prep と move は、どの作付にも付かない共通の時間。
+-- work_ids は、始めたときの計画の作業（今週やることの 1 行に、同じ日の同じ作業が何か所かまとまるので、複数）。
+-- 計画の作業が消えても、計測は label の名前で読める。log_id は、計画にない作業を、あとから記録につないだとき。
+-- stopped_at が空なら計測中。source: measured（押して測った）、edited（あとで時刻を直した、入れた）
+create table if not exists field.work_sessions (
+  id uuid primary key default gen_random_uuid(),
+  field_id uuid not null references field.fields (id) on delete cascade,
+  kind text not null default 'work' check (kind in ('work', 'prep', 'move')),
+  work_type text,
+  work_ids uuid[] not null default '{}',
+  log_id uuid references field.work_logs (id) on delete set null,
+  label text not null default '',
+  started_at timestamptz not null,
+  stopped_at timestamptz,
+  source text not null default 'measured' check (source in ('measured', 'edited')),
+  created_at timestamptz not null default now(),
+  constraint work_sessions_stop_after_start check (stopped_at is null or stopped_at >= started_at)
+);
+
+create index if not exists work_sessions_field_idx on field.work_sessions (field_id, started_at);
+
 -- 記録を 1 件、対象と資材ごと保存する。対象と資材は、渡したもので置き換える。
 -- 画面から呼ぶ。呼んだ利用者の権限で動くので、RLS がそのまま効く
 -- プランをコピーする。プランを作り、区域・区画・畝・作付・作業を、新しい ID を振って写す。作ったプランを返す。
@@ -778,7 +801,7 @@ declare
 begin
   foreach t in array array[
     'fields', 'backdrops', 'plans', 'zones', 'blocks', 'beds', 'plantings', 'works',
-    'crops', 'fertilizers', 'work_types', 'work_logs', 'work_log_targets', 'work_log_inputs'
+    'crops', 'fertilizers', 'work_types', 'work_logs', 'work_log_targets', 'work_log_inputs', 'work_sessions'
   ] loop
     execute format('drop trigger if exists write_audit_log on field.%I', t);
     execute format(
@@ -818,7 +841,7 @@ declare
   -- 親から子の順。fields.active_plan_id は plans を指すので、入れる順で断られた行は、あとでもう一度試す
   v_order constant text[] := array[
     'fields', 'backdrops', 'plans', 'work_types', 'fertilizers', 'crops', 'zones', 'blocks', 'beds', 'plantings', 'works',
-    'work_logs', 'work_log_targets', 'work_log_inputs'];
+    'work_logs', 'work_log_targets', 'work_log_inputs', 'work_sessions'];
   v_rows jsonb;      -- [{ t: 表, id: 行の ID, before: 操作の前の中身か null, after: 操作のあとの中身か null }]
   v_conflicts jsonb;
   v_headers jsonb;
@@ -1058,6 +1081,11 @@ begin
           coalesce((select json_agg(i) from field.work_log_inputs i where i.log_id = l.id), '[]'::json) as inputs
         from field.work_logs l where l.field_id = v_field
       ) x
+    ), '[]'),
+    -- 作業時間の計測。開く圃場の分と、ほかの圃場で計測中の分（1 人で作業するので、計測中はどの圃場でも 1 つだけ）
+    'sessions', coalesce((
+      select json_agg(t order by t.started_at, t.id) from field.work_sessions t
+      where t.field_id = v_field or t.stopped_at is null
     ), '[]')
   );
 end;
@@ -1136,7 +1164,7 @@ begin
   foreach t in array array[
     'fields', 'backdrops', 'plans', 'zones', 'blocks', 'work_types',
     'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'dev_notes',
-    'work_logs', 'work_log_targets', 'work_log_inputs', 'weather_daily', 'news'
+    'work_logs', 'work_log_targets', 'work_log_inputs', 'work_sessions', 'weather_daily', 'news'
   ] loop
     execute format('alter table field.%I enable row level security', t);
     execute format('drop policy if exists owner_all on field.%I', t);

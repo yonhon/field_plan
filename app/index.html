@@ -31,11 +31,12 @@
         <div id="userMenu" class="user-menu" role="menu" aria-label="利用者のメニュー" hidden></div>
       </div>
       <nav id="viewTabs" class="control-group" aria-label="画面の切り替え" hidden>
+        <!-- 台帳と変更の履歴は、ロゴのメニューから開く（user-menu.js） -->
+        <button class="tab-btn" data-view="today">今日</button>
         <button class="tab-btn is-active" data-view="map">圃場図<span id="mapBadge" class="tab-badge" hidden></span></button>
         <button class="tab-btn" data-view="schedule">日程</button>
-        <button class="tab-btn" data-view="master">台帳</button>
         <button class="tab-btn" data-view="diary">日記</button>
-        <button class="tab-btn" data-view="journal">履歴</button>
+        <button class="tab-btn" data-view="revenue">収支</button>
       </nav>
       <div class="header-right">
         <button id="undoBtn" class="text-btn edit-only icon-text-btn" data-icon="undo" title="元に戻す（Ctrl+Z）" hidden>元に戻す</button>
@@ -44,6 +45,9 @@
         <span id="saveStatus" hidden></span>
       </div>
     </header>
+
+    <!-- 計測中の作業（today-view.js）。計測中と休憩中だけ、どの画面でもヘッダーの下に出す -->
+    <div id="timerBar" class="timer-bar" role="status" hidden></div>
 
     <!-- お知らせ（app/toast.js）。ヘッダーの真下に重ねて出し、ヘッダーや画面の形を変えない -->
     <div class="toast-anchor">
@@ -442,6 +446,28 @@
 
     <!-- 圃場図の画面の右下に出す（showView が出し入れする） -->
     <button id="logAddBtn" class="fab" type="button" hidden>＋ 入力する</button>
+
+    <!-- 今日: 作業時間の計測（today-view.js）。準備・片付けと移動、計画にない作業を始めるボタン、
+         今週やること・遅れている作業の欄（圃場図の上の欄を、このタブを開いているあいだここへ移す。app.js の showView）、
+         その日の作業時間の一覧 -->
+    <main id="todayView" class="schedule today-view" hidden>
+      <section class="panel today-start">
+        <div id="todayStart" class="today-start-buttons" role="group" aria-label="作業を始める"></div>
+      </section>
+      <div id="todayWorkSlot" class="today-work-slot"></div>
+      <section id="todaySessions" class="panel today-sessions"></section>
+    </main>
+
+    <!-- 収支: 作付ごとの収支の一覧（revenue-view.js）。いまは作業時間だけ -->
+    <main id="revenueView" class="schedule" hidden>
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>作付ごとの作業時間</h2>
+          <p class="muted">「今日」のタブで測った時間を、作付と区画ごとに合計しています。何本かの畝をまとめて測った時間は、畝＋通路の面積の比で分けています。開いている圃場の分だけです。売上と経費は、これから足します。</p>
+        </div>
+        <div id="revenueBody"></div>
+      </section>
+    </main>
 
     <main id="plantingView" class="schedule" hidden>
       <div id="pickerSlotPlanting"></div>

@@ -337,10 +337,21 @@ async function launch() {
     }
   };
 
+  // 画面を開く。台帳と変更の履歴は、上のタブではなく、ロゴのメニューから開く
+  const openView = async (view) => {
+    if (view === "master" || view === "journal") {
+      await click("#brandMenu");
+      await click(`#userMenu [data-action="${view}"]`);
+    } else {
+      await click(`.tab-btn[data-view="${view}"]`);
+    }
+  };
+
   return {
     run,
     waitFor,
     click,
+    openView,
     clickMap,
     dragMap,
     viewport,

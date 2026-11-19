@@ -5133,3 +5133,226 @@ dialog.has-undo-pad {
   width: 24px;
   height: 24px;
 }
+
+/* ---- 作業時間の計測（today-view.js） ---- */
+
+/* 計測中の帯。どの画面でも、ヘッダーの下に出す */
+.timer-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #eef6f5;
+  font-size: 14px;
+}
+
+.timer-bar[hidden] {
+  display: none;
+}
+
+.timer-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: timer-blink 2s ease-in-out infinite;
+}
+
+@keyframes timer-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.timer-name {
+  font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.timer-name.is-paused {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.timer-time {
+  color: var(--muted);
+}
+
+.timer-time strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* 「今日」のタブ */
+.today-start-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 今週やることの欄は、圃場図の上より高くする（タブの主な中身なので） */
+.today-view .wt-body {
+  height: auto;
+  min-height: 150px;
+  max-height: 420px;
+}
+
+.week-running {
+  align-self: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #fdecea;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.today-sessions .panel-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.today-sessions h2 {
+  margin: 0;
+}
+
+.session-list {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-row {
+  display: grid;
+  grid-template-columns: 8em 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.session-row:first-child {
+  border-top: 0;
+}
+
+.session-row.is-common .session-name {
+  color: var(--muted);
+}
+
+.session-range,
+.session-minutes {
+  font-variant-numeric: tabular-nums;
+}
+
+.session-live {
+  margin-left: 4px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.session-minutes {
+  text-align: right;
+}
+
+.session-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 8px 0;
+}
+
+.session-totals strong {
+  margin-left: auto;
+}
+
+.session-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.session-form input,
+.session-form select {
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.session-times {
+  display: flex;
+  gap: 12px;
+}
+
+.session-dialog-name {
+  margin: 0;
+  font-weight: 700;
+}
+
+.today-type-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 800px) {
+  .session-row {
+    grid-template-columns: 5.2em 1fr auto auto;
+    gap: 6px;
+  }
+
+  .session-live {
+    display: block;
+    margin-left: 0;
+  }
+
+  /* 右下の「＋ 入力する」が、一覧の最後の行に重ならないように */
+  .today-view {
+    padding-bottom: 80px;
+  }
+
+  .session-form input,
+  .session-form select {
+    font-size: 16px; /* これより小さいと、iPhone で入力のたびに画面が拡大される */
+  }
+}
+
+/* 「収支」のタブ（revenue-view.js） */
+.revenue-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.revenue-table tr.is-link {
+  cursor: pointer;
+}
+
+.revenue-table tr.is-link:hover td {
+  background: #f1f6f6;
+}
+
+.revenue-table tfoot th {
+  text-align: left;
+  font-weight: 400;
+}

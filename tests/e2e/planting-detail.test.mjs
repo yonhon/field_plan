@@ -174,7 +174,7 @@ test("作付の詳細から別のタブに移って日程のタブに戻ると�
   const detailOf = (planting) => `location.hash === "#detail/planting/${planting}" && !document.getElementById("plantingView").hidden`;
 
   for (const view of ["map", "master"]) {
-    await page.click(`.tab-btn[data-view="${view}"]`);
+    await page.openView(view);
     await page.waitFor(`document.getElementById("plantingView").hidden`, `${view} に移る`);
     await page.click('.tab-btn[data-view="schedule"]');
     await page.waitFor(detailOf("pl2"), `${view} から戻ると、作付の詳細`);

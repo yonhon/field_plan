@@ -7,7 +7,7 @@
 const DB_NAME = "field_plan";
 const STORE = "cache";
 const KEY = "field";
-const FORMAT = 1; // 取っておく形の版。形を変えたら上げる（前の形の中身は使わない）
+const FORMAT = 2; // 取っておく形の版。形を変えたら上げる（前の形の中身は使わない）
 const OPEN_WAIT_MS = 1500; // IndexedDB が開かないまま止まることがあるので、これを過ぎたら使わない（起動を止めない）
 
 function open() {

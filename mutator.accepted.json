@@ -87,6 +87,10 @@
     "reason": "等価: created_at がないときの予備。DB の記録はいつも created_at を持つ",
     "where": "app/logs.js:652:117 \"\" -> \"Stryker was here!\""
   },
+  "271fn8ad2g0": {
+    "reason": "等価: workMinutes の重みの初めの関数が null を返しても undefined を返しても、Number.isFinite が false になり、均等に分ける",
+    "where": "app/work-time.js:73:54 null -> undefined"
+  },
   "28bhge8mhh3": {
     "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
     "where": "app/pesticide.js:277:42 [] -> [\"Stryker was here!\"]"
@@ -102,6 +106,10 @@
   "2fpckcenqru": {
     "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
     "where": "app/logs.js:655:39 [] -> [\"Stryker was here!\"]"
+  },
+  "3chgb8yt3k": {
+    "reason": "等価: startWrites で、止める時刻と始めた時刻が同じとき、< でも <= でも止める時刻は始めた時刻と同じ値になる",
+    "where": "app/work-time.js:93:112 at < session.started_at -> at <= session.started_at"
   },
   "3kw25zxwxo": {
     "reason": "等価: 選んだ希釈倍率は、選んだ品目の下限のいちばん大きいものなので、それを持つ品目は必ず見つかる。?. と予備の \"\" は使われない",

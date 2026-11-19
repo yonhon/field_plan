@@ -11,7 +11,8 @@
     "app/rac.js",
     "app/schedule.js",
     "app/upload.js",
-    "app/weather.js"
+    "app/weather.js",
+    "app/work-time.js"
   ],
   "reporters": ["text", "json", "html"],
   "reportDir": "mutation/report"

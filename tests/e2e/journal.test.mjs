@@ -72,7 +72,7 @@ const MORE = '#journalDays [data-act="older"]';
 
 async function openJournal() {
   await page.loadApp(seed());
-  await page.click('.tab-btn[data-view="journal"]');
+  await page.openView("journal");
   await page.waitFor(`Boolean(document.querySelector('#journalDays .journal-day'))`, "履歴の日が出る");
 }
 
@@ -120,10 +120,10 @@ test("圃場とプラン: 読んでいない古い記録しかないプランに
 test("履歴: 起動は履歴の読み込みを待たず、読んでいるあいだの変更も履歴に残る", options, async () => {
   // 履歴の読み込みを 1.5 秒遅らせる。画面は、その前に出て操作できる
   await page.loadApp(seed(), { field_plan_local_test: JSON.stringify({ readDelay: 1500 }) });
-  await page.click('.tab-btn[data-view="master"]');
+  await page.openView("master");
   await page.click("#addCropBtn");
   await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "品目を足す");
-  await page.click('.tab-btn[data-view="journal"]');
+  await page.openView("journal");
   assert.match(await page.run('document.getElementById("journalDays").textContent'), /読み込んでいます/);
   // 読み終えると、読んでいるあいだに足した記録と、読んだ記録の両方が出る
   await page.waitFor(`Boolean(document.getElementById("change-${DAYS}"))`, "読んだ記録が出る");

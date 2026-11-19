@@ -28,6 +28,7 @@ import { PAGE_PX, printPage } from "./print.js";
 import { initStrip, renderStrip } from "./strip-view.js";
 import { draw, noteScroll } from "./draw.js";
 import { escapeHtml } from "./html.js";
+import { runningIds, startWorks, stopIfRunning } from "./today-view.js";
 
 const $ = (id) => document.getElementById(id);
 // 工程表の寸法。1 日の幅は、表示期間が画面の幅に収まるように描くたびに決める（dayPx）
@@ -393,9 +394,10 @@ function weekLines(works) {
   return [...lines.values()];
 }
 
-// 今週やることと遅れている作業の 1 行。実際に使うプランなら「完了」と「修正」のボタンを付ける。
+// 今週やることと遅れている作業の 1 行。実際に使うプランなら「始める」「修正」「完了」のボタンを付ける。
+// 「始める」は作業時間の計測（today-view.js）。計測中の行は、「始める」の代わりに「計測中」と出す。
 // 完了した行は ✓ と実施日を付けて薄くし、「修正」でその記録を開く。「計画に戻す」で実績を消して未完了に戻す
-function weekItem({ work, works, places }, actuals, late) {
+function weekItem({ work, works, places }, actuals, late, running) {
   const today = localToday();
   const where = places.length > 4 ? `${places[0]} ほか ${places.length - 1} か所` : places.join("、");
   const ids = works.map((item) => item.id).join(",");
@@ -416,7 +418,10 @@ function weekItem({ work, works, places }, actuals, late) {
     : done
       ? `<button class="text-btn" data-week="edit-log" data-ids="${ids}">修正</button>` +
         `<button class="text-btn danger" data-week="revert" data-ids="${ids}" title="実績を削除して、未完了の計画に戻します">計画に戻す</button>`
-      : `<button class="chip-btn" data-week="edit" data-ids="${ids}" title="日付や内容を入れて、実績を入力します（初めは計画の日）">修正</button>` +
+      : (works.some((item) => running.has(item.id))
+          ? '<span class="week-running">計測中</span>'
+          : `<button class="chip-btn" data-week="start" data-ids="${ids}" data-label="${escapeHtml(`${workName(typeLabel(work.work_type), work.detail?.spec)} ${where}`)}" title="作業時間を測り始めます。測っている作業があれば、止めます">始める</button>`) +
+        `<button class="chip-btn" data-week="edit" data-ids="${ids}" title="日付や内容を入れて、実績を入力します（初めは計画の日）">修正</button>` +
         `<button class="primary-btn" data-week="done" data-ids="${ids}" title="計画どおりの日に行ったものとして、実績を入力します">完了</button>`;
   return (
     `<li class="${done ? "is-done" : ""}"><span class="week-date">${done ? "✓ " : ""}${formatRange(work)}</span>` +
@@ -434,16 +439,17 @@ function renderWeek() {
   const late = isActivePlan() ? lateWorks(live, actuals, today) : [];
   // 遅れている作業のタブ: あるときは、タブの名前に ⚠ と件数を付ける（見落とさないように）
   const lateCount = weekLines(late).length;
+  const running = runningIds();
   $("lateBadge").hidden = !lateCount;
   $("lateBadge").textContent = `⚠${lateCount}`;
   $("lateEmpty").hidden = Boolean(lateCount);
   draw(
     $("lateList"),
     weekLines(late)
-      .map((line) => weekItem(line, actuals, true))
+      .map((line) => weekItem(line, actuals, true, running))
       .join("")
   );
-  const items = weekLines(due.length ? due : upcoming).map((line) => weekItem(line, actuals, false));
+  const items = weekLines(due.length ? due : upcoming).map((line) => weekItem(line, actuals, false, running));
   $("weekNote").hidden = Boolean(due.length || !upcoming.length);
   draw($("weekList"), items.length ? items.join("") : '<li class="muted">予定はありません</li>');
 }
@@ -459,7 +465,13 @@ async function onWeekClick(event) {
   if (!works.length) {
     return;
   }
+  if (button.dataset.week === "start") {
+    await startWorks(works, button.dataset.label);
+    return;
+  }
   if (button.dataset.week === "done") {
+    // 完了にした作業を測っていれば、止める
+    await stopIfRunning(ids);
     // 防除と追肥は、農薬や肥料の量を入れないと実績にならないので、計画の中身を入れた実績の窓を開く
     if (["spray", "topdress"].includes(works[0].work_type)) {
       openLogEditor(null, { works: works.filter((work) => !currentActuals().get(work.id)?.end) });
