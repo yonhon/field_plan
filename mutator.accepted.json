@@ -1,0 +1,170 @@
+{
+  "10no2pztcs2": {
+    "reason": "等価: usageTable の並び順（ingredientOrder）と上限・条件の入れ物は、pesticideCounts が数えた成分の名前でしか読まない。空の名前や余分な名前、重なった名前が入っても、表には出ない。条件の文の予備 \"\" を変えても \"(\" を含まない",
+    "where": "app/logs.js:425:27 [] -> [\"Stryker was here!\"]"
+  },
+  "14fzo3e1unh": {
+    "reason": "等価: usageTable の並び順（ingredientOrder）と上限・条件の入れ物は、pesticideCounts が数えた成分の名前でしか読まない。空の名前や余分な名前、重なった名前が入っても、表には出ない。条件の文の予備 \"\" を変えても \"(\" を含まない",
+    "where": "app/logs.js:444:32 [] -> [\"Stryker was here!\"]"
+  },
+  "17j9wblipz": {
+    "reason": "等価: created_at がないときの予備。DB の記録はいつも created_at を持つ",
+    "where": "app/logs.js:652:76 \"\" -> \"Stryker was here!\""
+  },
+  "18pf693lnfj": {
+    "reason": "等価: 引数の既定値。呼ぶ所（fillChoices、previousChoice）は cropName と groupName を両方渡すので、既定値は使われない",
+    "where": "app/logs.js:633:71 \"\" -> \"Stryker was here!\""
+  },
+  "19nbtcrlem4": {
+    "reason": "等価: 文字がないときの予備 \"\" を変えても、使用量の形に合わないので null のまま",
+    "where": "app/logs.js:567:28 \"\" -> \"Stryker was here!\""
+  },
+  "1d0s72jmbf0": {
+    "reason": "等価: 使った量が 0 以下なら、基準の上限（0 以上）を超えることはなく、どちらでも指摘は出ない",
+    "where": "app/logs.js:617:54 used.value <= 0 -> false"
+  },
+  "1gvdqqvc7ub": {
+    "reason": "等価: 空白を除いたあとの文には改行がないので、\\(.* は $ を付けなくても末尾まで取る",
+    "where": "app/logs.js:571:14 /\\(.*$/ -> /\\(.*/"
+  },
+  "1i76u336ofo": {
+    "reason": "等価: 先頭以外に「原液として」がある書き方は、消しても消さなくても、前にほかの文字が残り、^ で始まる使用量の形に合わないので null になる",
+    "where": "app/logs.js:570:14 /^原液として/ -> /原液として/"
+  },
+  "1iuflrxfw7a": {
+    "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
+    "where": "app/logs.js:428:39 [] -> [\"Stryker was here!\"]"
+  },
+  "1kzz0pygx2d": {
+    "reason": "等価: Number(undefined) は NaN なので、続く !Number.isFinite で null を返す",
+    "where": "app/logs.js:555:26 amount === undefined -> false"
+  },
+  "1mnt2hget3g": {
+    "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
+    "where": "app/logs.js:371:53 [] -> [\"Stryker was here!\"]"
+  },
+  "1o5gavxw9up": {
+    "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
+    "where": "app/logs.js:634:34 [] -> [\"Stryker was here!\"]"
+  },
+  "1sj0uqure2f": {
+    "reason": "等価: 使った量が 0 以下なら、基準の上限（0 以上）を超えることはなく、どちらでも指摘は出ない",
+    "where": "app/logs.js:617:54 used.value <= 0 -> used.value < 0"
+  },
+  "1tvn8y8goa0": {
+    "reason": "等価: usageTable の並び順（ingredientOrder）と上限・条件の入れ物は、pesticideCounts が数えた成分の名前でしか読まない。空の名前や余分な名前、重なった名前が入っても、表には出ない。条件の文の予備 \"\" を変えても \"(\" を含まない",
+    "where": "app/logs.js:445:13 name -> true"
+  },
+  "1up2fpdrlxf": {
+    "reason": "等価: 使用基準の行（_uses）を読むのは、登録番号を選んだ農薬だけ（pick、ensureUses。unpick で消す）。農薬でないものや登録番号のないものが _uses を持つことはない",
+    "where": "app/pesticide.js:466:47 input.kind === \"pesticide\" && input.reg_no -> true"
+  },
+  "1xx9lx6bnso": {
+    "reason": "等価: pesticideCounts が数えた登録番号は、同じ作付・同じ条件（農薬で登録番号がある）の繰り返しで、必ず productRows にも入る。?. と予備の [] は使われない",
+    "where": "app/logs.js:470:32 ?. -> ."
+  },
+  "1z2ygeyz3mv": {
+    "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
+    "where": "app/logs.js:376:39 [] -> [\"Stryker was here!\"]"
+  },
+  "1z4wuwv19no": {
+    "reason": "等価: usageTable の並び順（ingredientOrder）と上限・条件の入れ物は、pesticideCounts が数えた成分の名前でしか読まない。空の名前や余分な名前、重なった名前が入っても、表には出ない。条件の文の予備 \"\" を変えても \"(\" を含まない",
+    "where": "app/logs.js:450:44 \"\" -> \"Stryker was here!\""
+  },
+  "21x3649b7bn": {
+    "reason": "等価: pesticideCounts が数えた登録番号は、同じ作付・同じ条件（農薬で登録番号がある）の繰り返しで、必ず productRows にも入る。?. と予備の [] は使われない",
+    "where": "app/logs.js:471:40 ?. -> ."
+  },
+  "23j2jpe68ok": {
+    "reason": "等価: 剤型の予備 \"\" を変えても、「粒」「粉」を含まない",
+    "where": "app/pesticide.js:390:52 \"\" -> \"Stryker was here!\""
+  },
+  "23t27b858oh": {
+    "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
+    "where": "app/logs.js:426:60 [] -> [\"Stryker was here!\"]"
+  },
+  "26hf39c8xwc": {
+    "reason": "等価: created_at がないときの予備。DB の記録はいつも created_at を持つ",
+    "where": "app/logs.js:652:117 \"\" -> \"Stryker was here!\""
+  },
+  "28bhge8mhh3": {
+    "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
+    "where": "app/pesticide.js:277:42 [] -> [\"Stryker was here!\"]"
+  },
+  "28e5h9yfjc2": {
+    "reason": "等価: 使用基準の行（_uses）を読むのは、登録番号を選んだ農薬だけ（pick、ensureUses。unpick で消す）。農薬でないものや登録番号のないものが _uses を持つことはない",
+    "where": "app/pesticide.js:466:47 input.kind === \"pesticide\" && input.reg_no -> (input.kind === \"pesticide\" || input.reg_no)"
+  },
+  "2c9jayl1182": {
+    "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
+    "where": "app/logs.js:481:26 [] -> [\"Stryker was here!\"]"
+  },
+  "2fpckcenqru": {
+    "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
+    "where": "app/logs.js:655:39 [] -> [\"Stryker was here!\"]"
+  },
+  "3kw25zxwxo": {
+    "reason": "等価: 選んだ希釈倍率は、選んだ品目の下限のいちばん大きいものなので、それを持つ品目は必ず見つかる。?. と予備の \"\" は使われない",
+    "where": "app/pesticide.js:405:99 \"\" -> \"Stryker was here!\""
+  },
+  "4ov8igxwiq": {
+    "reason": "等価: 2 つの日付が同じときだけ違うが、どちらを残しても同じ日付になる",
+    "where": "app/logs.js:537:49 planting.harvestStart < soonest -> planting.harvestStart <= soonest"
+  },
+  "4p2w4vh5rf": {
+    "reason": "等価: 計算した値が、上限・下限から 1e-9 ずらした値とちょうど同じときだけ違う。浮動小数の計算でその値にはならない。上限・下限そのものはテストしている",
+    "where": "app/logs.js:622:7 used.value > range.max * (1 + 1e-9) -> used.value >= range.max * (1 + 1e-9)"
+  },
+  "6fbpbsta2c": {
+    "reason": "等価: 計算した値が、上限・下限から 1e-9 ずらした値とちょうど同じときだけ違う。浮動小数の計算でその値にはならない。上限・下限そのものはテストしている",
+    "where": "app/logs.js:514:45 per10a > row.liquid_max + 1e-9 -> per10a >= row.liquid_max + 1e-9"
+  },
+  "blfyp4s6s5": {
+    "reason": "等価: 同じ組み合わせを Map に入れ直しても、中身も並び順も変わらない",
+    "where": "app/pesticide.js:282:9 !seen.has(key) -> true"
+  },
+  "c3pe37t1ro": {
+    "reason": "等価: 引数の既定値。呼ぶ所（fillChoices、previousChoice）は cropName と groupName を両方渡すので、既定値は使われない",
+    "where": "app/logs.js:648:74 \"\" -> \"Stryker was here!\""
+  },
+  "dkrnre0m4g": {
+    "reason": "等価: pesticideCounts が数えた登録番号は、同じ作付・同じ条件（農薬で登録番号がある）の繰り返しで、必ず productRows にも入る。?. と予備の [] は使われない",
+    "where": "app/logs.js:471:57 [] -> [\"Stryker was here!\"]"
+  },
+  "iqne48dnfx": {
+    "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
+    "where": "app/logs.js:484:39 [] -> [\"Stryker was here!\"]"
+  },
+  "jfcdqrop2b": {
+    "reason": "等価: 使用基準の行（_uses）を読むのは、登録番号を選んだ農薬だけ（pick、ensureUses。unpick で消す）。農薬でないものや登録番号のないものが _uses を持つことはない",
+    "where": "app/pesticide.js:466:47 input.kind === \"pesticide\" -> true"
+  },
+  "jgd2by7o4z": {
+    "reason": "等価: 選んだ希釈倍率は、選んだ品目の下限のいちばん大きいものなので、それを持つ品目は必ず見つかる。?. と予備の \"\" は使われない",
+    "where": "app/pesticide.js:405:83 ?. -> ."
+  },
+  "l9rb4j6o9x": {
+    "reason": "等価: 2 つの日付が同じときだけ違うが、どちらを残しても同じ日付になる",
+    "where": "app/logs.js:488:23 day > first -> day >= first"
+  },
+  "np60fct22m": {
+    "reason": "等価: usageTable の並び順（ingredientOrder）と上限・条件の入れ物は、pesticideCounts が数えた成分の名前でしか読まない。空の名前や余分な名前、重なった名前が入っても、表には出ない。条件の文の予備 \"\" を変えても \"(\" を含まない",
+    "where": "app/logs.js:446:15 !ingredientOrder.includes(name) -> true"
+  },
+  "octxz62v2l": {
+    "reason": "等価: 計算した値が、上限・下限から 1e-9 ずらした値とちょうど同じときだけ違う。浮動小数の計算でその値にはならない。上限・下限そのものはテストしている",
+    "where": "app/logs.js:514:11 per10a < row.liquid_min - 1e-9 -> per10a <= row.liquid_min - 1e-9"
+  },
+  "qjgfo59rvh": {
+    "reason": "等価: pesticideCounts が数えた登録番号は、同じ作付・同じ条件（農薬で登録番号がある）の繰り返しで、必ず productRows にも入る。?. と予備の [] は使われない",
+    "where": "app/logs.js:469:33 ?. -> ."
+  },
+  "r8c2bjp4mc": {
+    "reason": "等価: liquid_min が undefined なら、10 a あたりの量と NaN を比べることになり、どちらの比べ方も false で、指摘は出ない",
+    "where": "app/logs.js:512:74 row.liquid_min !== undefined -> true"
+  },
+  "rg9pib17t5": {
+    "reason": "等価: 条件の文の予備 \"\" を変えても \"(\" を含まないので、条件の指摘は出ない",
+    "where": "app/logs.js:531:31 \"\" -> \"Stryker was here!\""
+  }
+}

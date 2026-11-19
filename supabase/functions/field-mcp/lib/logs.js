@@ -363,6 +363,7 @@ export function inputText(input) {
 //                       totals, dilution_min, dilution_max, liquid_min, liquid_max, preharvest_days, times_max, total_max }] }
 
 // 作付の農薬の使用回数。登録番号ごとと、有効成分ごとに数える。1 件の記録で 1 回（同じ記録に同じ成分が 2 剤あっても 1 回）
+// mutator-critical
 export function pesticideCounts(logs, plantingId, excludeLogId = null) {
   const products = new Map();
   const ingredients = new Map();
@@ -388,6 +389,7 @@ export function pesticideCounts(logs, plantingId, excludeLogId = null) {
 // 品目のまとまりで、この防除が何回目になるか。作付ごとのこれまでの回数のうち、いちばん多いものに 1 を足す。
 // 作付のないまとまり（作付のない区画）は 1 回目。ingredients は総使用回数に数える有効成分（①〜⑤の順。数えないものは空）で、
 // 返り値の ingredients も同じ位置に回数を入れる（数えない成分は null）。countsOf(作付の ID) は pesticideCounts の結果
+// mutator-critical
 export function sprayCounts({ regNo, ingredients = [], plantingIds, countsOf }) {
   const counts = plantingIds.map(countsOf);
   const next = (get) => Math.max(0, ...counts.map(get)) + 1;
@@ -399,6 +401,7 @@ export function sprayCounts({ regNo, ingredients = [], plantingIds, countsOf }) 
 
 // まとまりの面積に対する、使用基準の量。散布液量の基準があれば基準散布量（L）、なければ面積あたりの使用量（g か mL）。
 // 面積がない、どちらの基準もないときは null。kind は "liquid"（散布液量）か "usage"（面積あたりの使用量）
+// mutator-critical
 export function areaStandard(row, area) {
   if (!row || !area) {
     return null;
@@ -413,6 +416,7 @@ export function areaStandard(row, area) {
 // 作付の、有効成分ごとの使用回数と上限の表。上限は、その作付の品目の使用基準の写しのうち、いちばん新しい記録のもの。
 // 有効成分と本剤は、最初に使った順（記録の日の古い順。同じ日は記録の中の資材の順）に並べる。
 // 本剤には、総使用回数に数える有効成分（ingredients）を付ける。画面は、有効成分の行の下に、その成分を含む本剤を出す
+// mutator-critical
 export function usageTable(logs, plantingId, cropName) {
   const counts = pesticideCounts(logs, plantingId);
   const limits = new Map();
@@ -470,6 +474,7 @@ export function usageTable(logs, plantingId, cropName) {
 }
 
 // 最後の防除と使用時期（収穫の何日前まで）から、基準を満たす最初の収穫日。防除がなければ null
+// mutator-critical
 export function firstHarvestDay(logs, plantingId, cropName) {
   let first = null;
   for (const log of logs) {
@@ -493,6 +498,7 @@ export function firstHarvestDay(logs, plantingId, cropName) {
 // 作物名の当てはめが正しいかは判定しない（指摘が出ないことを、正しい印と受け取られないように）。
 // groups は品目のまとまりごとの { name, area, liters, row（選んだ作物名と使い方の基準。まだ選んでいなければ null）,
 // plantings: [{ id, harvestStart }] }。countsOf(作付の ID) はその作付のこれまでの使用回数（pesticideCounts の結果）
+// mutator-critical
 export function sprayWarnings({ date, dilution, regNo, ingredients = [], groups, countsOf }) {
   const warnings = [];
   for (const group of groups) {
@@ -543,6 +549,7 @@ export function sprayWarnings({ date, dilution, regNo, ingredients = [], groups,
 }
 
 // 製品の量を、g か mL にそろえる。そろえられない単位は null
+// mutator-critical
 export function toBaseAmount(amount, unit) {
   const value = Number(amount);
   if (amount === null || amount === undefined || amount === "" || !Number.isFinite(value)) {
@@ -555,6 +562,7 @@ export function toBaseAmount(amount, unit) {
 // 使用基準の希釈倍数・使用量の欄にある、面積あたりの使用量（粒剤など）。例: 「6kg/10a」「4~6kg/10a」「500mL/10a」
 // 「1~2g/m2」「原液として3リットル/10a」。かっこの補足（「(少量散布)」「(1~2g/株)」）は読まない。
 // 返り値は 1 ㎡ あたりの下限・上限（g か mL）。面積あたりでない基準（倍、g/株、穴当りなど）は null
+// mutator-critical
 export function parseUsage(text) {
   const t = String(text || "")
     .normalize("NFKC")
@@ -575,6 +583,7 @@ export function parseUsage(text) {
 
 // 品目のまとまりごとの面積と使用基準の行から、面積あたりの使用量の基準の合計（g か mL）。
 // どれかのまとまりが面積あたりの基準でないとき、単位がそろわないときは null
+// mutator-critical
 export function usageRange(groups) {
   let min = 0;
   let max = 0;
@@ -592,6 +601,7 @@ export function usageRange(groups) {
 }
 
 // 量を読みやすく。1000 g 以上は kg、1000 mL 以上は L
+// mutator-critical
 export function formatAmount(value, unit) {
   if (value >= 1000) {
     return `${Math.round(value / 100) / 10} ${unit === "g" ? "kg" : "L"}`;
@@ -600,6 +610,7 @@ export function formatAmount(value, unit) {
 }
 
 // 製品の量と、面積あたりの使用量の基準の合計を比べた指摘（超えるとき）。基準がなければ空
+// mutator-critical
 export function usageWarnings({ amount, unit, groups }) {
   const range = usageRange(groups);
   const used = toBaseAmount(amount, unit);
@@ -618,6 +629,7 @@ export function usageWarnings({ amount, unit, groups }) {
 // 品目で選んだ記録は品目の名前（crop_name）で、区画で選んだ記録はまとまりの名前（group）で探す。
 // 使い方を写しの一番上に持つ形（品目ごとに選ぶ前の記録）も読む。
 // 適用病害虫が空の登録（展着剤の「添加」など）は、空のまま選んだものとして読む
+// mutator-critical
 export function standardChoice(standard, { cropName = "", groupName = "" }) {
   const row = (standard?.rows || []).find((item) => (cropName ? item.crop_name === cropName : item.group === groupName));
   if (!row?.crop) {
@@ -632,6 +644,7 @@ export function standardChoice(standard, { cropName = "", groupName = "" }) {
 // 1. その品目（区画）に同じ農薬を使った、いちばん新しい記録の作物名と使い方
 // 2. なければ、その品目（区画）でいちばん新しく選んだ作物名（この農薬の作物名にあるときだけ。使い方は 1 つしかなければそれ）
 // rows はこの農薬の使用基準の行（{ crop, target, method }）。見つからなければ null
+// mutator-critical
 export function previousChoice(logs, { regNo, cropName = "", groupName = "", excludeLogId = null }, rows) {
   const keysOf = (crop) => [...new Set(rows.filter((row) => row.crop === crop).map((row) => `${row.target}|${row.method}`))];
   const sorted = logs
@@ -661,6 +674,7 @@ export function previousChoice(logs, { regNo, cropName = "", groupName = "", exc
 
 // 選んだ品目の使用基準の行から、初めの希釈倍率。下限（いちばん濃くしてよい倍率）のうち、いちばん大きいもの。
 // 薄くする分には基準を外れないので、どの組み合わせでも 1 つに決まる
+// mutator-critical
 export function defaultDilution(rows) {
   const lows = rows.filter(Boolean).map((row) => row.dilution_min).filter((value) => value > 0);
   return lows.length ? Math.max(...lows) : null;

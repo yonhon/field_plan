@@ -28,6 +28,7 @@ export function searchKey(text) {
 }
 
 // 有効成分ごとの行を、登録番号ごとの農薬にまとめる。ingredients は総使用回数に数える有効成分（①〜⑤の順）
+// mutator-critical
 export function groupProducts(rows) {
   const products = new Map();
   for (const row of [...rows].sort((a, b) => a.reg_no - b.reg_no || a.ord - b.ord)) {
@@ -270,6 +271,7 @@ export function cropsOf(input) {
 }
 
 // 作物名の行にある、使い方・適用病害虫の組み合わせ。適用病害虫が空の登録（展着剤の「添加」など）は、指定なしと書く
+// mutator-critical
 export function useKeys(input, crop) {
   const seen = new Map();
   for (const row of input._uses?.rows || []) {
@@ -286,6 +288,7 @@ export function useKeys(input, crop) {
 }
 
 // まとまりで選んだ作物名と使い方の、使用基準の行。まだ選んでいなければ null
+// mutator-critical
 export function rowFor(input, group) {
   const choice = input.choices?.[group.key];
   if (!choice?.crop || !choice.use_key || !input._uses) {
@@ -323,6 +326,7 @@ function syncMethod(input, groups) {
 }
 
 // 作物名と使い方を選び終えていないまとまり（保存の前に確かめる）。[{ input, group }]
+// mutator-critical
 export function missingChoices(inputs, groups) {
   return inputs
     .filter((input) => input.kind === "pesticide" && input.reg_no)
@@ -330,6 +334,7 @@ export function missingChoices(inputs, groups) {
 }
 
 // 記録に写す使用基準。登録番号、農薬名、有効成分はいつも写す。まとまりごとに、選んだ作物名と使い方と基準を写す
+// mutator-critical
 export function snapshot(input, groups) {
   if (!input.reg_no) {
     return input.standard || null;
@@ -373,6 +378,7 @@ export function snapshot(input, groups) {
 
 // 面積あたりの使用量で使う農薬（粒剤など）か。選んだ使用基準が面積あたりの使用量（「6kg/10a」など）で、
 // 希釈倍数がないもの。まだ選んでいなければ、剤型（粒剤、粉剤など）で決める。希釈倍率と散布液の量は入れない
+// mutator-critical
 export function areaDosed(input, groups) {
   if (input.kind !== "pesticide" || !input.reg_no) {
     return false;
@@ -385,12 +391,14 @@ export function areaDosed(input, groups) {
 }
 
 // 面積あたりの使用量の基準の合計（g か mL）。最初の、面積あたりの使用量の農薬で求める。求められなければ null
+// mutator-critical
 export function baselineUsage(inputs, groups) {
   const input = inputs.find((item) => areaDosed(item, groups));
   return input ? usageRange(groups.map((group) => ({ area: group.area, row: rowFor(input, group) }))) : null;
 }
 
 // 初めの希釈倍率。選んだ品目の使用基準の下限のうち、いちばん大きいもの。どの品目に合わせたかも返す
+// mutator-critical
 export function suggestedDilution(input, groups) {
   const rows = groups.map((group) => ({ group, row: rowFor(input, group) })).filter((item) => item.row);
   const value = defaultDilution(rows.map((item) => item.row));
@@ -453,6 +461,7 @@ export function pickerHtml(input, i, groups) {
 }
 
 // 品目のまとまりごとの使用基準と、基準散布量、使用回数
+// mutator-critical
 export function standardsHtml(inputs, groups, logs, excludeLogId) {
   const pesticides = inputs.filter((input) => input.kind === "pesticide" && input.reg_no && input._uses);
   if (!pesticides.length || !groups.length) {
@@ -496,6 +505,7 @@ export function standardsHtml(inputs, groups, logs, excludeLogId) {
 }
 
 // 基準散布量の合計（L）。最初の農薬の散布液量の基準で求める。求められなければ null
+// mutator-critical
 export function baselineLiters(inputs, groups) {
   const input = inputs.find((item) => item.kind === "pesticide" && item.reg_no && item._uses);
   if (!input) {
@@ -515,6 +525,7 @@ export function baselineLiters(inputs, groups) {
 }
 
 // 防除の指摘（4.6）。農薬ごとに、品目のまとまりで選んだ作物名の基準と照らす。HTML の文の一覧（農薬名にアイコンを付ける）
+// mutator-critical
 export function warnings({ inputs, groups, date, sprayOf, logs, excludeLogId, harvestStartOf }) {
   const out = [];
   for (const input of inputs) {

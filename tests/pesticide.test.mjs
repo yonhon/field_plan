@@ -464,3 +464,21 @@ test("使用基準の表示: まとまりごとに、選んだ基準、この防
   assert.equal(standardsHtml([liquid(BOTH_LIQUID, { _uses: null })], GROUPS, [], null), "");
   assert.equal(standardsHtml([liquid(BOTH_LIQUID)], [], [], null), "");
 });
+
+// 以下は、農薬の計算の関数（`// mutator-critical`）で、テストが気づかなかった書き換えを確かめる
+
+test("使用基準の表示: FAMIC の「-」の欄は出さない。製品をまだ読めていなければ、成分の回数は出さない", () => {
+  const dashed = liquid({ g1: BOTH_LIQUID.g1 }, { _uses: { rows: [{ ...LIQUID[0], liquid_text: "-", timing_text: "-" }] } });
+  assert.match(standardsHtml([dashed], GROUPS.slice(0, 1), [], null), /<span>テスト乳剤（レタス）: 1000~2000倍<\/span>/);
+  const unknown = liquid({ g1: BOTH_LIQUID.g1 }, { _product: null });
+  assert.match(standardsHtml([unknown], GROUPS.slice(0, 1), LOGS, null), /<span class="muted">本剤 4 回目（3回以内）<\/span>/);
+  // 1 つの記録に農薬が 2 つ。まとまりの中に、農薬ごとの基準を続けて出す
+  const both = standardsHtml([liquid({ g1: BOTH_LIQUID.g1 }), granule({ g1: BOTH_GRANULE.g1 })], GROUPS.slice(0, 1), [], null);
+  assert.match(both, /この面積の基準散布量 <b>10\.0〜30\.0 L<\/b><\/span><span>テスト粒剤（レタス）: 6kg\/10a<\/span>/);
+});
+
+test("防除の指摘: 製品をまだ読めていなければ、成分の条件は言わない。使い方の一覧は、使用基準を読む前でも空", () => {
+  const rows = [{ ...LIQUID[0], totals: ["3回以内(定植前)", "2回以内"] }];
+  assert.deepEqual(warnings(context([liquid({ g1: BOTH_LIQUID.g1 }, { _product: null, _uses: { rows }, dilution: 2000 })], { groups: GROUPS.slice(0, 1) })), []);
+  assert.deepEqual(useKeys({}, "レタス"), []);
+});

@@ -526,6 +526,111 @@ test("まとまりの面積の基準の量: 散布液量の基準があれば基
   assert.equal(areaStandard(null, 100), null);
 });
 
+// 以下は、農薬の計算の関数（`// mutator-critical`）で、テストが気づかなかった書き換えを確かめる
+
+test("農薬の使用回数の表: 写しにその作物の行がない記録、上限の欄がない古い写し、行も成分もない写しも読む", () => {
+  const input = (standard, extra = {}) => ({ kind: "pesticide", reg_no: "100", name: "剤100", standard, ...extra });
+  // 写しに、レタスの行がない（ほかの品目で選んだ）。上限はわからない
+  const other = usageTable([spray("s1", "2026-03-01", ["p1"], [input({ product: "剤100", ingredients: ["成分A", "成分B"], rows: [{ ...useRow, crop_name: "キャベツ" }] })])], "p1", "レタス");
+  assert.deepEqual(other.products, [{ reg_no: "100", count: 1, name: "剤100", max: null, ingredients: ["成分A", "成分B"] }]);
+  assert.deepEqual(other.ingredients, [
+    { name: "成分A", count: 1, max: null, condition: "" },
+    { name: "成分B", count: 1, max: null, condition: "" },
+  ]);
+  // 有効成分ごとの上限と条件の欄がない、古い写し
+  const old = usageTable([spray("s1", "2026-03-01", ["p1"], [input({ product: "剤100", ingredients: ["成分A"], rows: [{ crop_name: "レタス", crop: "レタス", times_max: 2 }] })])], "p1", "レタス");
+  assert.deepEqual(old.products[0].max, 2);
+  assert.deepEqual(old.ingredients, [{ name: "成分A", count: 1, max: null, condition: "" }]);
+  // 行のない写し、有効成分のない写し
+  assert.equal(usageTable([spray("s1", "2026-03-01", ["p1"], [input({ product: "剤100", ingredients: ["成分A"] })])], "p1", "レタス").products[0].max, null);
+  const bare = usageTable([spray("s1", "2026-03-01", ["p1"], [input({ product: "剤100", rows: [useRow] })])], "p1", "レタス");
+  assert.deepEqual(bare.products, [{ reg_no: "100", count: 1, name: "剤100", max: 3, ingredients: [] }]);
+  assert.deepEqual(bare.ingredients, []);
+  assert.deepEqual([...pesticideCounts([spray("s1", "2026-03-01", ["p1"], [input({ product: "剤100", rows: [useRow] })])], "p1").ingredients.entries()], []);
+});
+
+test("農薬の使用回数の表: 上限は、いちばん新しい写しの、その作物の行。肥料と、登録番号のない農薬の写しは使わない", () => {
+  const input = (rows, extra = {}) => ({ kind: "pesticide", reg_no: "100", name: "剤100", standard: { product: "剤100", ingredients: ["成分A"], rows }, ...extra });
+  const logs = [
+    spray("s1", "2026-03-01", ["p1"], [input([useRow])]),
+    // 新しい写しには、キャベツの行が先にある
+    spray("s2", "2026-03-05", ["p1"], [input([{ ...useRow, crop_name: "キャベツ", times_max: 1, total_max: [1] }, { ...useRow, times_max: 5, total_max: [4] }])]),
+  ];
+  const table = usageTable(logs, "p1", "レタス");
+  assert.equal(table.products[0].max, 5);
+  assert.equal(table.ingredients[0].max, 4);
+  // さらに新しい記録の、肥料と、登録番号のない農薬（名前を手で入れた）の写しは、上限に使わない
+  const noisy = [
+    ...logs,
+    spray("s3", "2026-03-09", ["p1"], [
+      input([{ ...useRow, times_max: 9, total_max: [9] }], { kind: "fertilizer", name: "肥料" }),
+      input([{ ...useRow, times_max: 9, total_max: [9] }], { reg_no: null, name: "手で入れた農薬" }),
+    ]),
+  ];
+  const kept = usageTable(noisy, "p1", "レタス");
+  assert.deepEqual(kept.products.map((item) => [item.reg_no, item.count, item.max]), [["100", 2, 5]]);
+  assert.deepEqual(kept.ingredients.map((item) => [item.name, item.count, item.max]), [["成分A", 2, 4]]);
+});
+
+test("収穫してよい最初の日: 写しのない記録、行のない写し、その作物の行のない写しは使わない", () => {
+  const logs = [
+    spray("a", "2026-03-10", ["p1"], [{ kind: "pesticide", reg_no: "700", name: "手で入れた農薬" }]),
+    spray("b", "2026-03-11", ["p1"], [{ kind: "pesticide", reg_no: "701", standard: { product: "剤701" } }]),
+    spray("c", "2026-03-12", ["p1"], [{ kind: "pesticide", reg_no: "702", standard: { rows: [{ ...useRow, crop_name: "キャベツ" }] } }]),
+  ];
+  assert.equal(firstHarvestDay(logs, "p1", "レタス"), null);
+  assert.equal(firstHarvestDay([...logs, spray("d", "2026-03-01", ["p1"], [pesticide(100, ["成分A", ""])])], "p1", "レタス"), "2026-03-08");
+});
+
+test("防除の指摘: 収穫のいちばん早い作付は、並びの途中にあっても選ぶ。数えない成分と、成分を渡さないときは、条件を言わない", () => {
+  const none = { products: new Map(), ingredients: new Map() };
+  const base = { date: "2026-03-20", dilution: 2000, regNo: 100, countsOf: () => none };
+  const group = (extra) => ({ name: "レタス", area: 100, liters: 0, row: useRow, plantings: [{ id: "p1", harvestStart: null }], ...extra });
+  const plantings = [
+    { id: "p1", harvestStart: "2026-03-24" },
+    { id: "p2", harvestStart: "2026-04-10" },
+    { id: "p3", harvestStart: null },
+  ];
+  assert.ok(sprayWarnings({ ...base, ingredients: ["成分A"], groups: [group({ plantings })] }).includes("レタス: 収穫の開始（03/24）まで 4 日で、使用時期（収穫 7 日前まで）を満たしません"));
+  // 1 番目の成分は数えない（空）。その位置の条件は言わない
+  const row = { ...useRow, totals: ["1回(定植前)", "2回以内(定植後は1回以内)"] };
+  assert.deepEqual(sprayWarnings({ ...base, ingredients: ["", "成分B"], groups: [group({ row })] }), [
+    "レタス: 成分B の総使用回数には条件があります。確かめてください: 2回以内(定植後は1回以内)",
+  ]);
+  assert.deepEqual(sprayWarnings({ ...base, groups: [group({ row })] }), []);
+});
+
+test("面積あたりの使用量の読み方: 2 桁の上限、空白、小数の面積。まとまりがなければ基準はない", () => {
+  assert.deepEqual(parseUsage("4~12kg/10a"), { min: 4, max: 12, unit: "g" });
+  assert.deepEqual(parseUsage("6 kg/10a"), { min: 6, max: 6, unit: "g" });
+  assert.deepEqual(parseUsage("5g/1.25m2"), { min: 4, max: 4, unit: "g" });
+  assert.equal(usageRange([]), null);
+});
+
+test("前回の選択: 区画で選んだ記録、同じ日の記録の入れた順、肥料の写し、登録から消えた使い方", () => {
+  const rows = [
+    { crop: "野菜類", target: "一年生雑草", method: "全面土壌散布" },
+    { crop: "レタス", target: "アブラムシ類", method: "散布" },
+    { crop: "非結球レタス", target: "アブラムシ類", method: "散布" },
+    { crop: "非結球レタス", target: "ヨトウムシ", method: "散布" },
+  ];
+  // 区画で選んだ記録は、区画の名前で探す
+  const block = { id: "k", date: "2026-10-01", inputs: [{ kind: "pesticide", reg_no: 100, standard: { rows: [{ crop_name: "", group: "区画1", crop: "野菜類", target: "一年生雑草", method: "全面土壌散布" }] } }] };
+  assert.deepEqual(previousChoice([block], { regNo: 100, groupName: "区画1" }, rows), { crop: "野菜類", use_key: "一年生雑草|全面土壌散布" });
+  const input = (crop, target, extra = {}) => ({ kind: "pesticide", reg_no: 100, standard: { rows: [{ crop_name: "リーフレタス", crop, target, method: "散布" }] }, ...extra });
+  const where = { regNo: 100, cropName: "リーフレタス" };
+  // 同じ日の記録は、後に入れたほう。届く順によらない
+  const early = { id: "a", date: "2026-10-01", created_at: "2026-10-01T08:00:00Z", inputs: [input("レタス", "アブラムシ類")] };
+  const late = { id: "b", date: "2026-10-01", created_at: "2026-10-01T09:00:00Z", inputs: [input("非結球レタス", "ヨトウムシ")] };
+  assert.deepEqual(previousChoice([early, late], where, rows), { crop: "非結球レタス", use_key: "ヨトウムシ|散布" });
+  assert.deepEqual(previousChoice([late, early], where, rows), { crop: "非結球レタス", use_key: "ヨトウムシ|散布" });
+  // 新しい記録の肥料の写しは使わない
+  const fertilizer = { id: "f", date: "2026-10-05", inputs: [input("非結球レタス", "ヨトウムシ", { kind: "fertilizer" })] };
+  assert.deepEqual(previousChoice([fertilizer, early], where, rows), { crop: "レタス", use_key: "アブラムシ類|散布" });
+  // 前回の使い方が、いまの登録にない
+  assert.deepEqual(previousChoice([{ id: "g", date: "2026-10-01", inputs: [input("レタス", "ハダニ類")] }], where, rows), { crop: "レタス", use_key: "" });
+});
+
 test("農薬の使用回数に、肥料と、登録番号のない農薬（名前を手で入れた）は数えない", () => {
   const logs = [
     spray("s1", "2026-03-01", ["p1"], [
