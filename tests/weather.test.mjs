@@ -1,5 +1,5 @@
 // 気象の計算と読み取り（app/weather.js）のテスト。実行: node --test "tests/*.test.mjs"
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import {
   accumulate,

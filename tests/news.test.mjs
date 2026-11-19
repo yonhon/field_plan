@@ -1,5 +1,5 @@
 // ニュースの読み取り（scripts/news.mjs）。県のページの作りを写した短い HTML で確かめる。実行: node --test tests/news.test.mjs
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import { fullDate, linkUrl, monthDay, parseNotices, parseUpdates, plainText } from "../scripts/news.mjs";
 

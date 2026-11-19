@@ -15,7 +15,7 @@
     "app/upload.js",
     "app/weather.js"
   ],
-  "ignorePatterns": ["data", "docs", ".claude"],
+  "ignorePatterns": ["data", "docs", ".claude", "mutation/node_modules", "mutation/report", ".mutator"],
   "concurrency": 8,
   "coverageAnalysis": "off",
   "reporters": ["clear-text", "progress", "html", "json"],

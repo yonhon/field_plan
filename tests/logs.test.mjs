@@ -1,5 +1,5 @@
 // 作業の記録の計算（app/logs.js）のテスト。実行: node --test "tests/*.test.mjs"
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import {
   areaStandard,

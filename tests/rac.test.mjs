@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import test from "node:test";
+import { test } from "./test-api.mjs";
 import { codesText, committeesOf, describe, describeHtml, iconColors, iconSvg, iconsHtml, productCodes } from "../app/rac.js";
 
 const codes = new Map([

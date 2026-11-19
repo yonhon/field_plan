@@ -88,5 +88,5 @@
 
 - **操作の流れを変えたら、ブラウザーの通しテストを動かす。** 計算のテストは、画面の操作のバグを見つけられない。主な操作を足したら、`tests/e2e/` にテストを足す。
 - **大きな機能を足したら、`node scripts/perf/run.mjs` で画面の速さを測り、`docs/perf-runs.md` の前回の記録と比べる。** 続け方と、レビューに進む目安は `docs/performance.md` にある。1 月と 7 月には、Actions が定期の確かめの Issue を開く。
-- **計算のファイルを直したら、`node scripts/mutation.mjs <直したファイル>` で、計算のテストが誤りに気づくかを確かめる。** 対象は `stryker.config.json` の `mutate` のファイル。Survived のうち、直した所に当たるものにはテストを足す（どう書き換えても結果が変わらないものは残してよい）。計算の不具合を直してテストを足したときも同じ。全体は、1 月と 7 月の定期の確かめの Issue で回す（README の 12 章）。
+- **計算のファイルを直したら、コミットの前に `node mutation/run.mjs --since HEAD` で、計算のテストが誤りに気づくかを確かめる。** 対象は `mutation/mutator.config.json` の `include` のファイルで、コミットしていない変更の所だけを回す。直した所に Survived が出たらテストを足し、NoCoverage が出たら、その所を通るテストを足す。どう書き換えても結果が変わらないものは、`node mutation/run.mjs accept <key> --reason "理由"` で記録してコミットする。計算の不具合を直してテストを足したときも同じ。mutator の版を上げたときと、1 月と 7 月の定期の確かめでは、全体を回して `docs/mutation-runs.md` に足す（README の 12 章）。
 - **保存に関わる変更は、`?local=1&strict=1` で動かす。** 親の表ほど保存を遅くし、親のない行を断る。ふつうの `?local=1` は保存がすぐ終わるので、順序の誤りが出ない。

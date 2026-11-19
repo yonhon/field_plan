@@ -1,7 +1,7 @@
 // 起動と、戻ってきたときの読み直しが読む表（DB の関数 field.load_field）が、すべて DB の操作の記録（field.audit_log）の対象になっていること。
 // 画面は、操作の記録の最後の番号が前と同じなら読み直さない。対象でない表を読み直しに足すと、その表の変更を取りこぼす。
 // 実行: node --test "tests/*.test.mjs"
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import { FIELD_SQL as SQL, loadFieldTables } from "./load-field-sql.mjs";
 

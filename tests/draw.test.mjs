@@ -1,5 +1,5 @@
 // 画面の描き方のきまり（docs/implementation-rules.md の「画面を描く」）のテスト。実行: node --test "tests/*.test.mjs"
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

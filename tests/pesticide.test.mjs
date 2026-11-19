@@ -2,7 +2,7 @@
 // 使用回数の数え方と指摘の判定は logs.js にあり、tests/logs.test.mjs が確かめる。ここでは、
 // 品目のまとまりごとにどの基準の行を使うか、記録に何を写すか、それを logs.js の計算にどう渡すかを確かめる。
 // FAMIC の部分を使わない状態（initPesticide を呼ばない）で読むので、農薬名にアイコンは付かない
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import {
   areaDosed,

@@ -21,3 +21,8 @@ app/version.json
 
 # Mutation testing（Stryker）の作業用の写しと結果
 .stryker/
+
+# Mutation testing（mizchi/mutator）の道具、前回の結果、報告
+mutation/node_modules/
+mutation/report/
+.mutator/

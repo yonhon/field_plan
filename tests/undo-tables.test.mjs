@@ -5,7 +5,7 @@
 //   app/history.js の UNDO_APPLY（画面への当て方）と UNDO_NOT_APPLIED（当て方を決めていない表）
 //   app/store.js の AUDIT_NAMES（このブラウザーの保存の変更の記録。undoOp が返す表の名前）
 // 実行: node --test "tests/*.test.mjs"
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

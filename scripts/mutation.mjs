@@ -1,4 +1,6 @@
 // Mutation testing（StrykerJS）を、指定したファイルにかかわる計算のテストだけで動かす。
+// ふだんの Mutation testing は mizchi/mutator（mutation/run.mjs）で行う。これは、mutator の結果が正しいかを確かめる検算のために残している。
+// 同じファイルを両方で回し、node mutation/summary.mjs --compare で比べる（README の 12 章、docs/mutation-runs.md）
 //   node scripts/mutation.mjs app/geometry.js app/schedule.js
 //   node scripts/mutation.mjs app/pesticide.js:289-547
 //   node scripts/mutation.mjs --list app/logs.js     （動かすテストを出すだけ）

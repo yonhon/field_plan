@@ -2,7 +2,7 @@
 //   DB の関数 field.load_field（sql/field.sql）: ふだんの画面
 //   composeLoadField（app/store.js）: ?local=1 の店と、DB の関数がないとき。通しテストはこちらしか通らない
 // 片方だけに表を足すと、通しテストは通ったまま、本番でだけその表が読まれない。実行: node --test "tests/*.test.mjs"
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

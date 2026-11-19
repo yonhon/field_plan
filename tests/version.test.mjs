@@ -1,5 +1,5 @@
 // 版の印（scripts/build-version.mjs が作る app/version.json）のテスト。実行: node --test "tests/*.test.mjs"
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";

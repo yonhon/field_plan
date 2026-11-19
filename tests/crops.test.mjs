@@ -1,5 +1,5 @@
 // 苗数と施肥量の計算（app/crops.js）と、品目ごとの日数（app/schedule.js）のテスト。実行: node --test "tests/*.test.mjs"
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import { cropLabel, holesOf, plantingNumbers, plantingSpec, summarize } from "../app/crops.js";
 import { DEFAULT_WORK_TYPES as types, TEMPLATES, planProblems, scheduleForward, typesForCrop } from "../app/schedule.js";

@@ -94,8 +94,9 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
 | `tests/` | 図形、日程、苗数と施肥量の計算、作業の実績の計算、元に戻すと、MCP サーバーのテスト |
 | `tests/e2e/` | 主な操作と、DB からの読み直しを、Chrome で通して動かすテスト |
-| `stryker.config.json` | 計算のテストが計算の誤りに気づくかを確かめる、Mutation testing（StrykerJS）の設定（12 章） |
-| `scripts/mutation.mjs` | Mutation testing を、指定したファイルを読み込むテストだけで動かす（12 章） |
+| `mutation/` | 計算のテストが計算の誤りに気づくかを確かめる、Mutation testing（mizchi/mutator）の道具と設定（12 章）。結果は `docs/mutation-runs.md` |
+| `tests/test-api.mjs` | 計算のテストが使う `test` の入口。`node --test` でも、Mutation testing の Vitest でも動くようにする |
+| `stryker.config.json`、`scripts/mutation.mjs` | mutator の結果を確かめる検算のための StrykerJS の設定と、動かすスクリプト（12 章） |
 | `data/` | 下絵の画像など、圃場ごとの資料。**Git の対象外** |
 
 画面のコードは公開されますが、データはログインした本人しか読めません。
@@ -644,20 +645,40 @@ node --test "tests/*.test.mjs"
 node --test "tests/e2e/*.test.mjs"
 ```
 
-計算のテストが、計算の誤りに本当に気づくかは、Mutation testing（StrykerJS）で確かめます。計算のコードを 1 か所ずつ書き換え（`<` を `<=` に、`+` を `-` にする、など）、そのたびに `node --test` を動かして、テストが失敗するかを見ます。失敗しなかった書き換え（Survived）は、テストが確かめていない所です。Node.js（npm）が要ります。package.json は置かず、版を決めて `npx` で動かします。
+計算のテストが、計算の誤りに本当に気づくかは、Mutation testing（[mizchi/mutator](https://github.com/mizchi/mutator)）で確かめます。計算のコードを 1 か所ずつ書き換え（`<` を `<=` に、`+` を `-` にする、など）、そのたびに、その所を通るテストだけを Vitest で動かして、テストが失敗するかを見ます。失敗しなかった書き換えは、テストが確かめていない所です。Survived はテストが通るが気づかないもの、NoCoverage はどのテストも通らないものです。
+
+mutator と Vitest は `mutation/` にだけ入れます（リポジトリの直下には package.json と node_modules を置かない）。計算のテストは `tests/test-api.mjs` から `test` を読むので、`node --test` でも Vitest でも動きます。初めに一度、入れます。
 
 ```
-node scripts/mutation.mjs app/geometry.js app/schedule.js
-node scripts/mutation.mjs app/pesticide.js:289-547
-node scripts/mutation.mjs --list app/logs.js
-node scripts/mutation.mjs
+npm --prefix mutation ci
 ```
 
-ふだんは、直したファイルだけを指定します（`app/pesticide.js:289-547` のように行も指定できます）。何も指定しなければ、`stryker.config.json` の `mutate`（計算のテストが行の 9 割以上を通るファイル）をすべて対象にします。結果は `.stryker/report.html` を開いて見ます。`push` のたびには動かしません。
+回し方は次のとおりです。対象は `mutation/mutator.config.json` の `include`（計算のテストが行の 9 割以上を通るファイル）です。結果は `mutation/report/index.html` を開いて見ます（Survived は `mutation/report/mutation.json` にもある）。`push` のたびには動かしません。
 
-書き換え 1 つにつき、そのファイルを直接・間接に読み込むテストファイルだけを動かします（`import` をたどって選ぶ。`--list` で、選んだテストを出すだけにする）。計算のテスト全体は 1 回 1.6 秒かかり、そのほとんどは保存の順序を確かめる `tests/store.test.mjs` の待ち時間です。これを読み込まないファイルほど速く、`app/pesticide.js` の計算の部分は 20 秒ほど、`store.js` が使う部品を読み込む `app/geometry.js` と `app/schedule.js` は 5 分ほどです（2026-11-18）。
+```
+node mutation/run.mjs --since HEAD
+node mutation/run.mjs app/geometry.js
+node mutation/run.mjs
+node mutation/run.mjs accept <key> --reason "理由"
+```
 
-`lib/ の写しは、app/ の部品と同じ内容` のテストだけは飛ばします。Stryker が `app/` のファイルを書き換えるので、必ず失敗するためです。
+- ふだんは `--since HEAD` で、コミットしていない変更の所だけを回します。数秒から数十秒です。計算のファイルを直したら、コミットの前に回します。
+- ファイルを指定すれば、そのファイルの全体を回します（geometry.js は 40 秒ほど）。何も指定しなければ全体で、7 分ほどです（2026-11-19）。
+- 前回の結果は `.mutator/` に残り、変えていない関数は回し直しません（Git の対象外）。
+- どう書き換えても結果が変わらない変異（Kill できないもの）は、`accept` で理由を付けて `mutator.accepted.json` に記録し、コミットします。次から Survived に出なくなります。
+- 結果は `docs/mutation-runs.md` に残します。`node mutation/summary.mjs` で、ファイルごとの表を出せます。
+
+mutator の版は `mutation/package.json` で決めています。版を上げたら、全体を回し、`docs/mutation-runs.md` の前の記録と比べます。大きく変わったら、StrykerJS でも確かめ、mutator の不具合らしければ版を戻します（package.json と package-lock.json を戻す）。
+
+StrykerJS（`stryker.config.json`、`scripts/mutation.mjs`）は、mutator の結果が正しいかを確かめる検算のために残しています。ふだんは使いません。`npx` で動かすので、入れる必要はありません。
+
+```
+node scripts/mutation.mjs app/geometry.js app/logs.js
+node mutation/run.mjs app/geometry.js app/logs.js
+node mutation/summary.mjs --compare
+```
+
+StrykerJS は、書き換え 1 つにつき、そのファイルを直接・間接に読み込むテストファイルを全部動かすので、mutator より 2〜5 倍遅くなります。`lib/ の写しは、app/ の部品と同じ内容` のテストは飛ばします（Stryker は `app/` のファイルそのものを書き換えるため）。比べ方と前回の結果は `docs/mutation-runs.md` にあります。
 
 supabase-js（DB とログインのライブラリー）は、版を決めたファイルを `app/vendor/` に置いています。版を上げるときは、npm のパッケージ `@supabase/supabase-js` のその版から `dist/umd/supabase.js` を取り、`app/vendor/supabase-js-<版>.js` として置き、古いファイルを消して、`app/index.html` と `app/sw.js` の `FILES` のファイル名を直します。`LICENSE` が変わっていれば、`app/vendor/supabase-js.LICENSE.txt` も置き換えます。そのあと、ログインして、読み込みと保存ができることを確かめます。
 

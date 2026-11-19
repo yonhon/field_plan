@@ -1,5 +1,5 @@
 // 図形の計算（app/geometry.js）のテスト。実行: node --test tests/
-import { test } from "node:test";
+import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import {
   bedAngle,

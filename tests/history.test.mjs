@@ -1,7 +1,7 @@
 // 元に戻す（app/history.js）が使う、このブラウザーの保存の戻し方（app/store.js の undoOp）のテスト。
 // DB の関数 field.undo_op と同じ戻し方と返し方をすることを確かめる（DB の側は scripts/check_field_sql.py が確かめる）。
 // 実行: node --test "tests/*.test.mjs"
-import { beforeEach, test } from "node:test";
+import { beforeEach, test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import { CONFIRM_FROM } from "../app/history.js";
 import { createLocalStore, currentOperation, inOrder, startOperation } from "../app/store.js";

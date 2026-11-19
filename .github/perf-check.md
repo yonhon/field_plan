@@ -12,8 +12,9 @@
 
 計算のテストの効き目の確かめです（Mutation testing。README の 12 章）。
 
-- [ ] `stryker.config.json` の `mutate` のファイルごとに `node scripts/mutation.mjs <ファイル>` を回し、ファイルごとの点数（Mutation score）と Survived の数を、この Issue に書く。まとめて 1 回で回すと、どのファイルにも全部のテストを動かすので遅い
-- [ ] 前回の Issue の点数より下がったファイルは、`.stryker/report.html` で Survived を見て、直した所に当たるものにテストを足す
-- [ ] 前回から増えた計算のファイルで、テストが行の 9 割以上を通るものは、`mutate` に足す
+- [ ] `node mutation/run.mjs` で全体を回し（7 分ほど）、`node mutation/summary.mjs` の表を `docs/mutation-runs.md` に足す
+- [ ] `docs/mutation-runs.md` の前の記録より点数が下がったファイルは、`mutation/report/index.html` で Survived と NoCoverage を見て、直した所に当たるものにテストを足す
+- [ ] StrykerJS で検算する: `node scripts/mutation.mjs app/geometry.js app/logs.js` と `node mutation/run.mjs app/geometry.js app/logs.js` を回し、`node mutation/summary.mjs --compare` の表を `docs/mutation-runs.md` の「StrykerJS との検算」に足す。どちらかだけで気づかない行が多ければ、どちらかの不具合を疑う
+- [ ] 前回から増えた計算のファイルで、テストが行の 9 割以上を通るものは、`mutation/mutator.config.json` の `include` に足す
 
 - [ ] 記録をコミットし、この Issue を閉じる

@@ -1,5 +1,5 @@
 // ローカルの保存（app/store.js）のテスト。実行: node --test "tests/*.test.mjs"
-import { beforeEach, test } from "node:test";
+import { beforeEach, test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import { createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation } from "../app/store.js";
 

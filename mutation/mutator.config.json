@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/@mizchi/mutator/schema/mutator.config.schema.json",
+  "runner": "vitest",
+  "vitestConfig": "mutation/vitest.config.mjs",
+  "include": [
+    "app/crops.js",
+    "app/diary.js",
+    "app/geometry.js",
+    "app/logs.js",
+    "app/pesticide.js",
+    "app/rac.js",
+    "app/schedule.js",
+    "app/upload.js",
+    "app/weather.js"
+  ],
+  "reporters": ["text", "json", "html"],
+  "reportDir": "mutation/report"
+}

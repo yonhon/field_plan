@@ -1,6 +1,6 @@
 // 農作業日記の計算（app/diary.js）と、ローカルの保存の日記の部分（app/store.js）のテスト。実行: node --test "tests/*.test.mjs"
 // 本物の日記は使わない。文も写真の名前も、ここで作ったもの。
-import { beforeEach, test } from "node:test";
+import { beforeEach, test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import {
   bodyChunks,
