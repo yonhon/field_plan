@@ -94,6 +94,10 @@ const TABLES = { zone: "zones", block: "blocks", bed: "beds" };
 const PLAN_TABLES = ["zones", "blocks", "beds", "plantings", "works"]; // プランの中身の表
 const CURRENT_PLAN_KEY = "field_plan_current_plan";
 const CURRENT_FIELD_KEY = "field_plan_current_field";
+// 最後に開いていた上のタブ（today、map、schedule、diary、revenue）。URL に画面がないときに開く。この端末だけ。
+// 台帳と変更の履歴はメニューから開く画面なので覚えない（開いても、その前のタブを覚えたまま）
+const LAST_TAB_KEY = "field_plan_last_tab";
+const TAB_VIEWS = ["today", "map", "schedule", "diary", "revenue"];
 const VIEW_DATE_KEY = "field_plan_view_date";
 
 // 前にその圃場を開いたときの表示日。覚えていなければ今日
@@ -4270,6 +4274,13 @@ function showView(view, { history: mode = "push" } = {}) {
   }
   rememberScheduleTab(view);
   const tab = view === "planting" ? "schedule" : view;
+  if (TAB_VIEWS.includes(tab)) {
+    try {
+      localStorage.setItem(LAST_TAB_KEY, tab);
+    } catch {
+      // 覚えられなくても、次は圃場図から開くだけ
+    }
+  }
   document.querySelectorAll(".tab-btn").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.view === tab);
   });
@@ -4310,6 +4321,20 @@ function showView(view, { history: mode = "push" } = {}) {
   } else {
     renderJournal();
   }
+}
+
+// URL に画面がないときに開くタブ
+function startTab() {
+  let last = null;
+  try {
+    last = localStorage.getItem(LAST_TAB_KEY);
+  } catch {
+    // 読めなければ圃場図
+  }
+  if (!TAB_VIEWS.includes(last)) {
+    return "map";
+  }
+  return last === "schedule" ? scheduleTabView() : last;
 }
 
 // 日程のタブで最後に見ていた画面（日程の画面か、作付の詳細と、その作付）を、圃場ごとに覚える。
@@ -4570,13 +4595,14 @@ async function startApp(user = "local") {
   renderWeatherSettings();
   syncWeather();
   initNews({ state, setStatus });
-  // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、スマホも PC も圃場図。
+  // URL に画面があれば、その画面を開く（再読み込み、ブックマーク）。なければ、最後に開いていた上のタブ（覚えていなければ圃場図）。
+  // 日程のタブなら、日程のタブを押したときと同じく、最後に見ていた日程の画面か作付の詳細を開く。
   // ほかの読み込みを待つ前に切り替える（待ってからだと、圃場図が一瞬見えてしまう）。履歴の画面は、履歴の用意（initJournal）のあとで開く
   const route = routeFromHash();
   if (route && route.view !== "journal") {
     openRoute(route, "replace");
   } else if (!route) {
-    showView("map", { history: "replace" });
+    showView(startTab(), { history: "replace" });
   }
   initCrops({ state, setStatus, showView });
   initDiary({ state, setStatus });

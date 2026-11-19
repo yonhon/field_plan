@@ -230,3 +230,26 @@ test("収支: 測った時間を作付ごとに合計し、まとめて測った
   await page.waitFor(`location.hash === "#detail/planting/pl2"`, "作付の詳細が開く");
   assert.deepEqual(page.errors, []);
 });
+
+test("起動: URL に画面がなければ、最後に開いていた上のタブを開く。覚えていなければ圃場図。台帳と変更の履歴は覚えない", options, async () => {
+  // URL から画面を消して開き直す（location.hash = "" は、開き直す前に戻ると同じ知らせを出し、圃場図を開いてしまう）
+  const reopen = () => page.run(`history.replaceState(null, "", location.pathname + location.search); location.reload()`);
+  await page.loadApp(seed());
+  await page.waitFor(`location.hash === "#map"`, "覚えていなければ圃場図");
+  await page.openView("revenue");
+  await page.waitFor(`location.hash === "#revenue"`, "収支");
+  // メニューから開いた台帳は覚えない（その前の収支のまま）
+  await page.openView("master");
+  await page.waitFor(`location.hash.startsWith("#master/")`, "台帳");
+  await reopen();
+  await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#revenue" && !document.getElementById("revenueView").hidden`, "収支で開く");
+  await page.openView("today");
+  await reopen();
+  await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#today" && !document.getElementById("todayView").hidden`, "今日で開く");
+  // 日程は、最後に見ていた作付の詳細を開く
+  await page.run(`location.hash = "#detail/planting/pl2"`);
+  await page.waitFor(`location.hash === "#detail/planting/pl2" && !document.getElementById("plantingView").hidden`, "作付の詳細");
+  await reopen();
+  await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#detail/planting/pl2" && !document.getElementById("plantingView").hidden`, "作付の詳細で開く");
+  assert.deepEqual(page.errors, []);
+});
