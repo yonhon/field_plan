@@ -411,65 +411,82 @@ const draftSnapshot = () =>
   });
 const isDirty = () => Boolean(draft) && (draft.kind === "process" ? processDirty() : draftSnapshot() !== draft.baseline);
 
+// 窓をどこから開いたかを、1 つの形にまとめる。開き方は次のどれか 1 つ（呼び出す側は組み合わせて渡さない）。
+//   実績を直す（log）、管理作業の計画を直す（preset.planWork）、計画の作業から実績を入れる（preset.works）、
+//   作付か区画から新しく入れる（preset.plantingId、preset.blockId）、何も選ばずに新しく入れる
+// 書きかけの項目は、開き方ごとに分けず、この形から決める（開き方を足すときは、ここだけを直す）。
+//   kind: "plan"（管理作業の計画）か "actual"（実績）。switchable: 窓の上で計画と実績を切り替えられるか
+//   planWork、planWorks: 直す計画と、一緒に入力したまとまり。works: 実績につなぐ（取りやめにできる）計画の作業
+//   source: 予定の中身（日付、作業の種類、detail）を入れる元の計画の作業。owners: 初めに選んでおく対象の持ち主（作業、作付、区画）
+// 直す計画が、読み込んだ実際に使うプランにないときは null
+function opening(log, preset) {
+  const none = { planWork: null, planWorks: [], works: [], source: null, owners: [] };
+  if (log) {
+    return { ...none, kind: "actual", switchable: false };
+  }
+  if (preset.planWork) {
+    // 計画の行は、読み込んだ実際に使うプランのものに置き換える（開いているプランが違うときに、古い行を直さないように）
+    const planWork = data.works.find((work) => work.id === preset.planWork.id);
+    if (!planWork) {
+      return null;
+    }
+    // 一緒に入力した計画（まとまり）ごと開く
+    const planWorks = planWork.batch_id ? data.works.filter((work) => work.batch_id === planWork.batch_id) : [planWork];
+    return { ...none, kind: "plan", switchable: false, planWork, planWorks, source: planWork, owners: planWorks };
+  }
+  if (preset.works?.length) {
+    return { ...none, kind: "actual", switchable: false, works: preset.works, source: preset.works[0], owners: preset.works };
+  }
+  // 「入力する」のボタンなどから開いたときだけ、窓の上で切り替えられる（初めは実績。preset.tab が "plan" なら計画）
+  const owners = preset.plantingId ? [{ planting_id: preset.plantingId }] : preset.blockId ? [{ block_id: preset.blockId }] : [];
+  return { ...none, kind: preset.tab === "plan" ? "plan" : "actual", switchable: true, owners };
+}
+
+// 対象の選び方。初めに選んでおく対象がすべて区画なら区画で、畝の作付があるか、対象がなければ品目で選ぶ
+const modeFor = (targets) => (targets.length && !targets.some((target) => target.bed_id || target.planting_id) ? "blocks" : "crops");
+
 // 管理作業の計画と実績の書きかけを作る。作れなければ false
 function makeDraft(log, preset) {
-  const presetWorks = !log && preset.works?.length ? preset.works : [];
-  // 管理作業の計画を直すときは、一緒に入力した計画（まとまり）ごと開く
-  // 計画の行は、読み込んだ実際に使うプランのものに置き換える（開いているプランが違うときに、古い行を直さないように）
-  const planWork = !log && preset.planWork ? data.works.find((work) => work.id === preset.planWork.id) || null : null;
-  if (preset.planWork && !planWork) {
+  const open = opening(log, preset);
+  if (!open) {
     notify("管理作業の計画は、実際に使うプランのものだけを直せます。");
     return false;
   }
-  const planWorks = planWork ? (planWork.batch_id ? data.works.filter((work) => work.batch_id === planWork.batch_id) : [planWork]) : [];
-  const source = planWork || presetWorks[0] || null; // 予定の中身（detail）を入れる元の計画
+  const { source } = open;
   const type = log?.work_type || source?.work_type || "";
+  // 計画の作業から開いたときは、計画の開始日と終了日（「この日で終わり」に印が付く）。それ以外は今日
+  const date = log?.date || source?.plan_start || source?.plan_end || localToday();
+  // 初めに選んでおく対象。作業から作るときは、その作業の ID を付けておく
+  const targets = log ? log.targets : open.owners.map((owner) => ({ ...targetForWork(owner, date), ...(owner.id ? { work_id: owner.id } : {}) }));
   draft = {
     id: log?.id || null,
-    // plan は管理作業の計画、actual は実績。「入力する」のボタンから開いたときだけ、窓の上で切り替えられる（初めは実績。preset.tab が "plan" なら計画）
-    kind: planWork || (!log && !presetWorks.length && preset.tab === "plan") ? "plan" : "actual",
-    switchable: !log && !planWork && !presetWorks.length,
-    planWork,
-    planWorks,
+    kind: open.kind,
+    switchable: open.switchable,
+    planWork: open.planWork,
+    planWorks: open.planWorks,
     onlyThis: false, // 計画を直すとき、この畝だけ直すか（一緒に入力した全部か）
     // 実績がつながる計画の作業（5.5）。計画の「完了」「修正」から開いたときと、実績の窓で印を付けたときだけ
-    linked: new Set(log ? log.targets.map((target) => target.work_id).filter(Boolean) : presetWorks.map((work) => work.id)),
-    // 計画の作業から開いたときは、計画の開始日と終了日（「この日で終わり」に印が付く）。それ以外は今日
-    date: log?.date || source?.plan_start || source?.plan_end || localToday(),
+    linked: new Set(log ? log.targets.map((target) => target.work_id).filter(Boolean) : open.works.map((work) => work.id)),
+    date,
     // 何日かかかった作業の、終えた日（作業中なら、進んだ日）。1 日の作業は空
     end_date: log ? log.end_date || "" : source?.plan_end && source.plan_end > (source.plan_start || "") ? source.plan_end : "",
     work_type: type,
     finishes: log ? log.finishes : true,
     spec: { ...(log?.spec || source?.detail?.spec || {}) },
-    note: log?.note ?? (planWork ? planWork.note || "" : ""),
-    mode: log
-      ? log.targets.some((target) => target.bed_id || target.planting_id) || !log.targets.length
-        ? "crops"
-        : "blocks"
-      : // 計画を直すときは、直す計画（まとまり）の対象で決める
-        (planWorks.length ? planWorks : presetWorks).some((work) => work.block_id) || (!presetWorks.length && !planWorks.length && preset.blockId)
-        ? "blocks"
-        : "crops",
+    note: log?.note ?? (open.planWork ? open.planWork.note || "" : ""),
+    mode: modeFor(targets),
     beds: new Set(),
     blocks: new Set(),
     orphans: [], // 対象の一覧にない対象（畝や区画を消した記録など）。そのまま残す
     spray: {}, // 品目のまとまり（または区画）ごとの散布液の量（L）
     inputs: (log?.inputs || source?.detail?.inputs || []).map((input) => ({ ...input })),
-    cancellable: presetWorks.map((work) => work.id), // 取りやめにできる計画の作業
+    cancellable: open.works.map((work) => work.id), // 取りやめにできる計画の作業
   };
-  const ownerWorks = planWorks.length ? planWorks : presetWorks;
-  const existing = log ? log.targets : ownerWorks.map((work) => ({ ...targetForWork(work, draft.date), work_id: work.id }));
-  if (!log && preset.plantingId) {
-    existing.push(targetForWork({ planting_id: preset.plantingId }, draft.date));
-  }
-  if (!log && preset.blockId && !presetWorks.length) {
-    existing.push(targetForWork({ block_id: preset.blockId }, draft.date));
-  }
-  if (existing.length) {
+  if (targets.length) {
     const choices = currentChoices();
     const bedIds = new Set(choices.crops.flatMap((group) => group.items.map((item) => item.bed_id)));
     const blockIds = new Set(choices.blocks.map((item) => item.block_id));
-    for (const target of existing) {
+    for (const target of targets) {
       if (target.bed_id && bedIds.has(target.bed_id)) {
         draft.beds.add(target.bed_id);
       } else if (isBlockTarget(target) && blockIds.has(target.block_id)) {
@@ -480,8 +497,8 @@ function makeDraft(log, preset) {
     }
   }
   // 定植・播種の計画の作業から開いたときは、仕様の欄に計画の値を入れておく（違うところだけ直せるように）
-  if (type === "plant" && presetWorks.length && !Object.keys(draft.spec).length) {
-    const planting = data.plantings.find((item) => item.id === presetWorks[0].planting_id);
+  if (type === "plant" && open.works.length && !Object.keys(draft.spec).length) {
+    const planting = data.plantings.find((item) => item.id === open.works[0].planting_id);
     const crop = planting && data.crops.find((item) => item.id === planting.crop_id);
     for (const key of ["plant_gap_cm", "row_gap_cm", "row_count", "staggered"]) {
       const value = planting?.[key] ?? crop?.[key];

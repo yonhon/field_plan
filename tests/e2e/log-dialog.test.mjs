@@ -380,6 +380,67 @@ test("区画の管理作業の計画: 開き直すと区画で選ぶになり、
   assert.deepEqual(page.errors, []);
 });
 
+// 窓の開き方（実績を直す、計画を直す、計画の作業から入れる、区画から入れる）ごとに、選び方と、初めに選んでおく対象が合う
+test("入力の窓の開き方: どこから開いても、開いた対象が選ばれている", options, async () => {
+  const day = (offset) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offset);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  };
+  const data = seed();
+  const work = (id, owner, start, batch) => ({ id, plan_id: "p1", block_id: null, planting_id: null, ...owner, work_type: "spray", seq: 1, plan_start: start, plan_end: start, note: "", batch_id: batch, cancelled_on: null, detail: { spec: {}, inputs: [] } });
+  data.works = [work("wb", { block_id: "b1" }, day(0), "bb"), work("wp", { planting_id: "pl1" }, day(10), "bp")];
+  data.workLogs = [{
+    id: "lb", field_id: "f1", date: day(-1), end_date: null, work_type: "water", finishes: false, spec: {}, note: "", created_at: AT, inputs: [],
+    targets: [{ id: "t1", log_id: "lb", planting_id: null, bed_id: null, block_id: "b1", work_id: null, label: "A", crop_name: "", area_m2: null, spray_l: null }],
+  }];
+  await page.loadApp(data);
+  const DIALOG = "dialog.log-dialog[open]";
+  const opened = async () =>
+    JSON.parse(await page.run(`JSON.stringify({
+      kind: document.querySelector('${DIALOG} [data-f="date"]').closest("label").textContent.startsWith("予定の日") ? "plan" : "actual",
+      switchable: Boolean(document.querySelector('${DIALOG} [data-act="kind"]')),
+      mode: document.querySelector('${DIALOG} [data-act="mode"].is-on')?.dataset.mode,
+      blocks: [...document.querySelectorAll('${DIALOG} [data-act="block"]:checked')].map((el) => el.dataset.id),
+      beds: document.querySelectorAll('${DIALOG} [data-act="bed"].is-on').length,
+    })`));
+  const close = async () => {
+    await page.click(`${DIALOG} .log-head [data-act="close"]`);
+    await page.waitFor(`!document.querySelector("dialog.log-dialog[open]")`, "窓が閉じる");
+    await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
+  };
+
+  // 今週やることの「修正」（区画の計画の作業から実績を入れる）
+  await page.openView("today");
+  await page.click('.wt-tab[data-wtab="week"]');
+  await page.click('#weekList [data-week="edit"][data-ids="wb"]');
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "計画の作業から開く");
+  assert.deepEqual(await opened(), { kind: "actual", switchable: false, mode: "blocks", blocks: ["b1"], beds: 0 });
+  await close();
+
+  // 最近の実績から、区画の実績を直す
+  await page.click('.wt-tab[data-wtab="log"]');
+  await page.click('#logList li[data-log="lb"]');
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "実績を開く");
+  assert.deepEqual(await opened(), { kind: "actual", switchable: false, mode: "blocks", blocks: ["b1"], beds: 0 });
+  await close();
+
+  // 工程表の帯から、作付の管理作業の計画を直す
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.click('#gantt .gantt-bar[data-id="wp"]');
+  await page.waitFor(`Boolean(document.querySelector("${DIALOG}"))`, "計画を直す窓");
+  assert.deepEqual(await opened(), { kind: "plan", switchable: false, mode: "crops", blocks: [], beds: 1 });
+  await close();
+
+  // 区画の頭の「＋ 作業を入力」（工程の計画で開く）から、実績へ切り替える
+  await page.click('#blockHead [data-act="record"]');
+  await page.click(`${DIALOG} [data-act="kind"][data-kind="actual"]`);
+  await page.waitFor(`document.querySelector('${DIALOG} [data-act="kind"].is-on')?.dataset.kind === "actual"`, "実績へ切り替える");
+  assert.deepEqual(await opened(), { kind: "actual", switchable: true, mode: "blocks", blocks: ["b1"], beds: 0 });
+  await close();
+  assert.deepEqual(page.errors, []);
+});
+
 test("実績の保存・削除のあとは、記録を全件読み直さず、その 1 件だけを差し替える", options, async () => {
   await page.loadApp(seed());
   // ほかの画面で入れた記録のつもりで、ブラウザーの保存にだけ 1 件足す。読み直すと、一覧に出てしまう
