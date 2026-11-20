@@ -3,9 +3,9 @@
 // 違えば、変わったファイルだけを取り直し、どのファイルもここにあるハッシュと照らし合わせてから入れ替える。
 //   node scripts/build-version.mjs                    app/version.json を作る（リポジトリにはコミットしない）
 //   node scripts/build-version.mjs --verify <URL>     公開中のサイトが、作った version.json と同じ中身を配っているかを確かめる
-// 一式の一覧は app/sw.js の FILES。中身は { version, label, no, files: { ファイル: SHA-256 } }。
+// 一式の一覧は app/sw.js の FILES。中身は { version, label, files: { ファイル: SHA-256 } }。
 // version は、ファイルとハッシュの組から作るので、中身が同じなら同じ、1 文字でも違えば違う。
-// label は画面に出す版（A199-3f9c2）。番号は更新の一覧（app/updates.json）の最後の番号
+// label は画面に出す版（3f9c2。version の先頭 5 文字）。一式の中身だけから決まるので、サーバーと手元で食い違わない
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -29,7 +29,7 @@ export function appFiles(swSource = readFileSync(join(APP, "sw.js"), "utf8")) {
 // 一覧のファイル名を、app/ の中のファイルにする（"./" は画面そのもの）
 const pathOf = (appDir, file) => join(appDir, file === "./" ? "index.html" : file);
 
-export function buildVersion({ appDir = APP, files = appFiles(), no }) {
+export function buildVersion({ appDir = APP, files = appFiles() } = {}) {
   const hashes = {};
   for (const file of files) {
     const path = pathOf(appDir, file);
@@ -39,12 +39,7 @@ export function buildVersion({ appDir = APP, files = appFiles(), no }) {
     hashes[file] = sha256(readFileSync(path));
   }
   const version = sha256(files.map((file) => `${file}:${hashes[file]}`).join("\n")).slice(0, 12);
-  return { version, label: `A${no}-${version.slice(0, 5)}`, no, files: hashes };
-}
-
-function lastUpdateNo(appDir = APP) {
-  const updates = JSON.parse(readFileSync(join(appDir, "updates.json"), "utf8"));
-  return Math.max(...updates.map((update) => update.no));
+  return { version, label: version.slice(0, 5), files: hashes };
 }
 
 // 公開中のサイトが、info（作った version.json）と同じ中身を配っているか。違うファイルの名前を返す（空なら同じ）。
@@ -91,7 +86,7 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 20000));
     }
   }
-  const info = buildVersion({ no: lastUpdateNo() });
+  const info = buildVersion();
   writeFileSync(target, `${JSON.stringify(info, null, 2)}\n`);
   console.log(`app/${VERSION_FILE} を作りました: 版 ${info.label}（${Object.keys(info.files).length} 個）`);
 }

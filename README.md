@@ -1,5 +1,7 @@
 # field_plan
 
+[![版](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fyonhon.github.io%2Ffield_plan%2Fversion.json&query=%24.label&label=%E7%89%88&color=4c9a2a)](https://yonhon.github.io/field_plan/)
+
 いのーファームの圃場の計画と管理を、ブラウザーで行うアプリです。
 計画は PC で作り、作業内容はスマホで確認します。見られるのはログインした本人だけです。
 

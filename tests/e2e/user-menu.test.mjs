@@ -93,10 +93,10 @@ test("利用者のメニュー: いま動いている版と、最新かどうか
   // ?local=1 には版の印（version.json。公開の手順が作る）がない
   assert.deepEqual(await menu(), { version: null, reload: false });
   // 版が分かり、この起動の確かめでサーバーと同じだったとき（boot.js が覚えて知らせる）
-  await page.run(`globalThis.fieldPlanVersion.label = "A199-3f9c2"; globalThis.fieldPlanVersion.status = "latest"; document.dispatchEvent(new Event("app-version"))`);
-  assert.deepEqual(await menu(), { version: "版 A199-3f9c2最新の版です", reload: false });
+  await page.run(`globalThis.fieldPlanVersion.label = "3f9c2"; globalThis.fieldPlanVersion.status = "latest"; document.dispatchEvent(new Event("app-version"))`);
+  assert.deepEqual(await menu(), { version: "版 3f9c2最新の版です", reload: false });
   // 新しい版を入れ替え済みのとき
   await page.run(`globalThis.fieldPlanVersion.status = "update"; document.dispatchEvent(new Event("app-version"))`);
-  assert.deepEqual(await menu(), { version: "版 A199-3f9c2", reload: true });
+  assert.deepEqual(await menu(), { version: "版 3f9c2", reload: true });
   assert.deepEqual(page.errors, []);
 });

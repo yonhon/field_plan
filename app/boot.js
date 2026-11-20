@@ -31,7 +31,7 @@ document.getElementById("updateBtn").addEventListener("click", async (event) => 
   }
 });
 // いま動いている版と、更新の確かめの結果。利用者のメニュー（user-menu.js）が出す。
-// label は版の印（version.json。公開の手順が作る）の「A199-3f9c2」。印がなければ（?local=1 などの手元の開発）null。
+// label は版の印（version.json。公開の手順が作る）の「3f9c2」。印がなければ（?local=1 などの手元の開発）null。
 // status は、この起動の確かめで、サーバーと同じだった（"latest"）か、新しい版を入れ替え済み（"update"）か。分からなければ null。
 // 変わったら "app-version" を知らせる
 const appVersion = (globalThis.fieldPlanVersion = { label: null, status: null });

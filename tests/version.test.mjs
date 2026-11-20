@@ -17,35 +17,35 @@ function appDir(contents) {
   return dir;
 }
 
-test("版の印: ファイルごとの SHA-256 と、そこから作った版、画面に出す版（A番号-版の先頭 5 文字）", () => {
-  const info = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app", "styles.css": "css" }), files: FILES, no: 199 });
+test("版の印: ファイルごとの SHA-256 と、そこから作った版、画面に出す版（版の先頭 5 文字）", () => {
+  const info = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app", "styles.css": "css" }), files: FILES });
   assert.equal(info.files["app.js"], createHash("sha256").update("app").digest("hex"));
   assert.equal(info.files["./"], createHash("sha256").update("page").digest("hex"), "./ は index.html");
   assert.match(info.version, /^[0-9a-f]{12}$/);
-  assert.equal(info.label, `A199-${info.version.slice(0, 5)}`);
-  assert.equal(info.no, 199);
+  assert.equal(info.label, info.version.slice(0, 5));
+  assert.equal("no" in info, false, "更新の一覧の番号は入れない（中身が同じなら、版の印も同じ）");
 });
 
 test("版の印: 中身が同じなら同じ版、1 文字でも違えば違う版", () => {
-  const a = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app", "styles.css": "css" }), files: FILES, no: 1 });
-  const b = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app", "styles.css": "css" }), files: FILES, no: 2 });
-  const c = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app!", "styles.css": "css" }), files: FILES, no: 1 });
-  assert.equal(a.version, b.version);
+  const a = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app", "styles.css": "css" }), files: FILES });
+  const b = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app", "styles.css": "css" }), files: FILES });
+  const c = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app!", "styles.css": "css" }), files: FILES });
+  assert.deepEqual(a, b);
   assert.notEqual(a.version, c.version);
 });
 
 test("版の印: 一覧にあるファイルがなければ、作らずに止める", () => {
-  assert.throws(() => buildVersion({ appDir: appDir({ "./": "page", "app.js": "app" }), files: FILES, no: 1 }), /styles\.css がありません/);
+  assert.throws(() => buildVersion({ appDir: appDir({ "./": "page", "app.js": "app" }), files: FILES }), /styles\.css がありません/);
 });
 
 test("版の印: 一式の一覧は app/sw.js の FILES で、どれも app/ にある", () => {
   const files = appFiles();
   assert.ok(files.includes("./") && files.includes("app.js") && files.includes("sw.js") === false);
-  assert.doesNotThrow(() => buildVersion({ files, no: 1 }));
+  assert.doesNotThrow(() => buildVersion({ files }));
 });
 
 test("公開のあとの確かめ: 配っている中身が版の印と違うファイルを返す", async () => {
-  const info = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app", "styles.css": "css" }), files: FILES, no: 1 });
+  const info = buildVersion({ appDir: appDir({ "./": "page", "app.js": "app", "styles.css": "css" }), files: FILES });
   const served = { "version.json": JSON.stringify(info), "": "page", "app.js": "app", "styles.css": "css" };
   const fetchImpl = async (url) => {
     const name = new URL(url).pathname.replace("/field_plan/", "");

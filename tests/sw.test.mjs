@@ -204,7 +204,7 @@ function withVersion(server) {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, server[new URL(file, SCOPE).href]);
   }
-  server[`${SCOPE}version.json`] = JSON.stringify(buildVersion({ appDir: dir, files: FILES, no: 1 }));
+  server[`${SCOPE}version.json`] = JSON.stringify(buildVersion({ appDir: dir, files: FILES }));
   return server;
 }
 
