@@ -50,7 +50,7 @@ rac.js の Survived の多くは、アイコンの色の値（文字列）。
 - 7,189 件のうち 7,183 件が同じ結果。違ったのは rac.js のアイコンの絵を描く所（117〜136 行）の 6 件で、Survived と RuntimeError が入れ替わった。この 6 件だけを 0.5.0 で回し直すと 6 件とも Survived で、同じ版でも実行のたびに揺れる。版の違いではない。critical の関数ではない。
 - 記録した等価な変異（`mutator.accepted.json` の 43 件）は、そのまま使えた。critical の関数は 941 件に気づき、気づかない 0 件、記録 42 件で、変わらない。
 - `--reporter agent`（Claude 向けの JSON）に、テストの出力が混ざらなくなった（mizchi/mutator#39）。
-- 一部のファイルだけを回すと、回さなかったファイルの記録が、`acceptance.stale`（もうない変異）として挙がる。記録のある logs.js、pesticide.js、work-time.js を含めて回すと 0 件。stale を見て記録を消すのは、全体を回したときだけにする。
+- ファイルを指定して回すと、指定しなかったファイルの記録が、`acceptance.stale`（もうない変異）として挙がる。記録のある logs.js、pesticide.js、work-time.js を含めて回すと 0 件。`--since` で回したときも 0 件（回さない変異も Pending として結果に入る）。0.4.5 でも同じで、前の版から続く動き（mutator の `applyAcceptance` は、その回の結果にない記録を stale とする）。stale を見て記録を消すのは、全体か `--since` で回したときだけにする。
 
 ほぼ同じ結果なので、StrykerJS での検算はしなかった。
 
