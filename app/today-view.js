@@ -8,7 +8,7 @@
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
 import { notify, notifySaveFailed, confirmDelete } from "./dialog.js";
-import { localToday } from "./schedule.js";
+import { localToday, workName } from "./schedule.js";
 import {
   SESSION_KINDS,
   checkTimes,
@@ -59,10 +59,15 @@ function savePaused(value) {
   }
 }
 
-// 計測の名前。計画の作業なら始めたときの名前、準備・片付けと移動はその名前
+// 計測の名前。実績につないだ計測は、その実績の名前（つないだときにも名前を写すが、あとで実績を直したら、その名前に合わせる）。
+// 計画の作業なら始めたときの名前、準備・片付けと移動はその名前
 export function sessionLabel(session) {
   if (session.kind !== "work") {
     return SESSION_KINDS[session.kind];
+  }
+  const log = session.log_id && (state().logs || []).find((item) => item.id === session.log_id);
+  if (log) {
+    return logName(log);
   }
   return session.label || ctx.typeLabel(session.work_type) || "作業";
 }
@@ -317,10 +322,11 @@ function dayLogs(date) {
   return (state().logs || []).filter((log) => log.field_id === state().field.id && log.date <= date && (log.end_date || log.date) >= date);
 }
 
+// 実績の名前。例: 株の手入れ（摘葉・誘引） 区画A 畝1 試験菜、区画A 畝2 試験菜
 function logName(log) {
   const places = (log.targets || []).map((target) => target.label).filter(Boolean);
   const where = places.length > 3 ? `${places.slice(0, 3).join("、")} ほか ${places.length - 3} か所` : places.join("、");
-  return `${ctx.typeLabel(log.work_type)}${where ? ` ${where}` : ""}`;
+  return `${workName(ctx.typeLabel(log.work_type), log.spec)}${where ? ` ${where}` : ""}`;
 }
 
 // 計測の時刻を直す窓（session が null なら、あとで時間を入れる）。message は、窓の上に出す文
@@ -377,8 +383,15 @@ function editSession(session, message = "") {
   box.addEventListener("submit", async (event) => {
     event.preventDefault();
     const day = field("date").value;
-    const started = day && field("start").value ? isoAt(day, field("start").value) : "";
-    const stopped = day && field("stop").value ? isoAt(day, field("stop").value) : null;
+    // 窓には分までしか出さないので、日付と時:分が元のままなら、元の時刻（秒まで）を使う（時刻を直していないことにする）
+    const timeOf = (clock, original) => {
+      if (!day || !clock) {
+        return original === undefined ? "" : null;
+      }
+      return original && localDateOf(original) === day && clockOf(original).padStart(5, "0") === clock ? original : isoAt(day, clock);
+    };
+    const started = timeOf(field("start").value, session?.started_at);
+    const stopped = timeOf(field("stop").value, session?.stopped_at || null);
     const error = checkTimes(started, stopped) || (!stopped && !running ? "止めた時刻を入れてください" : null) || (stopped && stopped > new Date().toISOString() ? "止めた時刻が、今より後です" : null);
     if (error) {
       field("error").textContent = error;
@@ -386,9 +399,15 @@ function editSession(session, message = "") {
     }
     let row;
     if (session) {
-      row = { ...session, started_at: started, stopped_at: stopped, source: "edited" };
+      // 時刻を直したときだけ「直した」の印を付ける（実績につなぐだけなら、測ったままの印）
+      const retimed = started !== session.started_at || stopped !== session.stopped_at;
+      row = { ...session, started_at: started, stopped_at: stopped, source: retimed ? "edited" : session.source };
       if (field("log")) {
-        row.log_id = field("log").value || null;
+        // つないだ実績の名前と種類を写す。つながないにしたら、作業の種類の名前に戻す
+        const log = logs.find((item) => item.id === field("log").value) || null;
+        row.log_id = log?.id || null;
+        row.work_type = log ? log.work_type : row.work_type;
+        row.label = log ? logName(log) : ctx.typeLabel(row.work_type);
       }
     } else {
       const [kind, value] = field("what").value.split(":");

@@ -253,3 +253,40 @@ test("起動: URL に画面がなければ、最後に開いていた上のタ�
   await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#detail/planting/pl2" && !document.getElementById("plantingView").hidden`, "作付の詳細で開く");
   assert.deepEqual(page.errors, []);
 });
+
+test("今日: 計画にない作業を実績につなぐと、実績の名前で出す。時刻を変えていなければ「直した」を付けない", options, async () => {
+  const start = new Date();
+  start.setHours(0, 2, 54, 0); // 秒まで入った、押して測った時刻
+  const stop = new Date(start.getTime() + 79 * 60000);
+  const log = {
+    id: "l1", field_id: "f1", date: today, end_date: null, work_type: "care", finishes: true, spec: { items: ["摘葉", "誘引"] }, note: "", created_at: AT,
+    targets: [{ id: "t1", log_id: "l1", planting_id: "pl1", bed_id: "bed1", block_id: "b1", work_id: null, label: "A 畝1 試験菜", crop_name: "試験菜", area_m2: 30, spray_l: null }],
+    inputs: [],
+  };
+  await page.loadApp(seed({
+    workLogs: [log],
+    workSessions: [{ id: "s1", field_id: "f1", kind: "work", work_type: "care", work_ids: [], log_id: null, label: "株の手入れ", started_at: start.toISOString(), stopped_at: stop.toISOString(), source: "measured", created_at: start.toISOString() }],
+  }));
+  await page.openView("today");
+  await page.waitFor(`document.querySelector('#todaySessions [data-session="s1"] .session-name')?.textContent === "株の手入れ"`, "始めたときの名前");
+  await page.click('#todaySessions [data-today="edit"][data-id="s1"]');
+  await page.setValue('dialog.session-dialog[open] [data-field="log"]', "l1");
+  await page.click('dialog.session-dialog[open] [data-act="save"]');
+  await page.waitFor(`document.querySelector('#todaySessions [data-session="s1"] .session-name')?.textContent === "株の手入れ（摘葉・誘引） A 畝1 試験菜"`, "実績の名前になる");
+  let [saved] = await sessions();
+  assert.equal(saved.log_id, "l1");
+  assert.equal(saved.label, "株の手入れ（摘葉・誘引） A 畝1 試験菜");
+  assert.equal(saved.source, "measured");
+  assert.equal(saved.started_at, start.toISOString(), "秒まで元のまま");
+  assert.equal(saved.stopped_at, stop.toISOString());
+
+  // 時刻を直すと「直した」
+  await page.click('#todaySessions [data-today="edit"][data-id="s1"]');
+  await page.setValue('dialog.session-dialog[open] [data-field="stop"]', "01:30");
+  await page.click('dialog.session-dialog[open] [data-act="save"]');
+  await page.waitFor(`document.querySelector('#todaySessions [data-session="s1"] .session-name')?.textContent.includes("（直した）")`, "直した印");
+  [saved] = await sessions();
+  assert.equal(saved.source, "edited");
+  assert.equal(saved.started_at, start.toISOString(), "直していない始めた時刻は元のまま");
+  assert.deepEqual(page.errors, []);
+});
