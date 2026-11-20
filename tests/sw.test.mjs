@@ -197,14 +197,14 @@ test("1 つでも取れなければ、取り直さずに、手元の一式を使
 
 // 版の印を、サーバーの中身から、公開の手順と同じスクリプト（scripts/build-version.mjs）で作る。
 // 端末の照らし合わせ（sw.js）と、公開の手順の計算が食い違えば、下のテストが失敗する
-function withVersion(server) {
+function withVersion(server, no = 1) {
   const dir = mkdtempSync(join(tmpdir(), "field-plan-sw-"));
   for (const file of FILES) {
     const path = join(dir, file === "./" ? "index.html" : file);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, server[new URL(file, SCOPE).href]);
   }
-  server[`${SCOPE}version.json`] = JSON.stringify(buildVersion({ appDir: dir, files: FILES, no: 1 }));
+  server[`${SCOPE}version.json`] = JSON.stringify(buildVersion({ appDir: dir, files: FILES, no }));
   return server;
 }
 
@@ -217,6 +217,21 @@ test("版の印: 手元と同じ版なら、版の印だけを取って終わる
   assert.deepEqual(worker.fetched, [`${SCOPE}version.json`]);
   assert.deepEqual(worker.replies, ["up-to-date"]);
   assert.deepEqual(worker.messages, []);
+});
+
+test("版の印: 一式は同じで版の番号だけ変わった（更新の一覧を足しただけ）なら、知らせずに印だけを差し替える", async () => {
+  const server = withVersion(serverWith("v1"), 231);
+  const worker = startWorker(server);
+  await worker.install();
+  withVersion(server, 232);
+  const before = JSON.parse(await worker.request(`${SCOPE}version.json`));
+  assert.equal(before.version, JSON.parse(server[`${SCOPE}version.json`]).version, "一式の中身は同じ");
+  worker.fetched.length = 0;
+  await worker.check();
+  assert.deepEqual(worker.fetched, [`${SCOPE}version.json`], "ほかのファイルは取らない");
+  assert.deepEqual(worker.replies, ["up-to-date"]);
+  assert.deepEqual(worker.messages, [], "読み込み直すボタンは出さない");
+  assert.equal(JSON.parse(await worker.request(`${SCOPE}version.json`)).label, `A232-${before.version.slice(0, 5)}`);
 });
 
 test("版の印: 版が変われば、変わったファイルだけを取り、ほかは手元から写して入れ替える", async () => {

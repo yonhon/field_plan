@@ -37,15 +37,17 @@ document.getElementById("updateBtn").addEventListener("click", async (event) => 
 const appVersion = (globalThis.fieldPlanVersion = { label: null, status: null });
 const versionChanged = () => document.dispatchEvent(new Event("app-version"));
 // 版の印は、Service Worker が手元の一式から出すので、通信はない（いま動いている一式の版）
-fetch("./version.json")
-  .then((response) => (response.ok ? response.json() : null))
-  .then((info) => {
-    if (typeof info?.label === "string") {
-      appVersion.label = info.label;
-      versionChanged();
-    }
-  })
-  .catch(() => {});
+const readLabel = () =>
+  fetch("./version.json")
+    .then((response) => (response.ok ? response.json() : null))
+    .then((info) => {
+      if (typeof info?.label === "string" && info.label !== appVersion.label) {
+        appVersion.label = info.label;
+        versionChanged();
+      }
+    })
+    .catch(() => {});
+readLabel();
 // ?local=1 は動作確認用なので、Service Worker を登録しない（手元のファイルを直したら、すぐ反映させたい）
 if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("local")) {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
@@ -58,6 +60,10 @@ if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("l
     if (event.data === "update-ready" || event.data === "up-to-date") {
       appVersion.status = event.data === "update-ready" ? "update" : "latest";
       versionChanged();
+    }
+    // 中身が同じで版の番号だけ変わったときは、Service Worker が印を差し替えているので、読み直す
+    if (event.data === "up-to-date") {
+      readLabel();
     }
     if (event.data === "update-ready") {
       if (outdated) {

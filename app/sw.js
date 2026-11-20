@@ -183,6 +183,12 @@ async function check() {
   if (server) {
     const kept = await keptVersion(cache);
     if (cache && kept?.version === server.info.version) {
+      // 一式の中身は同じでも、画面に出す版の番号（label。更新の一覧の最後の番号）だけ変わることがある
+      // （updates.json は一式に入れないので、更新の一覧を足しただけでは version は変わらない）。そのときは印だけを差し替える
+      if (kept.label !== server.info.label) {
+        const { status, statusText, headers } = server.response;
+        await cache.put(versionUrl(), new Response(server.body, { status, statusText, headers }));
+      }
       return "up-to-date";
     }
     files = await collect(server, cache, kept);
