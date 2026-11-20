@@ -3933,14 +3933,6 @@ $("warnings").addEventListener("click", (event) => {
     document.querySelector(".map-frame").scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 });
-// スマホの「一覧」: 配置と面積の木を、図の下に出し入れする（たたんでいるあいだも、選んだ図形の行と内容は出す）
-let treeOpen = false;
-$("treeFoldBtn").addEventListener("click", () => {
-  treeOpen = !treeOpen;
-  $("mapRow").classList.toggle("is-tree-folded", !treeOpen);
-  $("treeFoldBtn").setAttribute("aria-expanded", String(treeOpen));
-  $("treeFoldBtn").textContent = treeOpen ? "一覧 ▾" : "一覧 ▸";
-});
 // 木の行を押すと選んで内容を開き、選んでいる行をもう一度押すと閉じる。▸ は畝の行の出し入れ
 $("shapeTree").addEventListener("click", (event) => {
   const toggle = event.target.closest("[data-toggle]");

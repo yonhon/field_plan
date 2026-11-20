@@ -120,6 +120,9 @@ test("圃場図: 配置と面積の欄は図と同じ高さ。「＋ 入力す�
   // 配置と面積の欄は、中身が少なくても図と同じ高さ
   const height = (selector) => page.run(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().height`);
   assert.ok(Math.abs((await height("#appView .area-panel")) - (await height("#appView .map-frame"))) < 1, "欄と図の高さがそろう");
+  // 図と欄は、画面の下まで使う（下の余白は、圃場図の画面の内側の余白だけ）
+  const gap = await page.run(`innerHeight - document.getElementById("mapRow").getBoundingClientRect().bottom`);
+  assert.ok(gap >= 0 && gap <= 13, `図の下の余白（${gap}px）`);
   assert.equal(await targets(), "", "何も選んでいない");
   await page.click('#shapeTree [data-shape="b2"]');
   assert.equal(await targets(), "block:b2", "区画を選んでいる");
@@ -129,33 +132,25 @@ test("圃場図: 配置と面積の欄は図と同じ高さ。「＋ 入力す�
   assert.deepEqual(page.errors, []);
 });
 
-test("スマホの幅: 図の右に配置と面積の合計を並べ、木はたたむ。選んだ図形の行と内容は出し、「一覧」で木を出す", options, async () => {
+test("スマホの幅: 図を幅いっぱいに出し、その下に配置と面積の合計と木をまとめて出す", options, async () => {
   await page.viewport(390);
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="map"]');
   await page.waitFor(`Boolean(document.querySelector('#map [data-shape="b1"]'))`, "圃場図に区画が出る");
   const box = (selector) => page.run(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }; })()`);
+  const row = await box("#mapRow");
   const frame = await box("#appView .map-frame");
+  const panel = await box("#appView .area-panel");
   const sum = await box("#appView .area-sum");
-  assert.ok(sum.left >= frame.right, `合計は図の右（図 ${frame.right}、合計 ${sum.left}）`);
-  assert.ok(sum.top < frame.bottom && sum.bottom > frame.top, "図と同じ高さに並ぶ");
-  assert.ok(frame.width > 200, `図の幅が残る（${frame.width}）`);
+  const tree = await box("#shapeTree");
+  assert.ok(Math.abs(frame.width - row.width) < 1, `図は幅いっぱい（行 ${row.width}、図 ${frame.width}）`);
+  assert.ok(panel.top >= frame.bottom, `配置と面積は図の下（図 ${frame.bottom}、欄 ${panel.top}）`);
+  assert.ok(sum.bottom <= tree.top + 1 && tree.bottom <= panel.bottom + 1, "合計と木は同じ欄の中");
   assert.equal(await page.run(`document.documentElement.scrollWidth <= innerWidth`), true, "横にはみ出さない");
-  assert.equal(await shown("shapeTree"), false, "木はたたんである");
+  assert.ok((await page.run(`[...document.querySelectorAll("#shapeTree > li")].filter((li) => li.offsetParent !== null).length`)) > 1, "木の行を初めから出す");
 
   await page.clickMap([10, 10]); // 区画 A の中（畝のない所）
-  await page.waitFor(`document.getElementById("selectionPanel").offsetParent !== null`, "選んだ区画の内容は出す");
-  assert.deepEqual(
-    await page.run(`[...document.querySelectorAll("#shapeTree > li")].filter((li) => li.offsetParent !== null).map((li) => li.dataset.shape || li.id)`),
-    ["b1", "selectionPanel"],
-    "ほかの木の行は出さず、選んだ行とその内容だけ"
-  );
-
-  await page.click("#treeFoldBtn");
-  assert.ok((await page.run(`[...document.querySelectorAll("#shapeTree > li")].filter((li) => li.offsetParent !== null).length`)) > 1, "「一覧」で木を出す");
-  // 押したときに画面が送られるので、測り直して比べる
-  const [tree, after] = [await box("#shapeTree"), await box("#appView .map-frame")];
-  assert.ok(tree.top >= after.bottom, "木は図の下");
+  await page.waitFor(`document.getElementById("selectionPanel").offsetParent !== null`, "選んだ区画の内容を出す");
   await page.viewport(null);
   assert.deepEqual(page.errors, []);
 });

@@ -379,14 +379,37 @@ label.check {
   gap: 12px;
 }
 
-/* 図と、その右の「配置と面積」。高さは、送って図の上を画面の上に合わせたときに、画面の残りに収まる高さ。
-   右の欄は図と同じ高さにし、はみ出す分は欄の中で送る */
+/* 警告がないときは、警告の欄の分の隙間も空けない（図を画面の上まで寄せる） */
+.map-overview:not(:has(> :not([hidden]))) {
+  display: none;
+}
+
+/* 図と、その右の「配置と面積」。右の欄は図と同じ高さにし、はみ出す分は欄の中で送る。
+   PC の高さは、下の @media (min-width: 801px) で、画面の下まで使う高さにする */
 .map-row {
   display: grid;
   /* 図と右の欄は 3 : 2。狭い PC でも、畝の行（畝の番号、10 文字ほどの品目、幅 × 長さ）が 1 行に収まる幅は残す */
   grid-template-columns: minmax(0, 3fr) minmax(440px, 2fr);
   gap: 12px;
   height: max(360px, calc(100dvh - 190px));
+}
+
+/* PC: 図と右の欄を、ヘッダーの下から画面の下まで使う高さにする（ヘッダーが折り返しても合うよう、圃場図の画面の高さから測る）。
+   右下の「入力する」は欄の上に重なるので、送っている木の下に、ボタンの分の余白を足す（最後の行をボタンの上まで送れる） */
+@media (min-width: 801px) {
+  /* 右下のボタンの分の余白（#appView の padding-bottom: 84px）は、木の下に移す */
+  #appView.layout {
+    container-type: size;
+    padding-bottom: 12px;
+  }
+
+  .map-row {
+    height: max(360px, 100cqh);
+  }
+
+  .area-panel .shape-tree {
+    padding-bottom: 72px;
+  }
 }
 
 /* 配置と面積の欄は、図と同じ高さにする（中身が少なくても、多くても）。合計は上に残し、木だけを欄の中で送る */
@@ -406,11 +429,6 @@ label.check {
 /* 木の行の右（面積、畝の幅 × 長さ）は、途中で折り返さない */
 .shape-tree > li > span:last-child {
   white-space: nowrap;
-}
-
-/* 木の出し入れはスマホだけ */
-.tree-fold-btn {
-  display: none;
 }
 
 .toolbar {
@@ -1850,88 +1868,34 @@ body.schedule-saving #gantt :is(.gantt-bar, .gantt-actual-bar) {
     overflow-y: visible;
   }
 
-  /* スマホでも図の右に並べる。右の欄は細くして、合計だけを出す。木は図の下に出し、初めはたたむ
-     （たたんでいるあいだも、選んだ図形の内容は出す） */
+  /* スマホは、図を画面の幅いっぱいに出し、その下に配置と面積（合計と木）をまとめて出す。木は欄の中で送らず、ページごと送る */
   .map-row {
-    grid-template-columns: minmax(0, 1fr) 112px;
-    grid-template-areas:
-      "map sum"
-      "tree tree";
+    display: flex;
+    flex-direction: column;
     gap: 8px;
     height: auto;
   }
 
   .map-frame {
-    grid-area: map;
     height: 62vh;
-  }
-
-  .side,
-  .area-panel {
-    display: contents;
-  }
-
-  .area-sum,
-  .shape-tree {
-    padding: 8px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: var(--surface);
-    box-shadow: var(--shadow);
-  }
-
-  .area-sum {
-    grid-area: sum;
-    min-width: 0;
-    max-height: 62vh;
-    overflow-y: auto;
-  }
-
-  .area-sum h2 {
-    font-size: 13px;
-  }
-
-  .area-sum .tree-totals {
-    grid-template-columns: 1fr;
-  }
-
-  .area-sum .tree-totals dd {
-    font-size: 12px;
-    overflow-wrap: anywhere;
-  }
-
-  .area-sum .area-part {
-    display: inline-block;
-  }
-
-  /* 図が細いので、表示日・下絵と、図を編集・PDF出力は、収まらなければ次の行へ送る。ボタンの文字は折り返さない */
-  .map-top-row {
-    flex-wrap: wrap;
-  }
-
-  .map-actions .chip-btn {
-    white-space: nowrap;
-  }
-
-  .tree-fold-btn {
-    display: inline-block;
-    padding: 4px 0;
-  }
-
-  .shape-tree {
-    grid-area: tree;
   }
 
   .area-panel .shape-tree {
     overflow-y: visible;
   }
 
-  .map-row.is-tree-folded .shape-tree > li:not(.tree-detail, .is-selected) {
-    display: none;
+  /* 合計は 2 列。収まらないときは、坪の前で折り返す */
+  .area-sum .area-part {
+    display: inline-block;
   }
 
-  .map-row.is-tree-folded .shape-tree:not(:has(> li.tree-detail:not([hidden]))) {
-    display: none;
+  /* 表示日・下絵と、図を編集・PDF出力は、収まらなければ次の行へ送る。ボタンの文字は折り返さない */
+  .map-top-row {
+    flex-wrap: wrap;
+  }
+
+  .map-actions .chip-btn {
+    white-space: nowrap;
   }
 
   /* 日程の入力欄と、台帳の工程作業日数は、値だけを見せる */
