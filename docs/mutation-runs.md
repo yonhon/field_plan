@@ -28,6 +28,32 @@
 
 rac.js の Survived の多くは、アイコンの色の値（文字列）。
 
+### 2026-11-21、mutator 0.5.0（0.4.5 から上げた）、Vitest 5.1.1、Windows 11、Node 24.16.0、単体テスト 257 件
+
+上げる前に、同じコードで 0.4.5 の全体も回して比べた。全体で 7 分 22 秒（変異 7,189 件）。上げたあとの最初の 1 回は、前回の結果（`.mutator/`）を作り直すので、すべて回し直す。
+
+| ファイル | 点数 | 変異 | Killed | Timeout | Survived | NoCoverage |
+|---|---|---|---|---|---|---|
+| app/crops.js | 76.5% | 213 | 163 | 0 | 38 | 12 |
+| app/diary.js | 70.7% | 1028 | 677 | 50 | 241 | 60 |
+| app/geometry.js | 91.4% | 699 | 632 | 7 | 55 | 5 |
+| app/logs.js | 86.6% | 1507 | 1261 | 14 | 172 | 26 |
+| app/pesticide.js | 43.7% | 964 | 418 | 0 | 13 | 525 |
+| app/rac.js | 37.6% | 1137 | 422 | 1 | 686 | 23 |
+| app/schedule.js | 77.3% | 736 | 569 | 0 | 161 | 6 |
+| app/upload.js | 75.5% | 53 | 40 | 0 | 12 | 1 |
+| app/weather.js | 65.8% | 647 | 426 | 0 | 170 | 51 |
+| app/work-time.js | 100.0% | 205 | 204 | 0 | 0 | 0 |
+
+0.4.5 との違い:
+
+- 7,189 件のうち 7,183 件が同じ結果。違ったのは rac.js のアイコンの絵を描く所（117〜136 行）の 6 件で、Survived と RuntimeError が入れ替わった。この 6 件だけを 0.5.0 で回し直すと 6 件とも Survived で、同じ版でも実行のたびに揺れる。版の違いではない。critical の関数ではない。
+- 記録した等価な変異（`mutator.accepted.json` の 43 件）は、そのまま使えた。critical の関数は 941 件に気づき、気づかない 0 件、記録 42 件で、変わらない。
+- `--reporter agent`（Claude 向けの JSON）に、テストの出力が混ざらなくなった（mizchi/mutator#39）。
+- 一部のファイルだけを回すと、回さなかったファイルの記録が、`acceptance.stale`（もうない変異）として挙がる。記録のある logs.js、pesticide.js、work-time.js を含めて回すと 0 件。stale を見て記録を消すのは、全体を回したときだけにする。
+
+ほぼ同じ結果なので、StrykerJS での検算はしなかった。
+
 ## StrykerJS との検算
 
 mutator の結果が正しいかを、仕組みの違う StrykerJS（`node scripts/mutation.mjs`）と比べて確かめます。両方を同じファイルで回し、`node mutation/summary.mjs --compare` で、どちらかだけで「気づかない」になった行を出します。差が数行なら、どちらも正しく動いています。大きくずれたら、どちらかの不具合を疑います（mutator 0.3.0 では、前の実行の計装していないモジュールを使い回して、テストがあるのに NoCoverage になる不具合があった。mizchi/mutator#22）。
