@@ -1,11 +1,12 @@
 // MCP サーバー（supabase/functions/field-mcp）のテスト。実行: node --test "tests/*.test.mjs"
 import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { APP, LIB, SHARED } from "../scripts/sync-mcp-lib.mjs";
+import { syncMcpLib } from "../scripts/sync-mcp-lib.mjs";
 import { createDataSource, loadUpdates } from "../supabase/functions/field-mcp/data.js";
-import { createMcpHandler } from "../supabase/functions/field-mcp/mcp.js";
+
+// サーバーのコードは lib/ の写し（app/ の計算の部品）を読み込む。写しは git に入れないので、読み込む前にここで写す
+syncMcpLib();
+const { createMcpHandler } = await import("../supabase/functions/field-mcp/mcp.js");
 
 const TOKEN = "t".repeat(40);
 const BASE = "https://example.supabase.co/functions/v1/field-mcp";
@@ -113,12 +114,6 @@ function setup({ token = TOKEN, data = DATA, famic = true } = {}) {
   const inField = (name, args = {}) => call(name, { field: "圃場 1", ...args });
   return { handle, post, call, inField };
 }
-
-test("lib/ の写しは、app/ の部品と同じ内容", () => {
-  for (const name of SHARED) {
-    assert.equal(readFileSync(join(LIB, name), "utf8"), readFileSync(join(APP, name), "utf8"), `${name} が古い。node scripts/sync-mcp-lib.mjs を実行する`);
-  }
-});
 
 test("合言葉が違う呼び出しには、何もないのと同じ 404 を返す", async () => {
   const { post } = setup();
@@ -408,20 +403,32 @@ test("データは短いあいだだけ覚えておく", async () => {
   assert.equal(reads, 2);
 });
 
-test("アプリの更新の一覧は、公開しているものを読む。読めなければ、配備したときの写し", async () => {
-  const bundled = [{ no: 1, date: "2026-10-11", title: "古い写し" }];
-  const published = [...bundled, { no: 2, date: "2026-10-24", title: "公開した新しい項目" }];
+test("アプリの更新の一覧は、公開しているものを読む。読めなければ null（写しは持たない）", async () => {
+  const published = [{ no: 1, date: "2026-10-11", title: "最初の項目" }, { no: 2, date: "2026-10-24", title: "公開した新しい項目" }];
   const respond = (status, body) => async () => ({ ok: status === 200, status, json: async () => body });
   const quiet = console.error;
   console.error = () => {};
   try {
-    assert.deepEqual(await loadUpdates({ url: "u", bundled, fetch: respond(200, published) }), published);
-    // 読めない、形が違う、写しより短い（古いものがためてあった）ときは写し
-    assert.equal(await loadUpdates({ url: "u", bundled, fetch: respond(404, null) }), bundled);
-    assert.equal(await loadUpdates({ url: "u", bundled, fetch: async () => { throw new Error("offline"); } }), bundled);
-    assert.equal(await loadUpdates({ url: "u", bundled, fetch: respond(200, { not: "list" }) }), bundled);
-    assert.equal(await loadUpdates({ url: "u", bundled: published, fetch: respond(200, bundled) }), published);
+    assert.deepEqual(await loadUpdates({ url: "u", fetch: respond(200, published) }), published);
+    // 読めない、形が違うときは null
+    assert.equal(await loadUpdates({ url: "u", fetch: respond(404, null) }), null);
+    assert.equal(await loadUpdates({ url: "u", fetch: async () => { throw new Error("offline"); } }), null);
+    assert.equal(await loadUpdates({ url: "u", fetch: respond(200, { not: "list" }) }), null);
+    assert.equal(await loadUpdates({ url: "u", fetch: respond(200, [{ no: "1", date: "2026-10-11", title: "番号が文字" }]) }), null);
   } finally {
     console.error = quiet;
   }
+});
+
+test("get_changes: アプリの更新の一覧を読めなかったときは、更新なしとせず、読めなかったと添える", async () => {
+  const { inField: call } = setup({ data: { ...DATA, updates: null } });
+  const { isError, data } = await call("get_changes");
+  assert.equal(isError, false);
+  assert.ok(data.days.every((day) => day.app_updates.length === 0));
+  assert.match(data.app_updates_unavailable, /読めなかった/);
+  // 更新を含めないときは、添えない
+  const only = (await call("get_changes", { include_app_updates: false })).data;
+  assert.equal(only.app_updates_unavailable, undefined);
+  // 読めたときも、添えない
+  assert.equal((await setup().inField("get_changes")).data.app_updates_unavailable, undefined);
 });

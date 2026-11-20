@@ -94,7 +94,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `scripts/fetch-news.mjs` | 県のページ（病害虫防除技術センターの「新着更新情報」、農業研究センターの「お知らせ」）を読み、新しい記事を DB の `field.news` に足す。読み取りは `scripts/news.mjs`。`.github/workflows/news.yml` が 1 日 2 回（日本時間の 7 時と 16 時ごろ）動かす。初めて読むときは、載っている記事を確認済みとして入れる |
 | `scripts/import_jma_csv.py` | 気象庁の過去の気象データ（日別の CSV）を DB に入れる。いまは `fetch-weather.mjs` に日付を渡せば日別の表から入れ直せるので、ふだんは使わない |
 | `scripts/check_field_sql.py` | `sql/field.sql` を、手元の空の DB で流して確かめる（12 章） |
-| `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す |
+| `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す（テストと配備の前に自動で呼ばれる） |
 | `tests/` | 図形、日程、苗数と施肥量の計算、作業の実績の計算、元に戻すと、MCP サーバーのテスト |
 | `tests/e2e/` | 主な操作と、DB からの読み直しを、Chrome で通して動かすテスト |
 | `mutation/` | 計算のテストが計算の誤りに気づくかを確かめる、Mutation testing（mizchi/mutator）の道具と設定（12 章）。結果は `docs/mutation-runs.md` |
@@ -636,20 +636,23 @@ bun x supabase secrets set "FIELD_MCP_TOKEN=$t" --remote=byhthaiwbutqstrqbwwc
 
 ### サーバーを配備する
 
-画面と同じ計算をするために、`app/` の部品（`geometry.js`、`schedule.js`、`crops.js`、`updates.json`）の写しを、サーバーのフォルダーの `lib/` に置いています。
-`app/` の側か `supabase/functions/field-mcp/` を変えたら、写してから、テストして配備します。合言葉は変わらないので、コネクタの登録はそのまま使えます。
+ふだんは手で配備しません。サーバーが使う `app/` の計算の部品か、`supabase/functions/field-mcp/` が変わった push のときに、GitHub Actions（`.github/workflows/deploy_mcp.yml`）がテストしてから配備します。合言葉は変わらないので、コネクタの登録はそのまま使えます。
+
+- 画面と同じ計算をするために、`app/` の部品（`geometry.js`、`schedule.js`、`crops.js`、`logs.js`、`rac.js`、`html.js`）の写しを、サーバーのフォルダーの `lib/` に置きます。Edge Function は自分のフォルダーの中のファイルしか読み込めないためです。
+- 写しは Git に入れません（`.gitignore`）。`scripts/sync-mcp-lib.mjs` が写し、テスト（`tests/field-mcp.test.mjs` が、サーバーのコードを読み込む前に写す）と、配備の手順の中で自動で呼ばれます。手で写す必要はありません。
+- 配備には、リポジトリのシークレット `SUPABASE_ACCESS_TOKEN`（Supabase のアクセストークン）を使います。配備したあと、違う合言葉で呼んで、サーバーが起動して断ることを確かめます。
+- 部品を足したり外したりしたときは、`scripts/sync-mcp-lib.mjs` の `SHARED` と、ワークフローの `paths` の両方を直します。
+
+手元から配備するときは、先に写します。
 
 ```powershell
 node scripts/sync-mcp-lib.mjs
-node --test "tests/*.test.mjs"
 bun x supabase functions deploy field-mcp --remote=byhthaiwbutqstrqbwwc --no-verify-jwt
 ```
 
-配備の前に、本番のプロジェクトに配備してよいかを確かめられます（Supabase CLI 3.0 から）。`agri_db (byhthaiwbutqstrqbwwc)` と出ていれば、Yes を選びます。確かめずに配備するときは `--yes` を付けます。
+配備の前に、本番のプロジェクトに配備してよいかを確かめられます（Supabase CLI 3.0 から）。`agri_db (byhthaiwbutqstrqbwwc)` と出ていれば、Yes を選びます。
 
-写しが古いままだと、テストが失敗します。
-
-アプリの更新の一覧（`updates.json`）だけは、サーバーが呼ばれるたびに、公開しているアプリ（`https://yonhon.github.io/field_plan/updates.json`）から読みます。そのため、一覧を足したときは、アプリを公開するだけで Claude.ai にも届きます（GitHub Pages が最大 10 分ためておくので、少し遅れることがあります）。読めないときや、公開しているものが配備したときの写しより短いときは、写しを使います。
+アプリの更新の一覧（`updates.json`）は、写しを持たず、サーバーが呼ばれるたびに、公開しているアプリ（`https://yonhon.github.io/field_plan/updates.json`）から読みます。そのため、一覧を足したときは、アプリを公開するだけで Claude.ai にも届きます（GitHub Pages が最大 10 分ためておくので、少し遅れることがあります）。読めないときは、`get_changes` が、アプリの更新を読めなかったことを添えて返します。
 
 ## 12. 手元での確認
 

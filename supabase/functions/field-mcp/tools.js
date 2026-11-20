@@ -367,7 +367,9 @@ export const TOOLS = [
       const inRange = (day) => (!from || day >= from) && (!to || day <= to);
       const changes = data.changes.filter((entry) => inRange(entry.day) && (!plan || entry.plan_id === plan.id));
       const notes = data.notes.filter((note) => note.body && inRange(note.day));
-      const updates = withUpdates ? data.updates.filter((update) => inRange(update.date)) : [];
+      // アプリの更新の一覧を読めなかったとき（data.updates が null）は、更新なしとして並べ、読めなかったことを添える
+      const unreadUpdates = withUpdates && !Array.isArray(data.updates);
+      const updates = withUpdates && !unreadUpdates ? data.updates.filter((update) => inRange(update.date)) : [];
       let days = [...new Set([...changes.map((entry) => entry.day), ...notes.map((note) => note.day), ...updates.map((update) => update.date)])].sort().reverse();
       const total = days.length;
       days = days.slice(0, from || to ? MAX_CHANGE_DAYS : DEFAULT_CHANGE_DAYS);
@@ -391,6 +393,7 @@ export const TOOLS = [
         })),
         plans_changed: [...new Set(changes.map((entry) => entry.plan_name).filter(Boolean))],
         ...(total > days.length ? { more_days: total - days.length, hint: "from と to で期間を絞ると、残りの日を読めます。" } : {}),
+        ...(unreadUpdates ? { app_updates_unavailable: "アプリの更新の一覧を読めなかったため、app_updates は空です。更新がなかったという意味ではありません。" } : {}),
         note: "plan が「共通」の変更は、品目や縮尺など、その圃場のどのプランにも効く変更です。品目の変更は、どの圃場にも効きます。メモ（note）はすべての圃場で共通で、ほかの圃場の変更に触れていることがあります。",
       };
     },

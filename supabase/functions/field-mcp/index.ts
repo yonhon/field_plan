@@ -2,12 +2,11 @@
 // 配備: supabase functions deploy field-mcp --no-verify-jwt
 // 接続先: https://<project-ref>.supabase.co/functions/v1/field-mcp/<FIELD_MCP_TOKEN>
 // SUPABASE_DB_URL は Edge Functions の実行環境に自動で設定される。
-// 画面と同じ計算をするために、lib/ に app/ の部品の写しを置いている（scripts/sync-mcp-lib.mjs で写す）。
+// 画面と同じ計算をするために、lib/ に app/ の部品の写しを置く。lib/ は git に入れず、配備とテストの前に scripts/sync-mcp-lib.mjs が作る。
 // FIELD_FAMIC を false にすると、農薬の使用基準（FAMIC）を使う道具（get_pesticide_usage）と、農薬の作用機構分類を外す。
 import postgres from "npm:postgres@3.4.5";
 import { createDataSource, loadUpdates } from "./data.js";
 import { createMcpHandler } from "./mcp.js";
-import updates from "./lib/updates.json" with { type: "json" };
 
 const sql = postgres(Deno.env.get("SUPABASE_DB_URL") ?? "", { max: 1, prepare: false });
 
@@ -60,7 +59,7 @@ const source = createDataSource({
       changes: await rows("changes", "no desc"),
       notes: await rows("dev_notes", "day desc"),
       workLogs: await workLogs(),
-      updates: await loadUpdates({ url: UPDATES_URL, bundled: updates }),
+      updates: await loadUpdates({ url: UPDATES_URL }),
       ...(famic ? { rac: await rac() } : {}),
     };
   },

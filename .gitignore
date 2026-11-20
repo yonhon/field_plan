@@ -13,6 +13,9 @@ desktop.ini
 # Supabase CLI の作業用ファイル
 supabase/.temp/
 
+# MCP サーバーへ写した app/ の計算の部品。テストと配備の前に scripts/sync-mcp-lib.mjs が作る
+supabase/functions/field-mcp/lib/
+
 # 監査ファイル
 docs/review-*.md
 

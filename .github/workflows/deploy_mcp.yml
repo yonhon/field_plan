@@ -1,0 +1,96 @@
+name: Deploy field-mcp (Supabase Edge Function)
+
+# field-mcp（Claude.ai から計画と作業の記録を読むサーバー）を配備する。
+# サーバーが使う app/ の計算の部品か、サーバーのコードが変わった push のときに、テストしてから配備する。
+# 部品の写し（supabase/functions/field-mcp/lib/）は git に入れていないので、配備の前に scripts/sync-mcp-lib.mjs で写す。
+# 部品を足したり外したりしたら、下の paths と scripts/sync-mcp-lib.mjs の SHARED の両方を直す。
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "app/geometry.js"
+      - "app/schedule.js"
+      - "app/crops.js"
+      - "app/logs.js"
+      - "app/rac.js"
+      - "app/html.js"
+      - "supabase/functions/field-mcp/**"
+      - "scripts/sync-mcp-lib.mjs"
+      - "tests/field-mcp.test.mjs"
+      - ".github/workflows/deploy_mcp.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "field-mcp-deploy"
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      # field-mcp のテストは、サーバーのコードを読み込む前に、部品を lib/ へ写す
+      - name: Test
+        run: node --test "tests/*.test.mjs"
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: byhthaiwbutqstrqbwwc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check secret
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::error::リポジトリのシークレット SUPABASE_ACCESS_TOKEN が未設定です（README の「MCP サーバーを配備する」を参照）"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Copy the app modules into lib/
+        run: node scripts/sync-mcp-lib.mjs
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 3.2.0
+
+      # 本番に配備してよいかの確かめ（CLI 3.0 から）は、ここでは聞けないので --yes で通す
+      - name: Deploy field-mcp
+        run: supabase functions deploy field-mcp --remote="$SUPABASE_PROJECT_REF" --no-verify-jwt --yes
+
+      # 合言葉を持たないので、違う合言葉で呼び、サーバー自身が返す 404（本文が "Not Found"）を確かめる。
+      # 部品の読み込みに失敗して起動できないときは、5xx か、Supabase の JSON の応答になる
+      - name: Smoke test
+        run: |
+          url="https://${SUPABASE_PROJECT_REF}.supabase.co/functions/v1/field-mcp/smoke-test"
+          for i in 1 2 3 4 5; do
+            status=$(curl -sS -o body.txt -w '%{http_code}' -X POST "$url" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' || true)
+            if [ "$status" = "404" ] && [ "$(cat body.txt)" = "Not Found" ]; then
+              echo "OK: field-mcp が起動して、違う合言葉を断った"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::配備後の確認に失敗しました（HTTP $status）: $(cat body.txt)"
+          exit 1

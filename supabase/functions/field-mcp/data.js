@@ -2,8 +2,8 @@
 const CACHE_MS = 30_000;
 
 // アプリの更新の一覧は、公開しているアプリのものを読む。配備し直さなくても、アプリを公開すれば新しい一覧が届く。
-// 読めないとき、中身がおかしいとき、配備したときの写し（bundled）より短いとき（古いものがためてあった）は、写しを使う
-export async function loadUpdates({ url, bundled, fetch = globalThis.fetch, timeoutMs = 5000 }) {
+// 写しは持たない。読めないとき、中身がおかしいときは null を返す（get_changes が「読めなかった」と添える）
+export async function loadUpdates({ url, fetch = globalThis.fetch, timeoutMs = 5000 }) {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) {
@@ -13,10 +13,10 @@ export async function loadUpdates({ url, bundled, fetch = globalThis.fetch, time
     if (!Array.isArray(list) || !list.every((item) => Number.isInteger(item.no) && item.date && item.title)) {
       throw new Error("一覧の形が違う");
     }
-    return list.length >= bundled.length ? list : bundled;
+    return list;
   } catch (error) {
-    console.error("updates.json を読めなかったので、配備したときの写しを使う", error);
-    return bundled;
+    console.error("updates.json を読めなかった", error);
+    return null;
   }
 }
 
