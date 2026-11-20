@@ -28,6 +28,8 @@ import {
 import { draw } from "./draw.js";
 import { openDiaryTarget } from "./diary-view.js";
 import { escapeHtml } from "./html.js";
+import { timeAllocation, typesText } from "./revenue-view.js";
+import { formatMinutes } from "./work-time.js";
 
 const $ = (id) => document.getElementById(id);
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -384,7 +386,24 @@ function asideHtml(c, active) {
   if (!c.planting) {
     return "";
   }
-  return [famicEnabled() && active ? usageHtml(c) : "", accumulationHtml(), forecastHtml()].join("");
+  return [workTimeHtml(c), famicEnabled() && active ? usageHtml(c) : "", accumulationHtml(), forecastHtml()].join("");
+}
+
+// 作業時間（「今日」のタブで測った時間）。その作付でした作業と、区画全体にした作業から面積の比で分けた分を分けて出す。
+// 測った時間がなければ出さない。分け方は revenue-view.js
+function workTimeHtml(c) {
+  const time = timeAllocation()?.plantings.get(c.planting.id);
+  if (!time) {
+    return "";
+  }
+  return (
+    '<section class="panel work-time-panel"><h2>作業時間</h2><table class="usage-table"><tbody>' +
+    `<tr><td>この作付でした作業</td><td class="num">${formatMinutes(time.direct)}</td></tr>` +
+    `<tr><td>区画全体の作業から分けた分</td><td class="num">${formatMinutes(time.fromBlock)}</td></tr>` +
+    `<tr class="work-time-total"><td>合計</td><td class="num">${formatMinutes(time.direct + time.fromBlock)}</td></tr></tbody></table>` +
+    `<p class="muted">${escapeHtml(typesText(time.types, anyTypeLabel))}</p>` +
+    '<p class="muted">区画全体の作業は、その日にある畝の作付に、畝＋通路の面積の比で分けています（畝立ての前の作業は、次に入る作付に分けます）。</p></section>'
+  );
 }
 
 // 農薬の使用回数。有効成分ごとの回数と上限と、その下に、その成分を含む本剤ごとの回数と上限。
@@ -548,10 +567,15 @@ function blockInfoHtml(c) {
   const live = beds.filter((bed) => existsOn(bed.start_date, bed.removed_on, today));
   const summary = summarize({ ...state(), beds, logs: state().logs || [] });
   const text = `区画 ${polygonArea(c.block.shape).toFixed(1)} ㎡・畝 ${live.length} 本`;
+  // 作業時間 = 区画全体にした作業 + 中の作付でした作業（revenue-view.js）
+  const time = timeAllocation()?.blocks.get(c.block.id);
+  const timeHtml = time
+    ? `<span class="muted detail-info block-work-time">作業時間 ${formatMinutes(time.own + time.beds)}（区画全体 ${formatMinutes(time.own)}・畝 ${formatMinutes(time.beds)}）</span>`
+    : "";
   if (!summary.crops.length) {
-    return `<span class="muted detail-info">${escapeHtml(text)}</span>`;
+    return `<span class="muted detail-info">${escapeHtml(text)}</span>${timeHtml}`;
   }
-  return `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗と肥料の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>`;
+  return `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗と肥料の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>${timeHtml}`;
 }
 
 // 日程の画面で「全体」を選んだときの頭。名前と、すべての区画の面積・畝の本数（押すと苗と肥料の集計を出し入れする。区画の頭と同じ）、
@@ -595,11 +619,13 @@ function headHtml(c, active, rootId = "plantingBody") {
     // （品目を登録していない作付には出さない）
     const fertilizer = crop && state().fertilizers.find((item) => item.id === crop.fertilizer_id);
     const seedlings = crop ? plantingNumbers(c.bed.shape, crop, fertilizer, plantingSpec(c.planting, crop, state().logs || [])).seedlings : null;
+    const time = timeAllocation()?.plantings.get(c.planting.id);
     info = [
       mulch ? "マルチ" : "裸地",
       area ? `畝＋通路 ${area.toFixed(1)} ㎡` : "",
       seedlings !== null ? `苗 ${seedlings.toLocaleString("ja-JP")}` : "",
       end ? `収穫完了予定 ${formatDay(end)}` : "",
+      time ? `作業時間 ${formatMinutes(time.direct + time.fromBlock)}${time.fromBlock ? `（うち区画の作業から ${formatMinutes(time.fromBlock)}）` : ""}` : "",
     ]
       .filter(Boolean)
       .join("・");

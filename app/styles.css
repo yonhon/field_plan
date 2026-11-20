@@ -5351,3 +5351,8 @@ dialog.has-undo-pad {
   text-align: left;
   font-weight: 400;
 }
+
+/* 作付の詳細の作業時間の欄（planting-view.js の workTimeHtml） */
+.work-time-total td {
+  font-weight: 700;
+}

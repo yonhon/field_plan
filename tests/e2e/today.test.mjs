@@ -290,3 +290,35 @@ test("今日: 計画にない作業を実績につなぐと、実績の名前で
   assert.equal(saved.started_at, start.toISOString(), "直していない始めた時刻は元のまま");
   assert.deepEqual(page.errors, []);
 });
+
+test("作業時間: 区画全体の作業は、その日の畝の作付に面積の比で分け、作付の詳細・区画の頭・収支のタブに出す", options, async () => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const iso = (minutes) => new Date(start.getTime() + minutes * 60000).toISOString();
+  const row = (id, from, to, extra) => ({ id, field_id: "f1", kind: "work", work_type: "harvest", work_ids: [], log_id: null, label: "", started_at: iso(from), stopped_at: iso(to), source: "measured", created_at: iso(from), ...extra });
+  const data = seed({
+    workSessions: [
+      // 区画 A 全体の耕うんを 76 分。畝＋通路の面積は、畝 1 が幅 4 m、畝 2 が幅 34 m なので、8 分と 68 分に分ける
+      row("s1", 0, 76, { work_type: "rotary", work_ids: ["wb"] }),
+      // 畝 1 の収穫を 20 分
+      row("s2", 76, 96, { work_ids: ["w1"] }),
+    ],
+  });
+  data.works.push({ id: "wb", plan_id: "p1", planting_id: null, block_id: "b1", seq: 1, work_type: "rotary", plan_start: today, plan_end: today });
+  await page.loadApp(data);
+  await page.run(`location.hash = "#detail/planting/pl1"`);
+  await page.waitFor(`document.querySelector("#plantingBody .detail-info")?.textContent.includes("作業時間 0:28（うち区画の作業から 0:08）")`, "作付の詳細の頭");
+  const panel = await page.run(`[...document.querySelectorAll("#plantingBody .work-time-panel td.num")].map((td) => td.textContent)`);
+  assert.deepEqual(panel, ["0:20", "0:08", "0:28"]);
+  assert.match(await page.run(`document.querySelector("#plantingBody .work-time-panel p").textContent`), /収穫 0:20、耕うん（区画） 0:08|収穫 0:20、.+（区画） 0:08/);
+
+  await page.run(`location.hash = "#schedule/block/b1"`);
+  await page.waitFor(`document.querySelector("#blockHead .block-work-time")?.textContent === "作業時間 1:36（区画全体 1:16・畝 0:20）"`, "区画の頭");
+
+  await page.openView("revenue");
+  await page.waitFor(`document.querySelectorAll("#revenueBody tbody tr[data-planting]").length === 2`, "収支の作付の行");
+  const cells = await page.run(`[...document.querySelectorAll("#revenueBody tbody tr")].map((tr) => [...tr.cells].slice(0, 4).map((td) => td.textContent))`);
+  assert.deepEqual(cells, [["A 畝1", "試験菜", "0:28", "0:08"], ["A 畝2", "試験菜", "1:08", "1:08"]]);
+  assert.equal(await page.run(`document.querySelector("#revenueBody tfoot .num").textContent`), "1:36");
+  assert.deepEqual(page.errors, []);
+});

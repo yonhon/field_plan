@@ -87,10 +87,6 @@
     "reason": "等価: created_at がないときの予備。DB の記録はいつも created_at を持つ",
     "where": "app/logs.js:652:117 \"\" -> \"Stryker was here!\""
   },
-  "271fn8ad2g0": {
-    "reason": "等価: workMinutes の重みの初めの関数が null を返しても undefined を返しても、Number.isFinite が false になり、均等に分ける",
-    "where": "app/work-time.js:73:54 null -> undefined"
-  },
   "28bhge8mhh3": {
     "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
     "where": "app/pesticide.js:277:42 [] -> [\"Stryker was here!\"]"

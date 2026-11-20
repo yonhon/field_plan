@@ -3,6 +3,8 @@ import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import {
   SESSION_KINDS,
+  allocateMinutes,
+  shareByWeight,
   checkTimes,
   clockOf,
   daySessions,
@@ -16,7 +18,6 @@ import {
   sessionTotals,
   splitMinutes,
   startWrites,
-  workMinutes,
 } from "../app/work-time.js";
 
 // この端末の日時から作る（時差によらず、同じ結果にする）
@@ -94,27 +95,6 @@ test("合計: 作業と、準備・片付けと移動に分ける", () => {
   assert.deepEqual(sessionTotals([]), { work: 0, prep: 0, move: 0, total: 0 });
 });
 
-test("作業ごとの時間: 作業をいくつも持つ計測は、重みの比で分ける。重みが分からなければ均等", () => {
-  const list = [
-    session("a", at("2027-05-12", "08:00"), at("2027-05-12", "09:00"), { work_ids: ["w1", "w2"] }),
-    session("b", at("2027-05-12", "10:00"), at("2027-05-12", "10:30"), { work_ids: ["w1"] }),
-    session("c", at("2027-05-12", "11:00"), at("2027-05-12", "11:30"), { kind: "prep" }),
-    { ...session("d", at("2027-05-12", "12:00"), at("2027-05-12", "12:30")), work_ids: undefined },
-  ];
-  const even = workMinutes(list);
-  assert.equal(even.get("w1"), 60);
-  assert.equal(even.get("w2"), 30);
-  assert.equal(even.size, 2);
-  const weighted = workMinutes(list, (id) => ({ w1: 30, w2: 10 })[id]);
-  assert.equal(weighted.get("w1"), 75);
-  assert.equal(weighted.get("w2"), 15);
-  // 1 つでも重みが分からなければ、その計測は均等に分ける
-  const partial = workMinutes(list, (id) => ({ w1: 30 })[id]);
-  assert.equal(partial.get("w2"), 30);
-  const zero = workMinutes(list, (id) => ({ w1: 30, w2: 0 })[id]);
-  assert.equal(zero.get("w2"), 30);
-});
-
 test("持ち主に分ける: 重みの比で分け、持ち主のない計測は unassigned に足す", () => {
   const list = [
     session("a", at("2027-05-12", "08:00"), at("2027-05-12", "09:00"), { owners: [{ key: "p1", weight: 20 }, { key: "p2", weight: 40 }] }),
@@ -168,4 +148,71 @@ test("時刻の確かめ: 始めた時刻がない、止めた時刻が前なら
   assert.equal(checkTimes(at("2027-05-12", "09:00"), at("2027-05-12", "08:00")), "止めた時刻が、始めた時刻より前です");
   assert.equal(checkTimes(at("2027-05-12", "09:00"), at("2027-05-12", "09:00")), null);
   assert.equal(checkTimes(at("2027-05-12", "09:00"), null), null);
+});
+
+test("重みの比で分ける: 重みが分からないか 0 以下なら均等。同じ key は足し合わせる", () => {
+  assert.deepEqual([...shareByWeight(60, [{ key: "a", weight: 1 }, { key: "b", weight: 2 }])], [["a", 20], ["b", 40]]);
+  assert.deepEqual([...shareByWeight(60, [{ key: "a", weight: 1 }, { key: "b", weight: null }])], [["a", 30], ["b", 30]]);
+  assert.deepEqual([...shareByWeight(60, [{ key: "a", weight: 1 }, { key: "b", weight: -1 }])], [["a", 30], ["b", 30]]);
+  assert.deepEqual([...shareByWeight(60, [{ key: "a", weight: 1 }, { key: "a", weight: 1 }, { key: "b", weight: 2 }])], [["a", 30], ["b", 30]]);
+  assert.equal(shareByWeight(60, []).size, 0);
+});
+
+test("作付と区画に分ける: 区画 = 区画全体の作業 + 作付の作業。作付 = 作付の作業 + 区画全体の作業の面積按分", () => {
+  const list = [
+    // 作付 p1 で 30 分（収穫）
+    session("a", at("2027-05-12", "08:00"), at("2027-05-12", "08:30"), { work_type: "harvest", owners: [{ key: "planting:p1", weight: 10 }] }),
+    // 区画 B1 全体で 60 分（防除）。その日の作付は p1（10 ㎡）と p2（20 ㎡）
+    session("b", at("2027-05-12", "09:00"), at("2027-05-12", "10:00"), { work_type: "spray", owners: [{ key: "block:B1", weight: 30 }] }),
+    // 区画 B1 全体で 12 分。その日（5/1）は分ける作付がない
+    session("c", at("2027-05-01", "09:00"), at("2027-05-01", "09:12"), { work_type: "rotary", owners: [{ key: "block:B1", weight: 30 }] }),
+    // 持ち主のない作業
+    session("d", at("2027-05-12", "11:00"), at("2027-05-12", "11:05"), { owners: [] }),
+    // 区画のない作付（消えた畝など）
+    session("e", at("2027-05-12", "12:00"), at("2027-05-12", "12:10"), { work_type: "weed", owners: [{ key: "planting:gone", weight: 1 }] }),
+  ];
+  const result = allocateMinutes(list, {
+    ownersOf: (item) => item.owners,
+    plantingBlock: (id) => ({ p1: "B1", p2: "B1" })[id] || null,
+    blockPlantings: (blockId, date) => (blockId === "B1" && date === "2027-05-12" ? [{ id: "p1", weight: 10 }, { id: "p2", weight: 20 }] : []),
+  });
+  const p1 = result.plantings.get("p1");
+  const p2 = result.plantings.get("p2");
+  assert.equal(p1.direct, 30);
+  assert.equal(p1.fromBlock, 20);
+  assert.equal(p2.direct, 0);
+  assert.equal(p2.fromBlock, 40);
+  assert.deepEqual([...p1.types], [["harvest", 30], ["block:spray", 20]]);
+  assert.deepEqual([...p2.types], [["block:spray", 40]]);
+  assert.deepEqual(result.blocks.get("B1"), { own: 72, beds: 30, shared: 60 });
+  assert.equal(result.plantings.get("gone").direct, 10);
+  assert.equal(result.blocks.size, 1);
+  assert.equal(result.unassigned, 5);
+  // 区画の中の作付の時間の合計は、区画の時間から、分ける作付がなかった分を引いたもの
+  assert.equal(p1.direct + p1.fromBlock + p2.direct + p2.fromBlock, 72 + 30 - (72 - 60));
+});
+
+test("作付と区画に分ける: 種類のない計測は空の種類。持ち主のない計測は unassigned だけ", () => {
+  const result = allocateMinutes(
+    [session("a", at("2027-05-12", "08:00"), at("2027-05-12", "08:10"), { work_type: null })],
+    { ownersOf: () => [{ key: "planting:p1", weight: 1 }], plantingBlock: () => null, blockPlantings: () => [] }
+  );
+  assert.deepEqual([...result.plantings.get("p1").types], [["", 10]]);
+  assert.equal(result.unassigned, 0);
+  const none = allocateMinutes([session("a", at("2027-05-12", "08:00"), at("2027-05-12", "08:10"))], { ownersOf: () => null, plantingBlock: () => null, blockPlantings: () => [] });
+  assert.equal(none.unassigned, 10);
+  assert.equal(none.plantings.size + none.blocks.size, 0);
+});
+
+test("作付と区画に分ける: 同じ作付の同じ種類は足し合わせる。区画の作付が分からなければ区画にだけ残す", () => {
+  const result = allocateMinutes(
+    [
+      session("a", at("2027-05-12", "08:00"), at("2027-05-12", "08:10"), { work_type: "weed", owners: [{ key: "planting:p1", weight: 1 }] }),
+      session("b", at("2027-05-12", "09:00"), at("2027-05-12", "09:20"), { work_type: "weed", owners: [{ key: "planting:p1", weight: 1 }] }),
+      session("c", at("2027-05-12", "10:00"), at("2027-05-12", "10:15"), { work_type: "rotary", owners: [{ key: "block:B1", weight: 1 }] }),
+    ],
+    { ownersOf: (item) => item.owners, plantingBlock: () => "B1", blockPlantings: () => undefined }
+  );
+  assert.deepEqual([...result.plantings.get("p1").types], [["weed", 30]]);
+  assert.deepEqual(result.blocks.get("B1"), { own: 15, beds: 30, shared: 0 });
 });

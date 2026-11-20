@@ -68,24 +68,6 @@ export function sessionTotals(sessions, now = new Date()) {
   return totals;
 }
 
-// 計画の作業ごとの、計測の時間（分）。1 件の計測が作業をいくつも持つとき（同じ日の同じ作業を何か所かまとめて始めた）は、
-// weight（作業 → 重み。畝の面積など）の比で分ける。重みが分からない作業があれば、均等に分ける
-export function workMinutes(sessions, weight = () => null, now = new Date()) {
-  const result = new Map();
-  for (const session of sessions) {
-    const ids = session.work_ids || [];
-    const minutes = sessionMinutes(session, now);
-    const weights = ids.map((id) => weight(id));
-    const usable = weights.every((value) => Number.isFinite(value) && value > 0);
-    const sum = usable ? weights.reduce((a, b) => a + b, 0) : ids.length;
-    ids.forEach((id, index) => {
-      const share = minutes * (usable ? weights[index] : 1) / sum;
-      result.set(id, (result.get(id) || 0) + share);
-    });
-  }
-  return result;
-}
-
 // 計測の時間を、持ち主（作付、区画など）に分ける。ownersOf(session) は [{ key, weight }]（weight は畝の面積など）。
 // 重みが 1 つでも分からなければ、均等に分ける。持ち主のない計測（共通の時間、つないでいない作業）は unassigned に足す。
 // 返すのは { minutes: Map(key → 分), unassigned: 分 }
@@ -99,13 +81,86 @@ export function splitMinutes(sessions, ownersOf, now = new Date()) {
       unassigned += length;
       continue;
     }
-    const usable = owners.every((owner) => Number.isFinite(owner.weight) && owner.weight > 0);
-    const sum = usable ? owners.reduce((total, owner) => total + owner.weight, 0) : owners.length;
-    for (const owner of owners) {
-      minutes.set(owner.key, (minutes.get(owner.key) || 0) + (length * (usable ? owner.weight : 1)) / sum);
+    for (const [key, share] of shareByWeight(length, owners)) {
+      minutes.set(key, (minutes.get(key) || 0) + share);
     }
   }
   return { minutes, unassigned };
+}
+
+// 分を、重みの比で分ける。items は [{ key, weight }]。重みが 1 つでも分からなければ（0 以下を含む）、均等に分ける。
+// 同じ key が何度出てもよい（足し合わせる）。返すのは Map(key → 分)
+export function shareByWeight(minutes, items) {
+  const result = new Map();
+  const usable = items.every((item) => Number.isFinite(item.weight) && item.weight > 0);
+  const sum = usable ? items.reduce((total, item) => total + item.weight, 0) : items.length;
+  for (const item of items) {
+    result.set(item.key, (result.get(item.key) || 0) + (minutes * (usable ? item.weight : 1)) / sum);
+  }
+  return result;
+}
+
+// 計測の時間を、作付と区画に分ける。区画の時間は、区画全体にした作業（own）と、中の作付でした作業（beds）の合計。
+// 作付の時間は、その作付でした作業（direct）と、区画全体にした作業を面積の比で分けた分（fromBlock）の合計。
+// 区画の中の作付の時間を足すと、区画の時間とそろう（区画全体の作業を分ける作付がない時期の分だけ、区画にだけ残る）。
+// - ownersOf(session) は [{ key: "planting:ID" | "block:ID", weight }]（splitMinutes と同じ）
+// - plantingBlock(plantingId) は、作付の区画の ID
+// - blockPlantings(blockId, date) は、その日に区画全体の作業を分ける作付 [{ id, weight }]（weight は畝＋通路の面積）
+// 返すのは { plantings: Map(ID → { direct, fromBlock, types }), blocks: Map(ID → { own, beds, shared }), unassigned }。
+// types は作業の種類 → 分（区画全体の作業から分けた分は "block:種類" の形）。shared は、own のうち作付に分けた分
+export function allocateMinutes(sessions, { ownersOf, plantingBlock, blockPlantings }, now = new Date()) {
+  const plantings = new Map();
+  const blocks = new Map();
+  let unassigned = 0;
+  const plantingOf = (id) => {
+    if (!plantings.has(id)) {
+      plantings.set(id, { direct: 0, fromBlock: 0, types: new Map() });
+    }
+    return plantings.get(id);
+  };
+  const blockOf = (id) => {
+    if (!blocks.has(id)) {
+      blocks.set(id, { own: 0, beds: 0, shared: 0 });
+    }
+    return blocks.get(id);
+  };
+  const addType = (item, type, minutes) => item.types.set(type, (item.types.get(type) || 0) + minutes);
+  for (const session of sessions) {
+    const owners = ownersOf(session) || [];
+    if (!owners.length) {
+      unassigned += sessionMinutes(session, now);
+      continue;
+    }
+    const minutes = shareByWeight(sessionMinutes(session, now), owners);
+    const date = localDateOf(session.started_at);
+    const type = session.work_type || "";
+    for (const [key, share] of minutes) {
+      const [kind, id] = key.split(":");
+      if (kind === "planting") {
+        const item = plantingOf(id);
+        item.direct += share;
+        addType(item, type, share);
+        const block = plantingBlock(id);
+        if (block) {
+          blockOf(block).beds += share;
+        }
+        continue;
+      }
+      const block = blockOf(id);
+      block.own += share;
+      const targets = blockPlantings(id, date) || [];
+      if (!targets.length) {
+        continue;
+      }
+      for (const [plantingId, part] of shareByWeight(share, targets.map((target) => ({ key: target.id, weight: target.weight })))) {
+        const item = plantingOf(plantingId);
+        item.fromBlock += part;
+        addType(item, `block:${type}`, part);
+      }
+      block.shared += share;
+    }
+  }
+  return { plantings, blocks, unassigned };
 }
 
 // 作業を始めるときの書き込み。計測中の計測があれば、同じ時刻で止める（1 人なので、同時に進む作業は 1 つ）。
