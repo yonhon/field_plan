@@ -118,14 +118,27 @@ function fakeCaches() {
 }
 
 // sw.js を、まねた Service Worker の中で動かす。server は { URL: 中身 }、中身が null なら取れない
-function startWorker(server) {
+// windows は、開いている画面（{ url }）。通知を押したときに使う
+function startWorker(server, { windows = null } = {}) {
   const listeners = {};
+  const opened = []; // 新しく開いた画面の URL
+  const focused = []; // 前に出した画面の URL
+  const posted = []; // 開いている画面に送ったこと（URL と中身）
+  const windowClients = (windows || []).map((client) => ({
+    ...client,
+    focus: async () => void focused.push(client.url),
+    postMessage: (data) => posted.push({ url: client.url, data: JSON.parse(JSON.stringify(data)) }), // sw.js の中で作った値を、こちらの値に直す
+  }));
   const messages = []; // すべての画面に知らせたこと
   const replies = []; // 確かめるよう頼んだ画面への返事
   const caches = fakeCaches();
   const self = {
     registration: { scope: SCOPE },
-    clients: { matchAll: async () => [{ postMessage: (data) => messages.push(data) }], claim: async () => {} },
+    clients: {
+      matchAll: async () => (windows ? windowClients : [{ postMessage: (data) => messages.push(data) }]),
+      openWindow: async (url) => void opened.push(url),
+      claim: async () => {},
+    },
     skipWaiting: async () => {},
     addEventListener: (type, listener) => (listeners[type] = listener),
   };
@@ -156,6 +169,10 @@ function startWorker(server) {
     fetched,
     install: () => dispatch("install"),
     replies,
+    opened,
+    focused,
+    posted,
+    click: (data) => dispatch("notificationclick", { notification: { data } }),
     check: () => dispatch("message", { data: "check", source: { postMessage: (data) => replies.push(data) } }),
     request: async (url, mode = "no-cors") => {
       const responded = await dispatch("fetch", { request: { method: "GET", url, mode } });
@@ -283,4 +300,20 @@ test("版の印: 画面には、手元の一式の版の印を出す（サーバ
   server[`${SCOPE}app.js`] = "app.js v2";
   withVersion(server);
   assert.equal(await worker.request(`${SCOPE}version.json`), kept);
+});
+
+test("計測中の通知を押すと、開いている画面を前に出して「今日」のタブにさせる。読み込み直さない", async () => {
+  const worker = startWorker(serverWith("v1"), { windows: [{ url: "https://example.test/other/" }, { url: `${SCOPE}#diary` }] });
+  await worker.click({ view: "today" });
+  assert.deepEqual(worker.focused, [`${SCOPE}#diary`]);
+  assert.deepEqual(worker.posted, [{ url: `${SCOPE}#diary`, data: { type: "show-view", view: "today" } }]);
+  assert.deepEqual(worker.opened, []);
+});
+
+test("計測中の通知を押したとき、開いている画面がなければ「今日」のタブで開く。ほかの通知には触らない", async () => {
+  const worker = startWorker(serverWith("v1"), { windows: [] });
+  await worker.click({ view: "today" });
+  assert.deepEqual(worker.opened, [`${SCOPE}#today`]);
+  await worker.click(null);
+  assert.deepEqual(worker.opened, [`${SCOPE}#today`]);
 });

@@ -41,6 +41,7 @@ const FILES = [
   "user-menu.js",
   "work-time.js",
   "today-view.js",
+  "timer-notice.js",
   "revenue-view.js",
   "field-plans.js",
   "news-view.js",
@@ -281,5 +282,27 @@ self.addEventListener("fetch", (event) => {
     current()
       .then((cache) => cache && cache.match(key))
       .then((kept) => kept || fetch(request))
+  );
+});
+
+// 計測中の通知（timer-notice.js）を押したら、「今日」のタブを出す。開いている画面があれば、それを前に出して切り替えさせる
+// （読み込み直さない。書きかけの日記などを残す）。なければ「今日」のタブで開く。通知は消さない（計測中のあいだは出しておく）
+self.addEventListener("notificationclick", (event) => {
+  const view = event.notification.data?.view;
+  if (view !== "today") {
+    return;
+  }
+  event.waitUntil(
+    (async () => {
+      const base = scope();
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const open = windows.find((client) => new URL(client.url).pathname.startsWith(base.pathname));
+      if (open) {
+        await open.focus();
+        open.postMessage({ type: "show-view", view });
+        return;
+      }
+      await self.clients.openWindow(new URL(`./#${view}`, base).href);
+    })()
   );
 });

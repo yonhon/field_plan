@@ -25,6 +25,7 @@ import {
   sessionTotals,
   startWrites,
 } from "./work-time.js";
+import { askNoticePermission, syncTimerNotice, timerNoticeText } from "./timer-notice.js";
 
 const $ = (id) => document.getElementById(id);
 const PAUSE_KEY = "field_plan_paused"; // 休憩中の作業（再開で始め直す中身）。この端末だけ
@@ -112,6 +113,8 @@ export async function startSession(start) {
   if (!state().field) {
     return;
   }
+  // 通知の許しは、押した操作の続きでしか尋ねられないので、保存を待つ前に尋ねる
+  askNoticePermission(renderToday);
   savePaused(null);
   const row = { field_id: state().field.id, ...start };
   const name = sessionLabel(row);
@@ -158,6 +161,9 @@ function renderBar() {
   }
   const running = runningSession(sessions());
   const paused = running ? null : loadPaused();
+  const where = running && running.field_id !== state().field.id ? `（${ctx.fieldName(running.field_id)}）` : "";
+  // 端末の通知欄にも、計測中の作業を帯と同じ名前で出す（休憩中は出さない）
+  syncTimerNotice(running ? timerNoticeText(`${sessionLabel(running)}${where}`, clockOf(running.started_at)) : null);
   if (!running && !paused) {
     bar.hidden = true;
     bar.replaceChildren();
@@ -165,7 +171,6 @@ function renderBar() {
   }
   bar.hidden = false;
   if (running) {
-    const where = running.field_id !== state().field.id ? `（${ctx.fieldName(running.field_id)}）` : "";
     draw(
       bar,
       `<span class="timer-dot" aria-hidden="true"></span>` +
