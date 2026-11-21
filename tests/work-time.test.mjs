@@ -2,6 +2,7 @@
 import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import {
+  COMMON_KINDS,
   SESSION_KINDS,
   allocateMinutes,
   shareByWeight,
@@ -50,6 +51,15 @@ test("分の書き方: 時:分。1 分の単位で四捨五入し、負は 0", (
 
 test("計測の種類の名前", () => {
   assert.deepEqual(SESSION_KINDS, { work: "作業", observe: "観察", prep: "準備・片付け", move: "移動" });
+});
+
+test("共通の時間の種類: 画面には、観察、準備・片付け、移動の順に並べる。作業は入らない", () => {
+  // 「今日」のタブのボタン、その日の合計、収入のタブの表が、この順に並ぶ
+  assert.deepEqual(COMMON_KINDS, ["observe", "prep", "move"]);
+  assert.deepEqual(
+    COMMON_KINDS.map((kind) => SESSION_KINDS[kind]),
+    ["観察", "準備・片付け", "移動"]
+  );
 });
 
 test("計測中の計測: 止めていないもののうち、最後に始めたもの", () => {
