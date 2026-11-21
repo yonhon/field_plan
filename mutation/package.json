@@ -4,7 +4,7 @@
   "description": "Mutation testing (mizchi/mutator) for the calculation tests. Installed here so the repository root has no package.json. See README section 12.",
   "type": "module",
   "devDependencies": {
-    "@mizchi/mutator": "0.5.0",
+    "@mizchi/mutator": "0.5.3",
     "vitest": "5.1.1"
   }
 }
