@@ -74,6 +74,11 @@ test("今日: 「始める」で測り始め、次の作業を始めると前の
   assert.match(first.label, /収穫/);
   assert.match(await page.run(`document.querySelector("#timerBar .timer-name").textContent`), /収穫/);
 
+  // 共通の時間のボタンは、観察、準備・片付け、移動の順
+  assert.deepEqual(
+    await page.run(`[...document.querySelectorAll("#todayStart [data-today]")].map((button) => button.textContent)`),
+    ["観察", "準備・片付け", "移動", "計画にない作業…"]
+  );
   // 準備・片付けを始めると、収穫は同じ時刻で止まる
   await page.click('#todayStart [data-today="prep"]');
   await page.waitFor(`document.querySelector("#timerBar .timer-name")?.textContent === "準備・片付け"`, "帯が準備・片付けになる");
@@ -93,6 +98,10 @@ test("今日: 「始める」で測り始め、次の作業を始めると前の
   await page.click('#todayStart [data-today="move"]');
   await page.openView("schedule");
   await page.waitFor(`!document.getElementById("timerBar").hidden && document.querySelector("#timerBar .timer-name").textContent === "移動"`, "日程の画面でも帯");
+  await page.openView("today");
+  await page.click('#todayStart [data-today="observe"]');
+  await page.waitFor(`document.querySelector("#timerBar .timer-name")?.textContent === "観察"`, "帯が観察になる");
+  assert.equal((await running())[0].kind, "observe");
   assert.deepEqual(page.errors, []);
 });
 
@@ -225,7 +234,8 @@ test("収支: 測った時間を作付ごとに合計し、まとめて測った
   const cells = await page.run(`[...document.querySelectorAll("#revenueBody tbody tr")].map((tr) => [...tr.cells].slice(0, 3).map((td) => td.textContent))`);
   assert.deepEqual(cells, [["A 畝1", "試験菜", "0:26"], ["A 畝2", "試験菜", "0:54"]]);
   const foot = await page.run(`[...document.querySelectorAll("#revenueBody tfoot tr")].map((tr) => tr.querySelector(".num").textContent)`);
-  assert.deepEqual(foot, ["1:20", "0:10", "0:00", "0:05"]);
+  // 作付と区画の合計、観察、準備・片付け、移動、実績につないでいない作業
+  assert.deepEqual(foot, ["1:20", "0:00", "0:10", "0:00", "0:05"]);
   await page.click('#revenueBody tr[data-planting="pl2"]');
   await page.waitFor(`location.hash === "#detail/planting/pl2"`, "作付の詳細が開く");
   assert.deepEqual(page.errors, []);

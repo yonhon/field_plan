@@ -2,8 +2,11 @@
 // 計測（field.work_sessions の行）は、始めた時刻と止めた時刻の組。止めた時刻が空なら計測中。
 // 1 人で作業するので、計測中はどの圃場でも 1 つだけにする（次の作業を始めると、前の作業は止まる）
 
-// 計測の種類。準備・片付けと移動は、どの作付にも付かない共通の時間
-export const SESSION_KINDS = { work: "作業", prep: "準備・片付け", move: "移動" };
+// 計測の種類。観察、準備・片付け、移動は、どの作付にも付かない共通の時間
+export const SESSION_KINDS = { work: "作業", observe: "観察", prep: "準備・片付け", move: "移動" };
+
+// 共通の時間の種類（画面に並べる順）
+export const COMMON_KINDS = ["observe", "prep", "move"];
 
 const MINUTE_MS = 60 * 1000;
 const pad = (n) => String(n).padStart(2, "0");
@@ -57,9 +60,9 @@ export function daySessions(sessions, fieldId, date) {
     .sort((a, b) => a.started_at.localeCompare(b.started_at));
 }
 
-// 計測の合計（分）。作業（work）と、共通の時間（準備・片付け、移動）に分ける
+// 計測の合計（分）。作業（work）と、共通の時間（観察、準備・片付け、移動）に分ける
 export function sessionTotals(sessions, now = new Date()) {
-  const totals = { work: 0, prep: 0, move: 0, total: 0 };
+  const totals = { work: 0, observe: 0, prep: 0, move: 0, total: 0 };
   for (const session of sessions) {
     const minutes = sessionMinutes(session, now);
     totals[session.kind] = (totals[session.kind] || 0) + minutes;

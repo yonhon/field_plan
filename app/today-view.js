@@ -10,6 +10,7 @@ import { escapeHtml } from "./html.js";
 import { notify, notifySaveFailed, confirmDelete } from "./dialog.js";
 import { localToday, workName } from "./schedule.js";
 import {
+  COMMON_KINDS,
   SESSION_KINDS,
   checkTimes,
   clockOf,
@@ -60,7 +61,7 @@ function savePaused(value) {
 }
 
 // 計測の名前。実績につないだ計測は、その実績の名前（つないだときにも名前を写すが、あとで実績を直したら、その名前に合わせる）。
-// 計画の作業なら始めたときの名前、準備・片付けと移動はその名前
+// 計画の作業なら始めたときの名前、共通の時間（観察、準備・片付け、移動）はその名前
 export function sessionLabel(session) {
   if (session.kind !== "work") {
     return SESSION_KINDS[session.kind];
@@ -218,8 +219,7 @@ export function renderToday() {
   }
   draw(
     $("todayStart"),
-    `<button type="button" class="chip-btn" data-today="prep">${SESSION_KINDS.prep}</button>` +
-      `<button type="button" class="chip-btn" data-today="move">${SESSION_KINDS.move}</button>` +
+    COMMON_KINDS.map((kind) => `<button type="button" class="chip-btn" data-today="${kind}">${SESSION_KINDS[kind]}</button>`).join("") +
       `<button type="button" class="chip-btn" data-today="other">計画にない作業…</button>`
   );
   const date = shownDay();
@@ -248,7 +248,7 @@ export function renderToday() {
       `<button type="button" class="chip-btn" data-today="next" aria-label="次の日"${date >= today ? " disabled" : ""}>›</button></span>` +
       `<button type="button" class="chip-btn" data-today="add">＋ 時間を入れる</button></div>` +
       (rows ? `<ul class="session-list">${rows}</ul>` : '<p class="muted">この日の計測はありません。</p>') +
-      `<p class="session-totals">作業 ${formatMinutes(totals.work)}・${SESSION_KINDS.prep} ${formatMinutes(totals.prep)}・${SESSION_KINDS.move} ${formatMinutes(totals.move)}` +
+      `<p class="session-totals">作業 ${formatMinutes(totals.work)}${COMMON_KINDS.map((kind) => `・${SESSION_KINDS[kind]} ${formatMinutes(totals[kind])}`).join("")}` +
       `<strong>合計 ${formatMinutes(totals.total)}</strong></p>` +
       '<p class="muted">次の作業の「始める」を押すと、前の作業は止まります。休憩と、その日の最後の作業のあとは「止める」を押してください。押し忘れたときは「直す」で時刻を直すか、「＋ 時間を入れる」で入れます。</p>'
   );
@@ -270,7 +270,7 @@ async function onTodayClick(event) {
     return;
   }
   const action = button.dataset.today;
-  if (action === "prep" || action === "move") {
+  if (COMMON_KINDS.includes(action)) {
     await startSession({ kind: action });
   } else if (action === "other") {
     chooseType();
@@ -338,7 +338,7 @@ function editSession(session, message = "") {
     ? ""
     : '<label>中身<select data-field="what">' +
       (logs.length ? `<optgroup label="この日の実績">${logs.map((log) => `<option value="log:${escapeHtml(log.id)}">${escapeHtml(logName(log))}</option>`).join("")}</optgroup>` : "") +
-      `<optgroup label="共通の時間"><option value="kind:prep">${SESSION_KINDS.prep}</option><option value="kind:move">${SESSION_KINDS.move}</option></optgroup>` +
+      `<optgroup label="共通の時間">${COMMON_KINDS.map((kind) => `<option value="kind:${kind}">${SESSION_KINDS[kind]}</option>`).join("")}</optgroup>` +
       `<optgroup label="計画にない作業">${[...(state().allWorkTypes || state().workTypes)]
         .sort((a, b) => a.sort - b.sort)
         .map((type) => `<option value="type:${escapeHtml(type.code)}">${escapeHtml(type.label)}</option>`)

@@ -12,7 +12,7 @@ import { escapeHtml } from "./html.js";
 import { polygonArea } from "./geometry.js";
 import { bedAreas, logEnd, plantingStart } from "./logs.js";
 import { existsOn } from "./schedule.js";
-import { SESSION_KINDS, allocateMinutes, formatMinutes, splitMinutes } from "./work-time.js";
+import { COMMON_KINDS, SESSION_KINDS, allocateMinutes, formatMinutes, splitMinutes } from "./work-time.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -185,8 +185,9 @@ export function renderRevenue() {
     '<div class="table-scroll"><table class="work-table revenue-table"><thead><tr><th>場所</th><th>品目</th><th class="num">作業時間</th><th class="num">うち区画の作業</th><th>内訳</th></tr></thead>' +
       `<tbody>${body || '<tr><td colspan="5" class="muted">作業時間を測った作付はまだありません。「今日」のタブの「始める」で測ります。</td></tr>'}</tbody>` +
       `<tfoot><tr><th colspan="2">作付と区画の合計</th><td class="num">${formatMinutes(assigned)}</td><td></td><td></td></tr>` +
-      `<tr><th colspan="2">${SESSION_KINDS.prep}</th><td class="num">${formatMinutes(commonMinutes("prep"))}</td><td></td><td class="muted">どの作付にも分けない時間</td></tr>` +
-      `<tr><th colspan="2">${SESSION_KINDS.move}</th><td class="num">${formatMinutes(commonMinutes("move"))}</td><td></td><td class="muted">どの作付にも分けない時間</td></tr>` +
+      COMMON_KINDS.map(
+        (kind) => `<tr><th colspan="2">${SESSION_KINDS[kind]}</th><td class="num">${formatMinutes(commonMinutes(kind))}</td><td></td><td class="muted">どの作付にも分けない時間</td></tr>`
+      ).join("") +
       `<tr><th colspan="2">実績につないでいない作業</th><td class="num">${formatMinutes(allocation.unassigned)}</td><td></td><td class="muted">計画にない作業。「今日」のタブの「直す」で、その日の実績につなげます</td></tr></tfoot>` +
       "</table></div>"
   );

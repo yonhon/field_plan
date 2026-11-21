@@ -285,14 +285,14 @@ create index if not exists work_log_inputs_log_idx on field.work_log_inputs (log
 
 -- 作業時間の計測。「始める」から「止める」（または次の作業の「始める」）までの 1 回で 1 行。
 -- 作業の記録と同じく、プランではなく圃場に付ける。止めても作業は終えたことにしない（終えたかは作業の記録で持つ）。
--- kind: work（作業）、prep（準備・片付け）、move（移動）。prep と move は、どの作付にも付かない共通の時間。
+-- kind: work（作業）、observe（観察）、prep（準備・片付け）、move（移動）。observe、prep、move は、どの作付にも付かない共通の時間。
 -- work_ids は、始めたときの計画の作業（今週やることの 1 行に、同じ日の同じ作業が何か所かまとまるので、複数）。
 -- 計画の作業が消えても、計測は label の名前で読める。log_id は、計画にない作業を、あとから記録につないだとき。
 -- stopped_at が空なら計測中。source: measured（押して測った）、edited（あとで時刻を直した、入れた）
 create table if not exists field.work_sessions (
   id uuid primary key default gen_random_uuid(),
   field_id uuid not null references field.fields (id) on delete cascade,
-  kind text not null default 'work' check (kind in ('work', 'prep', 'move')),
+  kind text not null default 'work' check (kind in ('work', 'observe', 'prep', 'move')),
   work_type text,
   work_ids uuid[] not null default '{}',
   log_id uuid references field.work_logs (id) on delete set null,
@@ -303,6 +303,10 @@ create table if not exists field.work_sessions (
   created_at timestamptz not null default now(),
   constraint work_sessions_stop_after_start check (stopped_at is null or stopped_at >= started_at)
 );
+
+-- 観察（observe）を足す前に作った表の制約を、作り直す
+alter table field.work_sessions drop constraint if exists work_sessions_kind_check;
+alter table field.work_sessions add constraint work_sessions_kind_check check (kind in ('work', 'observe', 'prep', 'move'));
 
 create index if not exists work_sessions_field_idx on field.work_sessions (field_id, started_at);
 

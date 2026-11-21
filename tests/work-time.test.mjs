@@ -49,7 +49,7 @@ test("分の書き方: 時:分。1 分の単位で四捨五入し、負は 0", (
 });
 
 test("計測の種類の名前", () => {
-  assert.deepEqual(SESSION_KINDS, { work: "作業", prep: "準備・片付け", move: "移動" });
+  assert.deepEqual(SESSION_KINDS, { work: "作業", observe: "観察", prep: "準備・片付け", move: "移動" });
 });
 
 test("計測中の計測: 止めていないもののうち、最後に始めたもの", () => {
@@ -84,15 +84,16 @@ test("その日の計測: その圃場の、その日に始めた計測を、始
   assert.deepEqual(daySessions(list, "f1", "2027-05-12").map((item) => item.id), ["early", "late"]);
 });
 
-test("合計: 作業と、準備・片付けと移動に分ける", () => {
+test("合計: 作業と、観察、準備・片付け、移動に分ける", () => {
   const list = [
     session("a", at("2027-05-12", "08:00"), at("2027-05-12", "09:00")),
     session("b", at("2027-05-12", "09:00"), at("2027-05-12", "09:15"), { kind: "prep" }),
     session("c", at("2027-05-12", "09:15"), at("2027-05-12", "09:25"), { kind: "move" }),
     session("d", at("2027-05-12", "09:25"), at("2027-05-12", "09:30"), { kind: "prep" }),
+    session("e", at("2027-05-12", "09:30"), at("2027-05-12", "09:35"), { kind: "observe" }),
   ];
-  assert.deepEqual(sessionTotals(list), { work: 60, prep: 20, move: 10, total: 90 });
-  assert.deepEqual(sessionTotals([]), { work: 0, prep: 0, move: 0, total: 0 });
+  assert.deepEqual(sessionTotals(list), { work: 60, observe: 5, prep: 20, move: 10, total: 95 });
+  assert.deepEqual(sessionTotals([]), { work: 0, observe: 0, prep: 0, move: 0, total: 0 });
 });
 
 test("持ち主に分ける: 重みの比で分け、持ち主のない計測は unassigned に足す", () => {
