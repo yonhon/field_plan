@@ -29,3 +29,6 @@ app/version.json
 mutation/node_modules/
 mutation/report/
 .mutator/
+
+# jev-lint の判定の結果（README の 12 章）
+.jev-lint/

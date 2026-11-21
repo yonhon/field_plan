@@ -1,0 +1,9 @@
+# jev-lint: before a commit, check the staged change against AGENTS.md (README section 12).
+#   npx -y jev-lint@0.10.0 commits --staged
+# The rules judge a Git change: whether it follows AGENTS.md, whether the commit message
+# describes the diff, and whether a change games a measured score (goodhart, campbell).
+rules:
+  git/diff-follows-instructions: on
+  git/commit-message-describes-diff: on
+  git/goodhart: on
+  git/campbell: on
