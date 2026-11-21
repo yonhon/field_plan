@@ -56,6 +56,10 @@ const FILES = [
   "icons/A_mark_color.svg",
   "icons/favicon-32.png",
   "icons/apple-touch-icon.png",
+  "manifest.webmanifest",
+  "icons/icon-192.png",
+  "icons/icon-512.png",
+  "icons/icon-maskable-512.png",
 ];
 // 一式ごとに、取った時刻を名前に付けたキャッシュに入れる。いちばん新しく、取り終えた印のあるものを使う
 const PREFIX = "field-plan-app-";

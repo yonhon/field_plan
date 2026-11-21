@@ -69,6 +69,18 @@ test("一式に、app.js からたどれる部品と、index.html が読むフ�
   }
 });
 
+test("manifest のアイコンは一式に入っていて、起動の URL は画面と同じ", () => {
+  const manifest = JSON.parse(readFileSync(join(APP, "manifest.webmanifest"), "utf8"));
+  for (const icon of manifest.icons) {
+    assert.ok(FILES.includes(icon.src), `sw.js の FILES に ${icon.src} がない`);
+  }
+  assert.ok(manifest.icons.some((icon) => icon.purpose === "maskable"), "Android で切り抜かれても欠けないアイコンがない");
+  // ログインと Google フォトの戻り先を変えないため、起動の URL に印（?source=pwa など）を付けない
+  assert.equal(manifest.start_url, "./");
+  assert.equal(manifest.scope, "./");
+  assert.equal(manifest.display, "standalone");
+});
+
 test("index.html は、外のサーバーからスクリプトを読まない", () => {
   const html = readFileSync(join(APP, "index.html"), "utf8");
   const sources = [...html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']?([^"'\s>]+)/gi)].map(([, src]) => src);
