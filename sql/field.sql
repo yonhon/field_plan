@@ -616,9 +616,11 @@ begin
 end;
 $$;
 
--- FAMIC の入れ替えを終える。途中の表の行数が、取り込み係の数えた行数と合えば、本番の表と入れ替えて版を残す
+-- FAMIC の入れ替えを終える。途中の表の行数が、取り込み係の数えた行数と合えば、本番の表と入れ替えて版を残す。
+-- 適用部の約 10 万行を入れ直すので、authenticated の上限（8 秒）を超えることがある（2026-11-23 に 1.9〜10 秒）。
+-- この関数だけ上限を 60 秒にする（API は、関数に付けた statement_timeout を、呼ぶときに当てる）
 create or replace function field.famic_finish(files text[], products int, uses int) returns void
-language plpgsql security definer set search_path = ''
+language plpgsql security definer set search_path = '' set statement_timeout = '60s'
 as $$
 declare
   got_products int := (select count(*) from field.famic_products_next);
