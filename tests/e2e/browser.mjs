@@ -274,6 +274,10 @@ async function launch() {
     await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x + dx, y: point.y, button: "left", clickCount: 1 });
   };
 
+  // アプリの決まった時間（app/clock.js で置いた処理。自動保存の 600 ms、お知らせの 2 秒など）を ms ぶん進める。
+  // そのうちに来る処理を時間を待たずに今動かし、処理が返した Promise（保存の送信など）が終わるまで待つ
+  const advance = (ms) => run(`window.fieldClock.advance(${ms})`);
+
   // 画面の幅を変える（スマホの幅を試す）。width を省くと元の大きさに戻す
   const viewport = (width, height = 844) =>
     width
@@ -352,6 +356,7 @@ async function launch() {
     waitFor,
     click,
     openView,
+    advance,
     clickMap,
     dragMap,
     viewport,

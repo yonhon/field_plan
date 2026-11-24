@@ -6,6 +6,7 @@
 //   失敗           「…に失敗しました: 」「…ませんでした: 」の形。自然には消さず、× で閉じる。誤りの内容は「詳しく」で窓に出す
 //   それ以外        操作の結果。2 秒で消す
 // 新しい版のお知らせ（#updateToast）は index.html が出し、押すまで残る
+import { cancel, later } from "./clock.js";
 import { notify } from "./dialog.js";
 
 const $ = (id) => document.getElementById(id);
@@ -20,7 +21,7 @@ let hideTimer = null;
 let savingTimer = null;
 
 function removeTransient() {
-  clearTimeout(hideTimer);
+  cancel(hideTimer);
   transient?.remove();
   transient = null;
 }
@@ -42,7 +43,7 @@ function showTransient(kind, text, ms) {
   transient.setAttribute("role", "status");
   $("toasts").append(transient);
   if (ms) {
-    hideTimer = setTimeout(removeTransient, ms);
+    hideTimer = later(removeTransient, ms);
   }
 }
 
@@ -71,14 +72,14 @@ function showError(text, detail) {
 
 // 保存の状態の文を、お知らせにする（テストからも呼べるよう export する）
 export function showStatus(text) {
-  clearTimeout(savingTimer);
+  cancel(savingTimer);
   if (!text || text === SAVED) {
     removeTransient();
     return;
   }
   if (text === SAVING) {
     // ふだんの保存は一瞬で終わるので、すぐには出さない。前のお知らせは残す
-    savingTimer = setTimeout(() => showTransient("progress", SAVING), SAVING_DELAY_MS);
+    savingTimer = later(() => showTransient("progress", SAVING), SAVING_DELAY_MS);
     return;
   }
   const error = ERROR.exec(text);

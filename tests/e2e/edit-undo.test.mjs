@@ -95,7 +95,9 @@ test("元に戻す: 別の画面から押すと、操作をした日程の画面
   await page.waitFor(`document.querySelector('[data-dim="width:0"]')?.textContent === "100cm"`, "畝幅が戻る");
   await page.waitFor(`document.querySelector('.strip-bed[data-bed="bed1"]').classList.contains("is-selected")`, "戻した畝を選ぶ");
   assert.equal(await page.run(`document.querySelector('.strip-bed[data-bed="bed1"]').classList.contains("undo-flash")`), true, "戻した畝を光らせる");
-  await page.waitFor(`!document.querySelector('.strip-bed[data-bed="bed1"]').classList.contains("undo-flash")`, "少しあとに消える");
+  // 光らせるのは 1.6 秒。時間は app/clock.js で進める
+  await page.advance(1600);
+  assert.equal(await page.run(`document.querySelector('.strip-bed[data-bed="bed1"]').classList.contains("undo-flash")`), false, "少しあとに消える");
   assert.equal(await savedWidth(), 100);
   assert.deepEqual(page.errors, []);
 });

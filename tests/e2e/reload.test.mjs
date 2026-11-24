@@ -247,6 +247,8 @@ test("知らせの出ない書きかけ（図の編集など）が終わった�
   await page.run(`document.getElementById("quietBox").removeAttribute("open")`);
   await settle();
   assert.equal(await shownBeds(), "bed1,bed2", "知らせがないので、すぐには読み直さない");
+  // 間を空けた試しは 3 秒後。時間は app/clock.js で進める
+  await page.advance(3000);
   await waitBeds("bed1,bed2,bed3");
   assert.deepEqual(page.errors, []);
 });
@@ -266,13 +268,15 @@ test("ドラッグしているあいだは読み直さず、離したら読み�
   await awayFor(61);
   await settle();
   await page.run(`document.getElementById("quietBox").remove()`);
-  // 畝 1 を右へ動かし、押したまま 3.5 秒止まる。そのあいだに、間を空けた試しが来る
+  // 畝 1 を右へ動かし、押したまま 3 秒ぶん止まる（時間は app/clock.js で進める）。そのあいだに、間を空けた試しが来る
   let during = null;
   await page.drag('.strip-bed[data-bed="bed1"]', 30, async () => {
-    await settle(3500);
+    await page.advance(3000);
     during = await shownBeds();
   });
   assert.equal(during, "bed1,bed2", "ドラッグしているあいだは、入れ替えない");
+  // 押しているあいだに見送った試しは、その 3 秒後にまた来る
+  await page.advance(3000);
   await waitBeds("bed1,bed2,bed3");
   await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました" || document.getElementById("saveStatus").textContent === "ほかの画面での変更を読み込みました"`, "保存の完了");
   assert.notEqual(await shapeOf(), before, "動かした結果は、DB に入っている");

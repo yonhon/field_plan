@@ -64,8 +64,8 @@ test("作図の道具が出ていない幅では、選んだ区画をなぞっ�
   assert.equal(await page.run(`getComputedStyle(document.getElementById("mapEditBtn")).display`), "none", "スマホの幅では「図を編集」を出さない");
   const view = await page.run(`document.getElementById("map").getAttribute("viewBox")`);
   await selectAndDrag();
-  // 保存は少し遅れて送るので、送るはずの時間を待ってから見る
-  await sleep(900);
+  // 保存は少し遅れて（600 ms）送るので、その時間を進め（app/clock.js）、送るはずのものを送り終えてから見る
+  await page.advance(1000);
   assert.deepEqual(await savedX(), { block: BLOCK[0][0], bed: BED[0][0] });
   // 図は動く
   assert.notEqual(await page.run(`document.getElementById("map").getAttribute("viewBox")`), view);
@@ -77,7 +77,7 @@ test("PC の幅でも、「図を編集」を押す前は、選んだ区画を�
   await page.waitFor(`document.querySelector('#map [data-shape="b1"]').classList.contains("is-selected")`, "ふだんの図でも区画を選べる");
   assert.equal(await page.run(`document.querySelectorAll("#map .handle").length`), 0);
   await page.dragMap(INSIDE, 80);
-  await sleep(900);
+  await page.advance(1000);
   assert.deepEqual(await savedX(), { block: BLOCK[0][0], bed: BED[0][0] });
 });
 
@@ -88,7 +88,7 @@ test("「図を編集」を押すと、選んだ区画をなぞると、区画�
   assert.equal(await page.run(`document.querySelector('#mapBand .mode-btn[data-mode="select"]').classList.contains("is-active")`), true, "初めは選択・移動");
   await selectAndDrag();
   await page.waitFor(`document.getElementById("mapEditSave").disabled === false`, "書きかけ");
-  await sleep(900);
+  await page.advance(1000);
   assert.deepEqual(await savedX(), { block: BLOCK[0][0], bed: BED[0][0] }, "保存するまでは DB は変わらない");
   assert.equal(await page.run(`JSON.parse(localStorage.getItem("field_plan_local")).changes?.length || 0`), 0, "変更の記録も、保存するまで残さない");
   await page.click("#mapEditSave");
@@ -118,7 +118,7 @@ test("図の編集: 保存しないで閉じると、捨ててよいかを確か
   await page.click('dialog.notice [data-action="delete"]');
   await page.waitFor(`document.getElementById("mapBand").hidden`, "帯を閉じる");
   assert.notEqual(await page.run(`document.querySelector('#map [data-shape="b1"]').getAttribute("points")`), moved, "区画が元の位置に戻る");
-  await sleep(900);
+  await page.advance(1000);
   assert.deepEqual(await savedX(), { block: BLOCK[0][0], bed: BED[0][0] });
   assert.deepEqual(page.errors, []);
 });

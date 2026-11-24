@@ -98,8 +98,8 @@ test("畝を続けて 2 回動かす: 2 回目を押したときに 1 回目の�
   await page.drag('.strip-bed[data-bed="bed1"]', 30, async () => {
     await page.waitFor(`JSON.stringify(JSON.parse(localStorage.getItem("field_plan_local")).beds.find((item) => item.id === "bed1").shape) !== ${JSON.stringify(before)}`, "1 回目の位置の保存");
     first = await shapeOf();
-    // 自動保存の時間を過ぎても、押しているあいだの位置は送らない
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    // 自動保存の時間（600 ms）を過ぎても、押しているあいだの位置は送らない。時間は app/clock.js で進める
+    await page.advance(900);
     later = await shapeOf();
   });
   assert.equal(later, first, "押しているあいだは、1 回目の位置のまま");

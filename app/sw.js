@@ -48,6 +48,7 @@ const FILES = [
   "field-plans.js",
   "news-view.js",
   "toast.js",
+  "clock.js",
   "undo-pad.js",
   "icons.js",
   "html.js",

@@ -106,8 +106,11 @@ test("記録のある畝の幅を変える: 今までの記録の面積にも当
   const ASK = `document.querySelector("dialog.notice[open]")?.textContent.includes("記録にも当てはめる")`;
 
   // 畝 1 の幅を 150 cm にする。少し待つと、記録 1 件の面積が変わると尋ねる。当てはめると、畝 1 と畝 2 の面積を今の形で求め直す
+  // 尋ねるのは、形を変えてから 1.5 秒後。その時間は実際には待たずに進める（app/clock.js）
   await widenBed();
-  await page.waitFor(ASK, "記録の面積に当てはめるかを尋ねる");
+  assert.equal(await page.run(`Boolean(${ASK})`), false, "すぐには尋ねない");
+  await page.advance(1500);
+  assert.equal(await page.run(`Boolean(${ASK})`), true, "1.5 秒たつと、記録の面積に当てはめるかを尋ねる");
   assert.match(await page.run(`document.querySelector("dialog.notice[open]").textContent`), /今までの作業の記録 1 件（.+）で、畝の面積（畝＋通路）が変わります/);
   await page.click(CONFIRM);
   const applied = await expected();
@@ -117,10 +120,11 @@ test("記録のある畝の幅を変える: 今までの記録の面積にも当
   // もう一度幅を変えて、当てはめないと、記録の面積はそのまま。そのあと別の畝を触っても、同じ変更で尋ね直さない
   await page.run(`window.prompt = () => "200"`);
   await page.click('[data-dim="width:0"]');
-  await page.waitFor(ASK, "2 回目も尋ねる");
+  await page.advance(1500);
+  assert.equal(await page.run(`Boolean(${ASK})`), true, "2 回目も尋ねる");
   await page.click('dialog.notice [data-action="cancel"]');
   await page.waitFor(`!document.querySelector("dialog.notice[open]")`, "窓が閉じる");
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  await page.advance(2000);
   assert.equal(await page.run(`Boolean(${ASK})`), false);
   assert.deepEqual(await areas(), applied);
   assert.deepEqual(page.errors, []);

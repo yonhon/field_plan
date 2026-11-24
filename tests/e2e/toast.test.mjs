@@ -33,7 +33,6 @@ after(async () => {
 const say = (text) => page.run(`document.getElementById("saveStatus").textContent = ${JSON.stringify(text)}`);
 const toasts = () => page.run(`[...document.querySelectorAll("#toasts .toast:not([hidden])")].map((t) => t.className.replace("toast toast-", "") + ":" + t.querySelector(".toast-text").textContent)`);
 const headerHeight = () => page.run(`document.querySelector(".page-header").getBoundingClientRect().height`);
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("お知らせ: 種類ごとに出し方を変え、ヘッダーの形は変えない", options, async () => {
   await page.loadApp(seed());
@@ -42,33 +41,37 @@ test("お知らせ: 種類ごとに出し方を変え、ヘッダーの形は変
   // 起動のときに「このブラウザーの中だけに保存します」は出さない
   assert.deepEqual(await toasts(), []);
 
-  // 操作の結果は出して、2 秒で消す
+  // 操作の結果は出して、2 秒で消す（時間は、実際には待たずに app/clock.js で進める）
   await say("並べ直しました");
   assert.deepEqual(await toasts(), ["info:並べ直しました"]);
   assert.equal(await headerHeight(), height);
-  await page.waitFor(`!document.querySelector("#toasts .toast-info")`, "2 秒で消える");
+  await page.advance(1500);
+  assert.deepEqual(await toasts(), ["info:並べ直しました"], "2 秒たつまでは出ている");
+  await page.advance(500);
+  assert.deepEqual(await toasts(), [], "2 秒で消える");
 
   // 保存中… は 1 秒たっても終わらないときだけ出し、保存しました は出さずに消す
   await say("保存中…");
-  await sleep(300);
+  await page.advance(300);
   assert.deepEqual(await toasts(), []);
   await say("保存しました");
-  await sleep(1000);
+  await page.advance(1000);
   assert.deepEqual(await toasts(), []);
   await say("保存中…");
-  await page.waitFor(`document.querySelector("#toasts .toast-progress")?.textContent === "保存中…"`, "時間がかかる保存");
+  await page.advance(1000);
+  assert.deepEqual(await toasts(), ["progress:保存中…"], "時間がかかる保存");
   await say("保存しました");
   assert.deepEqual(await toasts(), []);
 
   // 進み具合は、次の文が来るまで出し続ける
   await say("画像を保存中… 45%（1.0 / 2.2 MB）");
-  await sleep(2300);
+  await page.advance(2300);
   assert.deepEqual(await toasts(), ["progress:画像を保存中… 45%（1.0 / 2.2 MB）"]);
 
   // 失敗は消えずに残り、誤りの内容は「詳しく」で窓に出し、× で閉じる
   await say("保存に失敗しました: TypeError: Failed to fetch");
   assert.deepEqual(await toasts(), ["error:保存に失敗しました"]);
-  await sleep(2300);
+  await page.advance(2300);
   assert.deepEqual(await toasts(), ["error:保存に失敗しました"]);
   await page.click("#toasts .toast-error .toast-btn");
   await page.waitFor(`document.querySelector("dialog[open]")?.textContent.includes("Failed to fetch")`, "詳しく");

@@ -61,6 +61,7 @@ import { PAGE_PX, printPage, pxToMm } from "./print.js";
 import { existsOn, harvestEnd, isPlannable, localToday, worksRange } from "./schedule.js";
 import { anyTypeLabel, currentBlockId, ganttTakesKey, initSchedule, openInSchedule, openProcessPlan, placePicker, problemTotal, renderPicker, renderSchedule, renderTypes, scheduleHash } from "./schedule-view.js";
 import { bindOperation, createLocalStore, createSupabaseStore, currentOperation, duringOperation, fetchWithOperation, forgetImageUrls, inOrder, startOperation, APP_VERSION } from "./store.js";
+import { cancel, later } from "./clock.js";
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
 
@@ -1101,8 +1102,8 @@ let saveTimer = null;
 
 function scheduleSaves() {
   $("saveStatus").textContent = "保存中…";
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(flushSaves, SAVE_DELAY_MS);
+  cancel(saveTimer);
+  saveTimer = later(flushSaves, SAVE_DELAY_MS);
 }
 
 function queueSave(key) {
@@ -1130,7 +1131,7 @@ function setStatus(text) {
 // まだ送っていない保存を、すぐに送る。親の行を先に保存したいときに使う
 async function sendPendingSaves() {
   if (pendingSaves.size) {
-    clearTimeout(saveTimer);
+    cancel(saveTimer);
     await flushSaves();
   }
 }
@@ -1150,7 +1151,7 @@ const isTextEntry = (element) =>
 function beginOperation(event) {
   const continuing = event.type === "keydown" && (event.repeat || isTextEntry(event.target));
   if (!continuing && pendingSaves.size && retries === 0) {
-    clearTimeout(saveTimer);
+    cancel(saveTimer);
     flushSaves();
   }
   startOperation();
@@ -1195,7 +1196,7 @@ let retries = 0;
 function retrySaves() {
   clearTimeout(retryTimer);
   if (pendingSaves.size) {
-    clearTimeout(saveTimer);
+    cancel(saveTimer);
     flushSaves({ quiet: true });
   }
 }
@@ -1562,7 +1563,7 @@ function showUndone(targets) {
       void element.getBoundingClientRect(); // 続けて戻したときも、光らせ直す
       element.classList.add("undo-flash");
     }
-    setTimeout(() => marked.forEach((element) => element.classList.remove("undo-flash")), UNDO_FLASH_MS);
+    later(() => marked.forEach((element) => element.classList.remove("undo-flash")), UNDO_FLASH_MS);
   });
 }
 
@@ -1703,10 +1704,10 @@ const RELOAD_WAIT_EDIT_MS = 3000; // 書きかけがあって見送ったあと�
 const RELOAD_WAIT_FAILED_MS = 30000; // 読めなかったあと、次に試すまで
 
 function reloadLater(wait) {
-  clearTimeout(reloadTimer);
+  cancel(reloadTimer);
   // 画面が隠れているあいだは試さない（戻ってきたときに試す）
   if (reloadDue && document.visibilityState !== "hidden") {
-    reloadTimer = setTimeout(reloadIfChanged, wait);
+    reloadTimer = later(reloadIfChanged, wait);
   }
 }
 
@@ -1718,7 +1719,7 @@ function reloadSoon() {
 }
 
 async function reloadIfChanged() {
-  clearTimeout(reloadTimer);
+  cancel(reloadTimer);
   if (!reloadDue || reloading || !state.field || !state.plan) {
     return;
   }
@@ -1768,7 +1769,7 @@ async function reloadIfChanged() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     hiddenAt = Date.now();
-    clearTimeout(reloadTimer);
+    cancel(reloadTimer);
     return;
   }
   if (hiddenAt !== null && Date.now() - hiddenAt >= RELOAD_AFTER_HIDDEN_MS) {
@@ -2323,13 +2324,16 @@ const areaGeometry = () => ({
 });
 
 function resetAreaBase() {
-  clearTimeout(areaTimer);
+  cancel(areaTimer);
   areaBase = areaGeometry();
 }
 
 function scheduleAreaCheck() {
-  clearTimeout(areaTimer);
-  areaTimer = setTimeout(checkAreas, AREA_CHECK_MS);
+  cancel(areaTimer);
+  // checkAreas は確かめの窓の答えを待つので、Promise を返さずに置く（clock.js の advance が答えを待たないように）
+  areaTimer = later(() => {
+    checkAreas();
+  }, AREA_CHECK_MS);
 }
 
 async function checkAreas() {
@@ -2812,7 +2816,7 @@ function measureBackdrop(backdrop, url) {
 }
 
 async function openField(field) {
-  clearTimeout(saveTimer);
+  cancel(saveTimer);
   await flushSaves();
   const plan = await loadFieldData(field);
   try {
@@ -2879,7 +2883,7 @@ async function deleteField(field) {
   await planTask(async () => {
     if (isOpen) {
       // 消す圃場の図形の保存は、もう要らない
-      clearTimeout(saveTimer);
+      cancel(saveTimer);
       pendingSaves.clear();
     }
     // 記録は、圃場があるうちに保存しておく
@@ -2982,7 +2986,7 @@ function setPlanData(plan, tables) {
 }
 
 async function openPlan(plan) {
-  clearTimeout(saveTimer);
+  cancel(saveTimer);
   await flushSaves();
   await loadPlanData(plan);
   showPlan(plan);
@@ -3046,7 +3050,7 @@ async function copyPlan(field = state.field, plan = state.plan, plans = state.pl
   await planTask(async () => {
     // 写すのは DB の中身なので、開いているプランは、まだ送っていない変更を先に送る
     if (plan.id === state.plan.id) {
-      clearTimeout(saveTimer);
+      cancel(saveTimer);
       await flushSaves();
       if (pendingSaves.size) {
         throw new Error("まだ保存できていない変更があるので、コピーをやめました");
@@ -3076,7 +3080,7 @@ async function deletePlan(field = state.field, plan = state.plan, plans = state.
   const isOpen = plan.id === state.plan.id;
   await planTask(async () => {
     if (isOpen) {
-      clearTimeout(saveTimer);
+      cancel(saveTimer);
       [...pendingSaves.keys()].filter((key) => key.includes(":")).forEach((key) => pendingSaves.delete(key));
     }
     record({ kind: "plan.delete", plan: false, field, target: ["plan", plan.id], text: `プラン「${plan.name}」を削除` });
@@ -4758,7 +4762,7 @@ async function startApp(user = "local") {
     },
     // まだ送っていない図形の保存を、先に済ませる
     flush: async () => {
-      clearTimeout(saveTimer);
+      cancel(saveTimer);
       await flushSaves();
     },
     apply: applyUndo,
