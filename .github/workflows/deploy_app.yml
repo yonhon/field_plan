@@ -12,6 +12,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read # 上げたファイル（artifact）が見えるようになったかを、API で確かめる
 
 concurrency:
   group: "pages"
@@ -46,6 +47,23 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: app
+
+      # 上げたファイルが API で見えるようになるまで待つ。2026-11-24 に、上げた 1 秒後の公開の段が「github-pages が見つからない」で
+      # 何回も続けて落ちた（GitHub の稼働状況には障害が出ていなかった）。5 秒おきに、2.5 分まで確かめる
+      - name: Wait for the artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 30); do
+            count=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" --jq '[.artifacts[] | select(.name == "github-pages")] | length')
+            if [ "$count" -ge 1 ]; then
+              echo "見えるようになった（${i} 回目）"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "上げたファイルが 2.5 分たっても見えません"
+          exit 1
 
       - name: Deploy to GitHub Pages
         id: deployment
