@@ -17,8 +17,10 @@ concurrency:
   group: "pages"
   cancel-in-progress: true
 
+# GitHub の雛形と同じく、ファイルを用意して上げるジョブ（build）と、公開するジョブ（deploy）に分ける。
+# 同じジョブで上げた直後に公開すると、上げたファイルがまだ見えず「No artifacts named "github-pages"」で落ちることが続いた（2026-11-24）
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,6 +48,22 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: app
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # 公開の確かめに使う版の印を、同じ中身から作り直す（版の印は、一式の中身だけから決まるので、build のジョブと同じになる）
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Build version
+        run: node scripts/build-version.mjs
 
       - name: Deploy to GitHub Pages
         id: deployment
