@@ -13,7 +13,7 @@ import { escapeHtml } from "./html.js";
 import { polygonArea } from "./geometry.js";
 import { cropLabel, plantingNumbers, plantingSpec } from "./crops.js";
 import { bedAreas, logEnd, plantingStart } from "./logs.js";
-import { forecast, harvestActual, harvestWindow, marketEstimate } from "./revenue.js";
+import { MARKET_WIDEN_DAYS, forecast, harvestActual, harvestWindow, marketEstimate } from "./revenue.js";
 import { existsOn, localToday } from "./schedule.js";
 import { COMMON_KINDS, SESSION_KINDS, allocateMinutes, formatMinutes, splitMinutes } from "./work-time.js";
 
@@ -396,7 +396,7 @@ function marketOnDay(prices, day) {
 }
 
 // 単価の出どころの短い名前。市況から推した単価は、どこまで広げた市況かも添える（revenue.js の forecast の estimate）:
-// どの日もその日の市況なら「市況・収穫期」、前後に広げた日があれば、いちばん広げた日数で「市況・前後 14 日」、
+// いちばん広げた日数で「市況・前後 7 日」（どの日も最初の前後 7 日で足りたとき）「市況・前後 14 日」など、
 // どの日も全期間の中央値なら「市況・全期間」、一部の日だけなら「市況・一部全期間」。収穫の計画がない作付は「市況・全期間」
 export function priceSource(price) {
   if (price.from !== "market") {
@@ -404,7 +404,7 @@ export function priceSource(price) {
   }
   const { widen, counts } = price.estimate;
   if (!counts || widen !== "all") {
-    return widen === "all" ? "市況・全期間" : widen ? `市況・前後 ${widen} 日` : "市況・収穫期";
+    return widen === "all" ? "市況・全期間" : `市況・前後 ${widen} 日`;
   }
   return counts.all === price.estimate.days ? "市況・全期間" : "市況・一部全期間";
 }
@@ -419,9 +419,9 @@ export function priceTitle(price) {
     const month = (iso) => iso.slice(0, 7).replace("-", "/");
     return `収穫の予定がないため、市況のある全期間の卸値の中央値（${estimate.days} 日分、${month(estimate.from)}〜${month(estimate.to)}、幅 ${formatYen(estimate.low)}〜${formatYen(estimate.high)} 円）`;
   }
-  const parts = [0, 14, 30, 45, "all"]
+  const parts = [...MARKET_WIDEN_DAYS, "all"]
     .filter((widen) => estimate.counts[widen])
-    .map((widen) => `${widen === "all" ? "市況が足りず全期間の中央値" : widen ? `前後 ${widen} 日に広げた中央値` : "その日の市況の中央値"} ${estimate.counts[widen]} 日`);
+    .map((widen) => `${widen === "all" ? "市況が足りず全期間の中央値" : `前後 ${widen} 日の中央値`} ${estimate.counts[widen]} 日`);
   return `収穫の予定の ${estimate.days} 日それぞれの卸値から推した単価の平均（${parts.join("、")}）`;
 }
 

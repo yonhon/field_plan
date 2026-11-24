@@ -92,7 +92,7 @@ test("見込み: 収穫の計画がなければ、売上を出さない。単価
 
 test("見込み: 市況のときは、日ごとにその日の市況から推し、月ごとに分ける", () => {
   // 6/29〜7/2 の 4 日。6 月の 2 日は 100 円、7 月の 2 日は 300 円（7/2 だけ前後 14 日に広げた）
-  const marketOn = (day) => (day < "2027-07-01" ? { yen: 100, widen: 0 } : { yen: 300, widen: day === "2027-07-02" ? 14 : 0 });
+  const marketOn = (day) => (day < "2027-07-01" ? { yen: 100, widen: 7 } : { yen: 300, widen: day === "2027-07-02" ? 14 : 7 });
   const result = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: { start: "2027-06-29", end: "2027-07-02" }, marketOn });
   // 出荷量 8 kg を 4 日に 2 kg ずつ
   assert.deepEqual([...result.monthly], [
@@ -100,21 +100,21 @@ test("見込み: 市況のときは、日ごとにその日の市況から推し
     ["2027-07", 1200],
   ]);
   assert.equal(result.salesYen, 1600);
-  assert.deepEqual(result.price, { yen: 200, from: "market", estimate: { widen: 14, counts: { 0: 3, 14: 1 }, days: 4 } });
+  assert.deepEqual(result.price, { yen: 200, from: "market", estimate: { widen: 14, counts: { 7: 3, 14: 1 }, days: 4 } });
   // 全期間を使った日があれば、いちばん広げた印は all
   const some = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE, marketOn: (day) => ({ yen: 100, widen: day === "2027-06-05" ? "all" : 30 }) });
   assert.deepEqual(some.price.estimate, { widen: "all", counts: { 30: 9, all: 1 }, days: 10 });
   // 1 日でも市況から推せなければ、単価も売上も null
-  const gap = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE, marketOn: (day) => (day === "2027-06-03" ? null : { yen: 100, widen: 0 }) });
+  const gap = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE, marketOn: (day) => (day === "2027-06-03" ? null : { yen: 100, widen: 7 }) });
   assert.deepEqual([gap.price, gap.salesYen, gap.monthly], [null, null, null]);
   // 市況がない品目（marketOn なし）も null
   assert.equal(forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE }).price, null);
   // 3 種類が混ざっても、いちばん広げた印（all）
-  const mixed = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: { start: "2027-06-01", end: "2027-06-03" }, marketOn: (day) => ({ yen: 100, widen: { "2027-06-01": 0, "2027-06-02": "all", "2027-06-03": 30 }[day] }) });
+  const mixed = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: { start: "2027-06-01", end: "2027-06-03" }, marketOn: (day) => ({ yen: 100, widen: { "2027-06-01": 7, "2027-06-02": "all", "2027-06-03": 30 }[day] }) });
   assert.equal(mixed.price.estimate.widen, "all");
   // 作付か品目に単価があれば、市況は使わない（引きもしない）
   let asked = 0;
-  const manual = forecast({ price_yen_per_kg: 500 }, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE, marketOn: () => (asked += 1, { yen: 1, widen: 0 }) });
+  const manual = forecast({ price_yen_per_kg: 500 }, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE, marketOn: () => (asked += 1, { yen: 1, widen: 7 }) });
   assert.deepEqual([manual.price, manual.salesYen, asked], [{ yen: 500, from: "planting" }, 4000, 0]);
 });
 
@@ -210,11 +210,11 @@ function days(from, count, value) {
   return rows;
 }
 
-test("市況からの推定: 収穫の期間の月日に入る取引日の中央値と、25〜75 % の幅", () => {
+test("市況からの推定: 収穫の期間を前後 7 日に広げた月日に入る取引日の中央値と、25〜75 % の幅", () => {
   const prices = [...days("2026-05-01", 10, (date, i) => 100 + i * 10), ...days("2026-08-01", 10, 900)];
   const estimate = marketEstimate(prices, { start: "2027-05-01", end: "2027-05-10" });
   assert.equal(estimate.days, 10);
-  assert.equal(estimate.widen, 0);
+  assert.equal(estimate.widen, 7);
   near(estimate.yen, 145);
   near(estimate.low, 122.5);
   near(estimate.high, 167.5);
@@ -232,10 +232,15 @@ test("市況からの推定: 収穫の期間の月日に入る取引日の中央
   ];
   const sorted = marketEstimate(shuffled, { start: "2027-05-01", end: "2027-05-10" });
   assert.deepEqual([sorted.yen, sorted.low, sorted.high, sorted.from, sorted.to], [300, 200, 500, "2026-05-02", "2026-05-09"]);
+  // その日だけの市況では推さない。前後 7 日ちょうどの日まで入り、8 日離れた日は入らない
+  const edges = [...days("2026-06-03", 1, 100), ...days("2025-06-03", 1, 100), ...days("2024-06-03", 1, 100), ...days("2026-06-17", 1, 300), ...days("2025-06-17", 1, 300)];
+  const far = [...days("2026-06-02", 1, 900), ...days("2026-06-18", 1, 900)];
+  const seven = marketEstimate([...edges, ...far], { start: "2027-06-10", end: "2027-06-10" });
+  assert.deepEqual([seven.widen, seven.days, seven.yen], [7, 5, 100]);
 });
 
 test("市況からの推定: 取引日が足りなければ、前後に 14、30、45 日と広げる", () => {
-  // 期間（6/1〜6/3）には 2 日しかない。前後 14 日で 5 日になる
+  // 期間（6/1〜6/3）の前後 7 日には 2 日しかない。前後 14 日で 5 日になる
   const prices = [...days("2026-06-01", 2, 200), ...days("2026-05-20", 3, 100), ...days("2026-09-01", 10, 900)];
   const near14 = marketEstimate(prices, { start: "2027-06-01", end: "2027-06-03" });
   assert.equal(near14.widen, 14);
@@ -270,28 +275,30 @@ test("市況からの推定: 年をまたぐ期間と、うるう日", () => {
   // 12/25〜1/5 の期間に、去年の 12 月末と今年の 1 月初めの値が入る
   const prices = [...days("2025-12-28", 4, 100), ...days("2026-01-02", 3, 200), ...days("2026-06-01", 10, 900)];
   const estimate = marketEstimate(prices, { start: "2026-12-25", end: "2027-01-05" });
-  assert.equal(estimate.widen, 0);
+  assert.equal(estimate.widen, 7);
   assert.equal(estimate.days, 7);
   near(estimate.yen, 100);
-  // 2/29 は 2/28 と同じ日に数える
-  const leap = ["2028-02-29", "2024-02-29", "2026-02-28", "2027-02-28", "2025-02-28", "2025-03-01"].map((sale_date) => ({ sale_date, avg_price: 500 }));
-  const leapEstimate = marketEstimate(leap, { start: "2027-02-28", end: "2027-02-28" });
-  assert.deepEqual([leapEstimate.days, leapEstimate.widen], [5, 0], "2/29 の 2 日も 2/28 に入る。3/1 は入らない");
-  // 2 月のほかの月の 29〜31 日は、そのままの日（1/31 は、1/29 だけの期間に入らない）
+  // 2/29 は 2/28 と同じ日に数える（2/21 の前後 7 日の 2/14〜2/28 に入る。3/1 は入らない）
+  const leap = ["2008-02-29", "2012-02-29", "2016-02-29", "2020-02-29", "2024-02-29", "2025-03-01"].map((sale_date) => ({ sale_date, avg_price: 500 }));
+  const leapEstimate = marketEstimate(leap, { start: "2027-02-21", end: "2027-02-21" });
+  assert.deepEqual([leapEstimate.days, leapEstimate.widen], [5, 7]);
+  // 2 月のほかの月の 29〜31 日は、そのままの日（1/31 は、2/7 の前後 7 日の 1/31〜2/14 に入る）
   const monthEnd = days("2021-01-31", 1, 100).concat(days("2022-01-31", 1, 100), days("2023-01-31", 1, 100), days("2024-01-31", 1, 100), days("2025-01-31", 1, 100));
-  assert.equal(marketEstimate(monthEnd, { start: "2027-01-29", end: "2027-01-29" }).widen, 14);
+  assert.equal(marketEstimate(monthEnd, { start: "2027-02-07", end: "2027-02-07" }).widen, 7);
 });
 
 test("市況からの推定: 期間の終わりが始まりより前か空なら 1 日だけ、1 年を超える期間はどの日も入る", () => {
   const prices = [...days("2026-05-01", 5, 100), ...days("2026-10-01", 5, 300)];
-  assert.equal(marketEstimate(prices, { start: "2027-05-03", end: "2027-05-01" }).widen, 14);
-  assert.equal(marketEstimate(prices, { start: "2027-05-03", end: null }).widen, 14);
+  for (const end of ["2027-05-01", null]) {
+    const one = marketEstimate(prices, { start: "2027-05-03", end });
+    assert.deepEqual([one.widen, one.days], [7, 5], "5/3 の前後 7 日だけ（10 月は入らない）");
+  }
   // ちょうど 365 日後まで（同じ月日の 1 年後）は、どの日も入る
   const fullYear = marketEstimate(prices, { start: "2026-03-01", end: "2027-03-01" });
-  assert.deepEqual([fullYear.days, fullYear.widen], [10, 0]);
+  assert.deepEqual([fullYear.days, fullYear.widen], [10, 7]);
   const year = marketEstimate(prices, { start: "2026-01-01", end: "2027-02-01" });
   assert.equal(year.days, 10);
-  assert.equal(year.widen, 0);
+  assert.equal(year.widen, 7);
 });
 
 test("市況の品目名の候補: ひらがなとカタカナをそろえ、同じ、含む、含まれる、そのほかの順", () => {

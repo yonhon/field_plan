@@ -193,14 +193,13 @@ test("収穫量: 畝ごとに入れた量はそのまま、残りを面積の比
   assert.deepEqual(page.errors, []);
 });
 
-test("単価: 品目にも作付にもなければ、収穫の日ごとにその日の市況から推す。足りなければ全期間と注記する。月次に月ごとの売上を出す", options, async () => {
-  // 畝 1 の収穫は 6/27〜7/2 の 6 日。市況は、その 6 つの月日に 5 年分ずつあり、6 月は 100 円、7 月は 400 円。
-  // 畝 2 の収穫は 1 月で、その時期の市況はない（全期間の中央値 = 100 円）。ほかの品目の市況も 1 つ入れておく
-  const dates = ["06-27", "06-28", "06-29", "06-30", "07-01", "07-02"];
+test("単価: 品目にも作付にもなければ、収穫の日ごとにその日の前後 7 日の市況から推す。足りなければ全期間と注記する。月次に月ごとの売上を出す", options, async () => {
+  // 畝 1 の収穫は 6/27〜7/2 の 6 日。市況は 6/20〜6/24 に 100 円、7/5〜7/9 に 400 円。日ごとに前後 7 日に入る取引が変わり、
+  // 中央値は 6/27〜6/29 が 100 円、6/30〜7/2 が 400 円になる。
+  // 畝 2 の収穫は 1 月で、その時期の市況はない（全期間の中央値 = 250 円）。ほかの品目の市況も 1 つ入れておく
   const market = [
-    ...[2021, 2022, 2023, 2024, 2025].flatMap((year) =>
-      dates.map((date) => ({ item_name: "しけんな", sale_date: `${year}-${date}`, avg_price: date.startsWith("06") ? 100 : 400 }))
-    ),
+    ...["06-20", "06-21", "06-22", "06-23", "06-24"].map((date) => ({ item_name: "しけんな", sale_date: `2026-${date}`, avg_price: 100 })),
+    ...["07-05", "07-06", "07-07", "07-08", "07-09"].map((date) => ({ item_name: "しけんな", sale_date: `2026-${date}`, avg_price: 400 })),
     { item_name: "ほかの品目", sale_date: "2026-06-01", avg_price: 50 },
   ];
   const works = [
@@ -208,21 +207,21 @@ test("単価: 品目にも作付にもなければ、収穫の日ごとにその
     { id: "w2", plan_id: "p1", planting_id: "pl2", block_id: null, seq: 1, work_type: "harvest", plan_start: "2027-01-10", plan_end: "2027-01-20" },
   ];
   await page.loadApp(seed({ crop: { price_yen_per_kg: null, market_item_name: "しけんな" }, works, market }));
-  // 出荷量 16 kg を 6 日に均等に分ける。6 月の 4 日は 100 円、7 月の 2 日は 400 円。単価はその平均の 200 円
+  // 出荷量 16 kg を 6 日に均等に分ける。単価は日ごとの単価の平均の 250 円
   await openPlanting("pl1");
   await page.waitFor(
-    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "200（市況・収穫期）")`,
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "250（市況・前後 7 日）")`,
     "日ごとの市況からの単価"
   );
-  assert.deepEqual((await panelRows())[3], ["売上（円）", "3,200", "－"]);
+  assert.deepEqual((await panelRows())[3], ["売上（円）", "4,000", "－"]);
   assert.match(
     await panelNotes(),
-    /単価は、収穫の予定（6\/27〜7\/2）に均等に出荷するとして、市況「しけんな」から推しました。収穫の予定の 6 日それぞれの卸値から推した単価の平均（その日の市況の中央値 6 日）。手数料などを引く前の卸値です。/
+    /単価は、収穫の予定（6\/27〜7\/2）に均等に出荷するとして、市況「しけんな」から推しました。収穫の予定の 6 日それぞれの卸値から推した単価の平均（前後 7 日の中央値 6 日）。手数料などを引く前の卸値です。/
   );
 
   await openPlanting("pl2");
   await page.waitFor(
-    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "100（市況・全期間）")`,
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "250（市況・全期間）")`,
     "全期間の中央値"
   );
   assert.match(await panelNotes(), /収穫の予定の 11 日それぞれの卸値から推した単価の平均（市況が足りず全期間の中央値 11 日）/);
@@ -231,8 +230,8 @@ test("単価: 品目にも作付にもなければ、収穫の日ごとにその
   await page.openView("revenue");
   await page.waitFor(`document.querySelectorAll("${PLANTING_ROWS}").length === 2`, "作付の行");
   assert.deepEqual(await page.run(`[...document.querySelectorAll("${PLANTING_ROWS}")].map((tr) => [tr.cells[4].textContent, tr.cells[4].title, tr.cells[5].textContent])`), [
-    ["200（市況・収穫期）", "収穫の予定の 6 日それぞれの卸値から推した単価の平均（その日の市況の中央値 6 日）", "3,200"],
-    ["100（市況・全期間）", "収穫の予定の 11 日それぞれの卸値から推した単価の平均（市況が足りず全期間の中央値 11 日）", "1,600"],
+    ["250（市況・前後 7 日）", "収穫の予定の 6 日それぞれの卸値から推した単価の平均（前後 7 日の中央値 6 日）", "4,000"],
+    ["250（市況・全期間）", "収穫の予定の 11 日それぞれの卸値から推した単価の平均（市況が足りず全期間の中央値 11 日）", "4,000"],
   ]);
 
   // 月次: 横に月（売上のない月も並べる）と合計、縦に作付と合計
@@ -242,10 +241,15 @@ test("単価: 品目にも作付にもなければ、収穫の日ごとにその
   const table = (part) => page.run(`[...document.querySelectorAll("#revenueMonthly ${part} tr")].map((tr) => [...tr.cells].map((cell) => cell.textContent))`);
   assert.deepEqual(await table("thead"), [["場所", "品目", "2027/1", "2027/2", "2027/3", "2027/4", "2027/5", "2027/6", "2027/7", "合計"]]);
   assert.deepEqual(await table("tbody"), [
-    ["A 畝1", "試験菜", "", "", "", "", "", "1,067", "2,133", "3,200"],
-    ["A 畝2", "試験菜", "1,600", "", "", "", "", "", "", "1,600"],
+    ["A 畝1", "試験菜", "", "", "", "", "", "1,867", "2,133", "4,000"],
+    ["A 畝2", "試験菜", "4,000", "", "", "", "", "", "", "4,000"],
   ]);
-  assert.deepEqual(await table("tfoot"), [["合計", "1,600", "0", "0", "0", "0", "1,067", "2,133", "4,800"]]);
+  assert.deepEqual(await table("tfoot"), [["合計", "4,000", "0", "0", "0", "0", "1,867", "2,133", "8,000"]]);
+  // 合計の行は、見出しの欄（場所・品目）にも値の欄と同じ上の線を引く（線が途中で切れない）
+  assert.deepEqual(
+    await page.run(`[...document.querySelector("#revenueMonthly tfoot tr").cells].slice(0, 2).map((cell) => getComputedStyle(cell).borderTopStyle + " " + getComputedStyle(cell).borderTopWidth)`),
+    await page.run(`[...document.querySelector("#revenueMonthly tfoot tr").cells].slice(1, 3).map((cell) => getComputedStyle(cell).borderTopStyle + " " + getComputedStyle(cell).borderTopWidth)`)
+  );
   // 再読み込みしても月次で開き、行を押すと作付の詳細を開く
   await page.run(`location.reload()`);
   await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#revenue/monthly" && document.querySelectorAll("#revenueMonthly tbody tr").length === 2`, "月次で開き直す");
@@ -258,7 +262,7 @@ test("単価: 品目にも作付にもなければ、収穫の日ごとにその
   await page.loadApp(seed({ crop: { price_yen_per_kg: null, market_item_name: "しけんな" }, works, market: [] }), { field_plan_market: kept });
   await openPlanting("pl1");
   await page.waitFor(
-    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "200（市況・収穫期）")`,
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "250（市況・前後 7 日）")`,
     "取っておいた市況からの単価"
   );
 

@@ -68,9 +68,6 @@ export function daysOf(window) {
   return days;
 }
 
-// 広げた日数の重さ。いちばん広げた日を、市況から推した単価の印にする
-const WIDEN_ORDER = [0, 14, 30, 45, "all"];
-
 // 1 つの作付の見込み。分からない値は null。
 // 売上は、収穫の計画（window）がある作付だけに出す。出荷量を収穫の期間の日に均等に分け、日ごとの単価を掛けて足す。
 // 日ごとの単価は、作付か品目に単価があればその値、なければ marketOn(日付)（その日の市況からの推定。marketEstimate の返り値）。
@@ -98,7 +95,7 @@ export function forecast(planting, crop, { seedlings = null, areaM2 = null, wind
   if (!manual) {
     const counts = {};
     estimates.forEach((item) => (counts[item.widen] = (counts[item.widen] || 0) + 1));
-    const widen = WIDEN_ORDER.filter((step) => counts[step]).at(-1);
+    const widen = [...MARKET_WIDEN_DAYS, "all"].filter((step) => counts[step]).at(-1);
     result.price = { yen: daily.reduce((sum, yen) => sum + yen, 0) / days.length, from: "market", estimate: { widen, counts, days: days.length } };
   }
   if (shippedKg !== null) {
@@ -173,8 +170,10 @@ export function harvestWindow(works) {
 
 // 推定に要る取引日の数。これに満たなければ、期間を前後に広げる
 export const MARKET_MIN_DAYS = 5;
-// 広げる日数の段階。最後まで足りなければ、品目の全期間を使う
-export const MARKET_WIDEN_DAYS = [0, 14, 30, 45];
+// 期間の前後に広げる日数の段階。最後まで足りなければ、品目の全期間を使う。
+// 最初から前後 7 日に広げる（2026-11-24）。その日だけの市況は、その年の台風や曜日（休み明けは高い、など）に左右されやすく、
+// 数日で穫り終える品目では、それがそのまま単価になるため。7 日なら曜日の並びを 2 回り含み、季節の動きはぼかしすぎない
+export const MARKET_WIDEN_DAYS = [7, 14, 30, 45];
 
 // 年の中の何日目か（0〜364）。うるう日は 2 月 28 日と同じに扱う
 function dayOfYear(iso) {
@@ -192,8 +191,8 @@ function quantile(sorted, q) {
 }
 
 // 市況の中値から、収穫の期間の単価を推す。prices は 1 品目の [{ sale_date, avg_price }]（円/kg、卸値）。
-// 年は問わず、収穫の期間の月日に入る取引日の中値を集め、その中央値を単価にする（年をまたぐ期間も扱う）。
-// 取引日が MARKET_MIN_DAYS に満たなければ、期間を前後に 14、30、45 日と広げ、それでも足りなければ品目の全期間を使う。
+// 年は問わず、期間を前後 7 日に広げた月日に入る取引日の中値を集め、その中央値を単価にする（年をまたぐ期間も扱う）。
+// 取引日が MARKET_MIN_DAYS に満たなければ、前後 14、30、45 日と広げ、それでも足りなければ品目の全期間を使う。
 // 返り値: { yen, low, high（25 % と 75 % の点）, days, widen（広げた日数。全期間なら "all"）, from, to（使った取引日の最初と最後） }。
 // 取引日が 1 日もなければ null
 export function marketEstimate(prices, window) {
