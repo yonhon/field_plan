@@ -377,3 +377,19 @@ test("収量と単価の見込み: 履歴を直す・削除する。いま使う
   assert.deepEqual((await panelRows())[1], ["出荷量（kg）", "14.0", "－"]);
   assert.deepEqual(page.errors, []);
 });
+
+test("入力の窓の上のタブ: 4 つのタブが、PC でもスマホの幅でも 1 行に並び、文字が切れない", options, async () => {
+  await page.loadApp(seed());
+  for (const width of [1280, 390, 360]) {
+    await page.viewport(width);
+    await page.click("#logAddBtn");
+    await page.waitFor(`document.querySelectorAll('${DIALOG} [data-act="kind"]').length === 4`, `タブが 4 つ（幅 ${width}）`);
+    const tabs = await page.run(`[...document.querySelectorAll('${DIALOG} [data-act="kind"]')].map((el) => ({ top: Math.round(el.getBoundingClientRect().top), cut: el.scrollWidth > el.clientWidth }))`);
+    assert.equal(new Set(tabs.map((tab) => tab.top)).size, 1, `幅 ${width} で 1 行`);
+    assert.deepEqual(tabs.map((tab) => tab.cut), [false, false, false, false], `幅 ${width} で文字が切れない`);
+    await page.click(`${DIALOG} .log-head [data-act="close"]`);
+    await page.waitFor(`!document.querySelector("${DIALOG}") && history.state?.fieldPlanDialog !== true`, "閉じる");
+  }
+  await page.viewport();
+  assert.deepEqual(page.errors, []);
+});

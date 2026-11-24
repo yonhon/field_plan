@@ -4128,13 +4128,16 @@ button.diary-work:hover {
 
 /* ---- 「作業を入力する」の窓のタブと、工程の計画 ---- */
 /* タブは 3 つを同じ幅で並べる */
+/* 入力の窓の上のタブ（工程の計画、管理作業の計画、実績、収量と単価）。PC でもスマホでも 1 行に並べる。
+   幅は文字の長さに合わせて分け、余りを均等に足す（等分にすると、スマホの幅で「管理作業の計画」が収まらない） */
 .log-tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
   width: 100%;
 }
 
 .log-tabs .chip-btn {
+  flex: 1 1 auto;
+  min-width: 0;
   padding-left: 4px;
   padding-right: 4px;
 }
