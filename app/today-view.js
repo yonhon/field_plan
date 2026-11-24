@@ -1,14 +1,17 @@
 // 「今日」のタブと、計測中の帯（作業時間の計測。docs の 4.6）。計算は work-time.js。
 // - 計測中の帯: ヘッダーの下に、どの画面でも出す。作業の名前、始めた時刻、経過した時間と、「休憩」「止める」。
 //   休憩のあいだは「再開」で同じ作業を始め直せる（休憩の時間は数えない）。
-// - 「今日」のタブ: 準備・片付け、移動、計画にない作業を始めるボタンと、今週やること・遅れている作業の欄（圃場図の上の欄を
+// - 「今日」のタブ: 観察、準備・片付け、移動、計画にない作業を始めるボタンと、今週やること・遅れている作業の欄（圃場図の上の欄を
 //   このタブへ移して出す。行の「始める」は schedule-view.js）と、その日の作業時間の一覧（時刻を直す、あとで入れる、消す）。
+//   測っている種類のボタンは、経過した時間と「止める」に変わる（押すと止まる）。
+//   スマホの幅では、計測中の帯の代わりに、ボタンの上の計測の枠（#todayNow）に、休憩と止めるを出す（docs/design-rules.md）。
 // - 止め忘れて日をまたいだ計測は、開いたときに、止めた時刻を尋ねる。
 // 計測は、ほかの書き込みと同じく state.store を通して保存し、元に戻すの対象にする（history.js の UNDOABLE_WRITES）
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
 import { notify, notifySaveFailed, confirmDelete } from "./dialog.js";
-import { localToday, workName } from "./schedule.js";
+import { isManagement, localToday, workName } from "./schedule.js";
+import { MOVE_ICON, OBSERVE_ICON, PLAY_ICON, PREP_ICON, SHOVEL_ICON, STOP_ICON } from "./icons.js";
 import {
   COMMON_KINDS,
   SESSION_KINDS,
@@ -30,6 +33,13 @@ import { askNoticePermission, syncTimerNotice, timerNoticeText } from "./timer-n
 const $ = (id) => document.getElementById(id);
 const PAUSE_KEY = "field_plan_paused"; // 休憩中の作業（再開で始め直す中身）。この端末だけ
 const TICK_MS = 15 * 1000; // 経過した時間を書き直す間
+// 作業を始めるボタン。並べる順に、絵と名前。名前の <wbr> は、スマホの幅で 2 行にするときの切れ目
+const START_BUTTONS = [
+  { kind: "observe", icon: OBSERVE_ICON, label: SESSION_KINDS.observe },
+  { kind: "prep", icon: PREP_ICON, label: "準備・<wbr>片付け" },
+  { kind: "move", icon: MOVE_ICON, label: SESSION_KINDS.move },
+  { kind: "other", icon: SHOVEL_ICON, label: "計画に<wbr>ない作業…" },
+];
 
 let ctx = null; // { state, setStatus, refresh, typeLabel, fieldName }
 let day = null; // 作業時間の一覧で見ている日。null は今日
@@ -182,15 +192,17 @@ function renderBar() {
   } else {
     draw(
       bar,
-      `<span class="timer-name is-paused">休憩中（${clockOf(paused.at)} から）: ${escapeHtml(paused.label || SESSION_KINDS[paused.kind] || "作業")}</span>` +
+      `<span class="timer-name is-paused">休憩中（${clockOf(paused.at)} から）: ${escapeHtml(pausedName(paused))}</span>` +
         `<span class="timer-actions"><button type="button" class="primary-btn" data-timer="resume">再開</button>` +
         `<button type="button" class="text-btn" data-timer="forget" title="再開しないで、休憩の表示を消します">閉じる</button></span>`
     );
   }
 }
 
-async function onBarClick(event) {
-  const action = event.target.closest("[data-timer]")?.dataset.timer;
+const pausedName = (paused) => paused.label || SESSION_KINDS[paused.kind] || "作業";
+
+// 帯と計測の枠の「止める」「休憩」「再開」「閉じる」
+async function timerAction(action) {
   if (action === "stop") {
     await stopRunning();
   } else if (action === "pause") {
@@ -205,6 +217,48 @@ async function onBarClick(event) {
     savePaused(null);
     renderToday();
   }
+}
+
+function onBarClick(event) {
+  return timerAction(event.target.closest("[data-timer]")?.dataset.timer);
+}
+
+// 計測の枠（スマホの幅だけ出す）。測っていないときも同じ高さで出す
+function nowHtml(running, paused) {
+  if (running) {
+    const where = running.field_id !== state().field.id ? `（${ctx.fieldName(running.field_id)}）` : "";
+    return (
+      `<span class="timer-dot" aria-hidden="true"></span>` +
+      `<span class="today-now-name">${escapeHtml(sessionLabel(running))}${escapeHtml(where)}<small>${clockOf(running.started_at)} から</small></span>` +
+      `<span class="today-now-time">${formatMinutes(sessionMinutes(running))}</span>` +
+      `<button type="button" class="chip-btn" data-today="pause">休憩</button>` +
+      `<button type="button" class="primary-btn" data-today="stop">${STOP_ICON}止める</button>`
+    );
+  }
+  if (paused) {
+    return (
+      `<span class="timer-dot is-off" aria-hidden="true"></span>` +
+      `<span class="today-now-name is-off">${escapeHtml(pausedName(paused))}<small>休憩中（${clockOf(paused.at)} から）</small></span>` +
+      `<button type="button" class="text-btn" data-today="forget" title="再開しないで、休憩の表示を消します">閉じる</button>` +
+      `<button type="button" class="primary-btn" data-today="resume">${PLAY_ICON}再開</button>`
+    );
+  }
+  return (
+    `<span class="timer-dot is-off" aria-hidden="true"></span>` +
+    '<span class="today-now-name is-off">計測していません<small>下のボタンで測り始めます</small></span>'
+  );
+}
+
+// 作業を始めるボタン。測っている種類のボタンは、経過した時間と「止める」にする（押すと止まる）。
+// 計画の作業を測っているときは、どのボタンもそのまま（止めるのは帯と、今週やることの行）
+function startHtml(running) {
+  const runningKind = !running ? null : running.kind !== "work" ? running.kind : (running.work_ids || []).length ? null : "other";
+  return START_BUTTONS.map(({ kind, icon, label }) =>
+    kind === runningKind
+      ? `<button type="button" class="today-tile is-running" data-today="stop" aria-label="${label.replace("<wbr>", "").replace("…", "")}を止める">` +
+        `<span class="today-tile-time">${formatMinutes(sessionMinutes(running))}</span><span class="today-tile-stop">${STOP_ICON}止める</span></button>`
+      : `<button type="button" class="today-tile" data-today="${kind}">${icon}<span class="today-tile-label">${label}</span></button>`
+  ).join("");
 }
 
 // ---- 「今日」のタブ ----
@@ -222,11 +276,8 @@ export function renderToday() {
   if ($("todayView").hidden) {
     return;
   }
-  draw(
-    $("todayStart"),
-    COMMON_KINDS.map((kind) => `<button type="button" class="chip-btn" data-today="${kind}">${SESSION_KINDS[kind]}</button>`).join("") +
-      `<button type="button" class="chip-btn" data-today="other">計画にない作業…</button>`
-  );
+  draw($("todayNow"), nowHtml(running, running ? null : loadPaused()));
+  draw($("todayStart"), startHtml(running));
   const date = shownDay();
   const list = daySessions(sessions(), state().field.id, date);
   const totals = sessionTotals(list);
@@ -277,6 +328,8 @@ async function onTodayClick(event) {
   const action = button.dataset.today;
   if (COMMON_KINDS.includes(action)) {
     await startSession({ kind: action });
+  } else if (["stop", "pause", "resume", "forget"].includes(action)) {
+    await timerAction(action);
   } else if (action === "other") {
     chooseType();
   } else if (action === "prev" || action === "next") {
@@ -296,18 +349,34 @@ async function onTodayClick(event) {
   }
 }
 
-// 計画にない作業の種類を選んで始める
+// 計画にない作業の種類を選んで始める。管理作業と工程の作業に分けて並べる。
+// スマホの幅では画面の下から出る欄にして、大きさのそろったボタンを 3 列に並べる（docs/design-rules.md）
 function chooseType() {
   const types = [...(state().allWorkTypes || state().workTypes)].sort((a, b) => a.sort - b.sort);
+  const group = (title, list) =>
+    list.length
+      ? `<p class="today-type-cap">${title}</p><div class="today-type-list">` +
+        list.map((type) => `<button type="button" class="chip-btn today-type" data-type="${escapeHtml(type.code)}">${escapeHtml(type.label)}</button>`).join("") +
+        "</div>"
+      : "";
   const box = document.createElement("dialog");
   box.className = "notice today-types";
   draw(
     box,
-    '<p class="notice-text">始める作業の種類を選んでください。</p><div class="today-type-list">' +
-      types.map((type) => `<button type="button" class="chip-btn" data-type="${escapeHtml(type.code)}">${escapeHtml(type.label)}</button>`).join("") +
-      '</div><div class="row"><button type="button" class="text-btn" data-type="">キャンセル</button></div>'
+    '<p class="today-type-title">計画にない作業を始める</p>' +
+      group("管理作業", types.filter((type) => isManagement(type.code))) +
+      group("工程の作業", types.filter((type) => !isManagement(type.code))) +
+      '<div class="row today-type-foot"><button type="button" class="text-btn" data-type="">キャンセル</button></div>'
   );
   box.addEventListener("click", async (event) => {
+    // 欄の外（影）を押したら閉じる。影を押したときも target は窓そのものなので、押した位置で見分ける
+    if (event.target === box) {
+      const rect = box.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
+        box.close();
+      }
+      return;
+    }
     const code = event.target.closest("[data-type]")?.dataset.type;
     if (code === undefined) {
       return;

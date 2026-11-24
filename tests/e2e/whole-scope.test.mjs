@@ -6,7 +6,10 @@ import { findChrome, openBrowser } from "./browser.mjs";
 
 const AT = "2026-01-01T00:00:00Z";
 const AREA = [[0, 0], [40, 0], [40, 20], [0, 20]];
-const today = new Date().toISOString().slice(0, 10);
+// この端末の日付（toISOString の日付は UTC なので、日本時間の 0 時から 9 時は前の日になる）
+const pad = (n) => String(n).padStart(2, "0");
+const now = new Date();
+const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 
 // 区画 A と B に、畝を 1 本ずつ。どちらの畝にも試験菜を植え、今日にかかる作業を 1 つずつ入れる
 const seed = () => ({

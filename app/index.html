@@ -422,6 +422,8 @@
          遅れている作業・今週やること・最近の実績・ニュースの欄（行の「始める」は schedule-view.js）、その日の作業時間の一覧 -->
     <main id="todayView" class="schedule today-view" hidden>
       <section class="panel today-start">
+        <!-- 計測の枠（スマホの幅だけ出す）。測っていないときも出したままにして、下の欄が上下に動かないようにする -->
+        <div id="todayNow" class="today-now" role="status"></div>
         <div id="todayStart" class="today-start-buttons" role="group" aria-label="作業を始める"></div>
       </section>
       <!-- 遅れている作業・今週やること・最近の実績・ニュースのタブ。PC では欄の高さに上限を決め、はみ出す分は欄の中で送る。

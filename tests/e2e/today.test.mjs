@@ -215,6 +215,55 @@ test("今日: 「始める」は元に戻せる（前の作業も、止める前
   assert.deepEqual(page.errors, []);
 });
 
+test("今日: スマホの幅では、計測の枠と、行の丸いボタンで測って止める。計画にない作業は、分類ごとの欄から選ぶ", options, async () => {
+  await page.viewport(390);
+  try {
+    await page.loadApp(seed());
+    await page.openView("today");
+    await page.click('.wt-tab[data-wtab="week"]');
+    // 測っていないときも、計測の枠を出したままにする
+    await page.waitFor(`document.querySelector("#todayNow")?.textContent.includes("計測していません")`, "計測していないときの枠");
+    const nowHeight = await page.run(`document.getElementById("todayNow").offsetHeight`);
+
+    // 行の「始める」で測り始めると、行に「止める」、枠に「休憩」「止める」。帯は今日のタブでは出さない
+    await page.click('#weekList [data-week="start"]');
+    await page.waitFor(`Boolean(document.querySelector('#weekList li.is-running [data-week="stop"]')) && Boolean(document.querySelector('#todayNow [data-today="stop"]'))`, "行と枠の「止める」");
+    assert.equal(await page.run(`getComputedStyle(document.getElementById("timerBar")).display`), "none");
+    assert.equal(await page.run(`document.getElementById("todayNow").offsetHeight`), nowHeight, "枠の高さは変わらない");
+    await page.click('#weekList [data-week="stop"]');
+    await page.waitFor(`document.querySelector("#todayNow")?.textContent.includes("計測していません")`, "行の「止める」で止まる");
+    assert.deepEqual(await running(), []);
+
+    // 観察を始めると、観察のボタンが「止める」になり、押すと止まる
+    await page.click('#todayStart [data-today="observe"]');
+    await page.waitFor(`Boolean(document.querySelector('#todayStart .today-tile.is-running[data-today="stop"]'))`, "観察のボタンが止めるになる");
+    assert.equal((await running())[0].kind, "observe");
+    await page.click('#todayStart .today-tile.is-running');
+    await page.waitFor(`!document.querySelector("#todayStart .today-tile.is-running")`, "観察が止まる");
+    assert.deepEqual(await running(), []);
+
+    // 計画にない作業は、管理作業と工程の作業に分けて選ぶ
+    await page.click('#todayStart [data-today="other"]');
+    await page.waitFor(`Boolean(document.querySelector("dialog.today-types[open]"))`, "種類を選ぶ欄");
+    assert.deepEqual(await page.run(`[...document.querySelectorAll("dialog.today-types .today-type-cap")].map((cap) => cap.textContent)`), ["管理作業", "工程の作業"]);
+    assert.ok((await page.run(`document.querySelector("dialog.today-types .today-type-list").textContent`)).includes("除草"));
+    await page.click('dialog.today-types [data-type="weed"]');
+    await page.waitFor(`Boolean(document.querySelector('#todayStart .today-tile.is-running[aria-label="計画にない作業を止める"]'))`, "計画にない作業のボタンが止めるになる");
+    assert.equal((await running())[0].work_type, "weed");
+
+    // 枠の「休憩」と「再開」
+    await page.click('#todayNow [data-today="pause"]');
+    await page.waitFor(`Boolean(document.querySelector('#todayNow [data-today="resume"]'))`, "休憩中の枠");
+    assert.deepEqual(await running(), []);
+    await page.click('#todayNow [data-today="resume"]');
+    await page.waitFor(`Boolean(document.querySelector('#todayNow [data-today="stop"]'))`, "再開した枠");
+    assert.equal((await running())[0].work_type, "weed");
+    assert.deepEqual(page.errors, []);
+  } finally {
+    await page.viewport();
+  }
+});
+
 test("収支: 測った時間を作付ごとに合計し、まとめて測った時間は面積の比で分ける。行を押すと作付の詳細", options, async () => {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
