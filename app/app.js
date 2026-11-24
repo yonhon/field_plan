@@ -4217,7 +4217,7 @@ $("fieldSettings").addEventListener("click", (event) => {
 // 作付の詳細（planting）は、日程のタブの中の画面として扱う
 // 画面の URL。#map、#schedule、#diary、#journal、作付の詳細は #detail/planting/作付の ID。
 // 台帳は、開いているサブタブを付けて #master/サブタブ（crops、work-days、fertilizers）。前の品目の画面の URL（#crops）は、台帳の品目を開く。
-// 収支も、開いているサブタブを付けて #revenue/サブタブ（plantings、monthly）。#revenue だけなら、最後に開いたサブタブ。
+// 収支も、開いているサブタブを付けて #revenue/サブタブ（plantings、crops、monthly）。#revenue だけなら、最後に開いたサブタブ。
 // 日程の画面は、開いている区画を付けて #schedule/block/区画の ID、全体なら #schedule/all にする。
 // 前にあった区画の詳細（#detail/block/区画の ID）は、日程の画面でその区画を開く
 // 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）

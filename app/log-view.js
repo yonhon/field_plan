@@ -906,7 +906,9 @@ function specSection() {
         return `<label class="check"><input type="checkbox" data-spec="${key}"${value ? " checked" : ""} />${label}</label>`;
       }
       const type = kind === "text" ? "text" : "number";
-      return `<label>${label}<input type="${type}" data-spec="${key}" value="${escapeHtml(value ?? "")}"${type === "number" ? ' step="any" min="0" inputmode="decimal"' : ""} /></label>`;
+      // 正負の整数の欄は、マイナスを打てるように inputmode を付けない（スマホの数字だけのキーボードには − がない）
+      const attrs = kind === "signed" ? ' step="1"' : type === "number" ? ' step="any" min="0" inputmode="decimal"' : "";
+      return `<label>${label}<input type="${type}" data-spec="${key}" value="${escapeHtml(value ?? "")}"${attrs} /></label>`;
     })
     .join("");
   return `<div class="log-section"><h3>${choices ? "中身" : draft.kind === "plan" ? "予定の仕様" : "実際の仕様"}</h3>${items}${inputs ? `<div class="form-grid">${inputs}</div>` : ""}${harvestBedsHtml()}</div>`;
@@ -1652,7 +1654,8 @@ function buildLog() {
         spec[key] = String(value).trim();
       }
     } else if (num(value) !== null) {
-      spec[key] = num(value);
+      // 正負の整数の欄は、整数に丸める
+      spec[key] = type === "signed" ? Math.round(num(value)) : num(value);
     }
   }
   // 畝ごとの収穫量だけを入れたときは、その合計を記録の収穫量にする

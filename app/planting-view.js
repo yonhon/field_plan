@@ -431,13 +431,16 @@ function revenueHtml(c) {
   // 収量の差による売上の差 =（実績の出荷量 − 見込みの出荷量）× 単価。収穫の計画が終わる前は、途中の値
   const gap = actualShipped !== null && item.shippedKg !== null && item.price ? (actualShipped - item.shippedKg) * item.price.yen : null;
   const harvesting = item.window && item.window.end >= localToday();
-  const notes = [
+  // 見込みの出し方は、ふだんは閉じておく（「見込みの出し方」を押すと開く）。値が出ない理由などの知らせは、閉じずに出す
+  const howNotes = [
     `収量: ${how}。出荷率 ${item.rate.pct} %（${item.rate.from === "default" ? "値がないので 100 %" : VALUE_FROM[item.rate.from]}）。金額は税抜きです。`,
-    item.window ? "" : "収穫の計画（日付の入った収穫の作業）がないので、売上は出しません。",
     item.price?.from === "market" ? estimateNote(item) : "",
+    actual?.splitKg ? `収穫量のうち ${formatKg(actual.splitKg)} kg は、何本かの畝をまとめて量った量を、畝＋通路の面積の比で分けた値です。` : "",
+  ].filter(Boolean);
+  const notes = [
+    item.window ? "" : "収穫の計画（日付の入った収穫の作業）がないので、売上は出しません。",
     !item.price && item.marketLoading ? "市況を読んでいます。" : "",
     !item.price && item.marketName && !item.marketLoading ? `市況「${item.marketName}」に取引がないため、単価を推せません。` : "",
-    actual?.splitKg ? `収穫量のうち ${formatKg(actual.splitKg)} kg は、何本かの畝をまとめて量った量を、畝＋通路の面積の比で分けた値です。` : "",
     // 量を量らずに収穫だけを記録したものは、実績の収穫量に数えていない（0 kg とは分ける）
     actual?.unmeasured
       ? actual.count
@@ -454,7 +457,8 @@ function revenueHtml(c) {
     row("売上（円）", formatYen(item.salesYen), formatYen(actualSales(item))) +
     row("10 a あたり収量（kg）", per10a(item.yieldKg), actual?.count ? per10a(actual.kg) : "") +
     (gap !== null ? row(`収量の差による売上の差${harvesting ? "（収穫中）" : ""}`, "", `${gap > 0 ? "＋" : gap < 0 ? "−" : ""}${formatYen(Math.abs(gap))}`) : "") +
-    `</tbody></table>${reviewed ? `<p class="revenue-reviewed">${escapeHtml(reviewed)}</p>` : ""}${notes.map((text) => `<p class="muted">${escapeHtml(text)}</p>`).join("")}</section>`
+    `</tbody></table>${reviewed ? `<p class="revenue-reviewed">${escapeHtml(reviewed)}</p>` : ""}${notes.map((text) => `<p class="muted">${escapeHtml(text)}</p>`).join("")}` +
+    `<details class="note-fold"><summary>見込みの出し方</summary>${howNotes.map((text) => `<p class="muted">${escapeHtml(text)}</p>`).join("")}</details></section>`
   );
 }
 

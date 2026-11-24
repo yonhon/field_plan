@@ -22,7 +22,7 @@ const $ = (id) => document.getElementById(id);
 let ctx = null; // { state, typeLabel, openDetail, setStatus, onMarket, showView }
 
 // 「収支」のサブタブ。URL は #revenue/サブタブ（app.js）。最後に開いたサブタブを、ブラウザーに覚える（台帳のサブタブと同じ）
-export const REVENUE_TABS = ["plantings", "monthly"];
+export const REVENUE_TABS = ["plantings", "crops", "monthly"];
 const REVENUE_TAB_KEY = "field_plan_revenue_tab";
 let revenueTab = (() => {
   try {
@@ -368,7 +368,7 @@ export const actualSales = (item) => (item.actual?.kg && item.price ? (item.actu
 // 作付の品目の呼び名。苗と肥料の集計（crops.js の summarize）と同じ名前にする
 export const plantingCropName = (planting, crop) => (crop ? cropLabel(crop) : planting.crop_name || "品目なし");
 
-// 作付の並びの見込みを、品目ごとに足す。苗と肥料の集計の窓と、「収支」のタブの品目ごとの合計で使う。
+// 作付の並びの見込みを、品目ごとに足す。苗と肥料の集計の窓と、「収支」のタブの「品目ごとの収支」で使う。
 // 収量か売上の分からない作付は、その合計に入れず、数を missingYield、missingSales に数える
 export function revenueByCrop(plantings, index = revenueIndex()) {
   const byCrop = new Map();
@@ -503,11 +503,11 @@ function timeFoot(allocation) {
   );
 }
 
-// 品目ごとの合計の表
+// 「品目ごとの収支」の表
 function cropTable(active, index) {
   const crops = revenueByCrop(state().plantings, index);
   if (!crops.length) {
-    return "";
+    return '<p class="muted">このプランには、まだ作付がありません。</p>';
   }
   const sum = (key) => crops.reduce((total, row) => total + row[key], 0);
   const missing = (count) => (count ? `<span class="muted">（${count} 件は値なし）</span>` : "");
@@ -521,7 +521,7 @@ function cropTable(active, index) {
     )
     .join("");
   return (
-    '<h3 class="revenue-subhead">品目ごとの合計</h3><div class="table-scroll"><table class="work-table revenue-table revenue-crops">' +
+    '<div class="table-scroll"><table class="work-table revenue-table revenue-crops">' +
     `<thead><tr><th>品目</th><th class="num">作付の数</th><th class="num">収量の見込み（kg）</th><th class="num">売上の見込み（円）</th>${active ? '<th class="num">収穫量（kg）</th>' : ""}</tr></thead>` +
     `<tbody>${body}</tbody>` +
     `<tfoot><tr><th>合計</th><td class="num">${sum("count")}</td><td class="num">${formatKg(sum("yieldKg"))}</td><td class="num">${formatYen(sum("salesYen"))}</td>` +
@@ -572,12 +572,9 @@ export function renderRevenue() {
   // 作業時間と収穫の実績は、実際に使うプランの作業と作付につないでいるので、ほかのプランでは見込みだけを出す
   const allocation = timeAllocation();
   const index = revenueIndex();
-  draw(
-    $("revenueBody"),
-    (allocation ? "" : '<p class="muted">開いているプランは、実際に使うプランではありません。見込みだけを出します。作業時間と収穫量は、実際に使うプランを開くと出ます。</p>') +
-      plantingTable(allocation, index) +
-      cropTable(Boolean(allocation), index)
-  );
+  const other = allocation ? "" : '<p class="muted">開いているプランは、実際に使うプランではありません。見込みだけを出します。作業時間と収穫量は、実際に使うプランを開くと出ます。</p>';
+  draw($("revenueBody"), other + plantingTable(allocation, index));
+  draw($("revenueCrops"), other + cropTable(Boolean(allocation), index));
   draw($("revenueMonthly"), monthlyTable(index));
 }
 

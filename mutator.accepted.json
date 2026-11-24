@@ -123,6 +123,10 @@
     "reason": "等価: 計算した値が、上限・下限から 1e-9 ずらした値とちょうど同じときだけ違う。浮動小数の計算でその値にはならない。上限・下限そのものはテストしている",
     "where": "app/logs.js:622:7 used.value > range.max * (1 + 1e-9) -> used.value >= range.max * (1 + 1e-9)"
   },
+  "4xyvdd3f6s": {
+    "reason": "単位が見出しにないとき、(match || [])[1] も (match || [\"…\"])[1] も undefined になり、どちらも || \"\" で空になる。結果が変わらない",
+    "where": "app/logs.js:342:151 [] -> [\"Stryker was here!\"]"
+  },
   "6fbpbsta2c": {
     "reason": "等価: 計算した値が、上限・下限から 1e-9 ずらした値とちょうど同じときだけ違う。浮動小数の計算でその値にはならない。上限・下限そのものはテストしている",
     "where": "app/logs.js:514:45 per10a > row.liquid_max + 1e-9 -> per10a >= row.liquid_max + 1e-9"

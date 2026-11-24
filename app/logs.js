@@ -301,7 +301,7 @@ export function compressedAxis(spans, { margin = 1, minGap = 3, gapWidth = 2 } =
 // ---- 記録の文 ----
 // 画面と MCP サーバーで同じ書き方にする
 
-// 作業の種類ごとの仕様の欄。[spec のキー, 見出し, 種類（省くと数）]
+// 作業の種類ごとの仕様の欄。[spec のキー, 見出し, 種類（省くと 0 以上の数。signed は正負の整数）]
 export const SPEC_FIELDS = {
   plant: [
     ["plant_gap_cm", "株間（cm）"],
@@ -328,8 +328,9 @@ export const SPEC_FIELDS = {
   harvest: [["harvest_kg", "収穫量（kg）"]],
   care: [
     ["thin_gap_cm", "間引きで残した株間（cm）"],
-    ["pulled_plants", "抜き取った株数"],
-    ["pull_reason", "抜き取りの理由（例: 青枯病）", "text"],
+    // 増えたら正、減ったら負の整数（抜き取りで 3 株減らしたら −3、補植で 2 株足したら 2）
+    ["plant_change", "株数の変動（減ったら −）", "signed"],
+    ["change_reason", "変動の理由（例: 青枯病で抜き取り）", "text"],
   ],
 };
 
@@ -337,9 +338,14 @@ export const SPEC_FIELDS = {
 export function specText(type, spec = {}) {
   return (SPEC_FIELDS[type] || [])
     .filter(([key]) => spec[key] !== undefined && spec[key] !== null && spec[key] !== "" && spec[key] !== false)
-    .map(([key, label, kind]) => (kind === "check" ? label : `${label.replace(/（.*）/, "")} ${spec[key]}${(label.match(/（(cm|kg)）/) || [])[1] || ""}`))
+    .map(([key, label, kind]) =>
+      kind === "check" ? label : `${label.replace(/（.*）/, "")} ${kind === "signed" ? signedText(spec[key]) : spec[key]}${(label.match(/（(cm|kg)）/) || [])[1] || ""}`
+    )
     .join("・");
 }
+
+// 正負の数を、符号を付けて書く。例: +2、−3
+const signedText = (value) => (Number(value) > 0 ? `+${value}` : Number(value) < 0 ? `−${Math.abs(Number(value))}` : String(value));
 
 // 1 穴あたりの量の単位。量の単位が kg なら g、L なら mL（1 穴あたりは小さい量なので）
 export const perHoleUnit = (unit) => ({ kg: "g", L: "mL" })[unit] || unit;

@@ -4851,6 +4851,25 @@ dialog.field-settings::backdrop {
   fill: rgba(206, 77, 65, 0.12);
 }
 
+/* 表や枠の説明書き。ふだんは閉じておき、見出しを押すと開く */
+.note-fold {
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.note-fold summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.note-fold > p {
+  margin: 4px 0 0;
+}
+
+.note-fold > p + p {
+  margin-top: 4px;
+}
+
 /* 図の上の「操作の説明」 */
 .hint-fold {
   margin: 4px 0 6px;
@@ -5331,11 +5350,6 @@ dialog.has-undo-pad {
   text-align: right;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.revenue-subhead {
-  margin: 16px 0 6px;
-  font-size: 14px;
 }
 
 .revenue-crops tfoot th,

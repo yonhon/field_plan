@@ -8,7 +8,7 @@ import { findChrome, openBrowser } from "./browser.mjs";
 const AT = "2026-01-01T00:00:00Z";
 const AREA = [[0, 0], [40, 0], [40, 20], [0, 20]];
 const DIALOG = "dialog.log-dialog[open]";
-const PLANTING_ROWS = "#revenueBody .revenue-table:not(.revenue-crops) tbody tr";
+const PLANTING_ROWS = "#revenueBody .revenue-table tbody tr";
 const pad = (n) => String(n).padStart(2, "0");
 const TODAY = ((time) => `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}`)(new Date());
 
@@ -113,17 +113,23 @@ test("収量と売上: 品目の値から見込みを出し、作付の値を優
   assert.deepEqual((await panelRows())[3], ["売上（円）", "6,400", "－"]);
   assert.match(await page.run(`document.querySelector("#plantingBody .revenue-reviewed").textContent`), /見込みを .+ に記録（1 回目）/);
 
-  // 「収支」のタブ: 作付ごとの見込みと、品目ごとの合計
+  // 「収支」のタブ: 作付ごとの見込み
   await page.openView("revenue");
   await page.waitFor(`document.querySelectorAll("${PLANTING_ROWS}").length === 2`, "作付の行が 2 つ");
   assert.deepEqual(await page.run(`[...document.querySelectorAll("${PLANTING_ROWS}")].map((tr) => [0, 2, 3, 4, 5].map((i) => tr.cells[i].textContent))`), [
     ["A 畝1", "20.0", "80 %", "400（作付）", "6,400"],
     ["A 畝2", "20.0", "80 %", "300（品目）", "4,800"],
   ]);
+  // 「品目ごとの収支」のサブタブ: 品目ごとの合計
+  await page.click('#revenueView [data-revenuetab="crops"]');
+  await page.waitFor(`location.hash === "#revenue/crops" && !document.querySelector('[data-revenuepanel="crops"]').hidden`, "品目ごとの収支のサブタブ");
   assert.deepEqual(
-    await page.run(`[...document.querySelector("#revenueBody .revenue-crops tfoot tr").cells].map((cell) => cell.textContent)`),
+    await page.run(`[...document.querySelector("#revenueCrops .revenue-crops tfoot tr").cells].map((cell) => cell.textContent)`),
     ["合計", "2", "40.0", "11,200", "0.0"]
   );
+  // サブタブは覚えるので、ほかのテストのために「作付ごとの収支」に戻しておく
+  await page.click('#revenueView [data-revenuetab="plantings"]');
+  await page.waitFor(`location.hash === "#revenue/plantings"`, "作付ごとの収支に戻す");
 
   // 苗・肥料・収量の集計（日程の区画の頭の面積・畝の行を押すと開く）
   await page.run(`location.hash = "#schedule/block/b1"`);

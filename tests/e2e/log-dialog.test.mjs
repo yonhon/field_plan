@@ -235,6 +235,11 @@ test("株の手入れ・その他の中身は、作業の種類のすぐ下（�
   for (const item of ["鉢上げ", "抜き取り", "補植", "補播", "中耕"]) {
     assert.ok(await page.run(`Boolean(document.querySelector('dialog.log-dialog [data-act="item"][data-item="${item}"]'))`), `${item}を選べる`);
   }
+  // 株数の変動は、減ったときの負の数も入れられる（下限がなく、整数）
+  assert.deepEqual(
+    await page.run(`(() => { const input = document.querySelector('dialog.log-dialog [data-spec="plant_change"]'); return [input.type, input.min, input.step, input.inputMode]; })()`),
+    ["number", "", "1", ""]
+  );
   // 書きかけのまま閉じると、捨ててよいかを確かめる。「入力を続ける」なら窓は開いたまま
   await page.click('dialog.log-dialog [data-act="close"]');
   await page.waitFor(`document.querySelector("dialog.notice[open] .notice-text")?.textContent.includes("まだ保存していない入力")`, "捨ててよいかの確かめ");

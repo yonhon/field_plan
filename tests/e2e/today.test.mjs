@@ -4,8 +4,8 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { findChrome, openBrowser } from "./browser.mjs";
 
-// 「収支」のタブの、作付ごとの表の行（下の品目ごとの合計の表は除く）
-const PLANTING_ROWS = "#revenueBody .revenue-table:not(.revenue-crops) tbody tr";
+// 「収支」のタブの「作付ごとの収支」の表の行
+const PLANTING_ROWS = "#revenueBody .revenue-table tbody tr";
 
 const AT = "2026-01-01T00:00:00Z";
 const AREA = [[0, 0], [40, 0], [40, 20], [0, 20]];
@@ -237,7 +237,7 @@ test("収支: 測った時間を作付ごとに合計し、まとめて測った
   // 作付ごとの表の列: 場所、品目、収量・出荷率・単価・売上の見込み、収穫量、収穫量から見た売上、作業時間（8）、うち区画の作業（9）、内訳
   const cells = await page.run(`[...document.querySelectorAll("${PLANTING_ROWS}")].map((tr) => [0, 1, 8].map((i) => tr.cells[i].textContent))`);
   assert.deepEqual(cells, [["A 畝1", "試験菜", "0:26"], ["A 畝2", "試験菜", "0:54"]]);
-  const foot = await page.run(`[...document.querySelectorAll("#revenueBody .revenue-table:not(.revenue-crops) tfoot tr")].map((tr) => tr.querySelector(".num").textContent)`);
+  const foot = await page.run(`[...document.querySelectorAll("#revenueBody .revenue-table tfoot tr")].map((tr) => tr.querySelector(".num").textContent)`);
   // 作付と区画の合計、観察、準備・片付け、移動、実績につないでいない作業
   assert.deepEqual(foot, ["1:20", "0:00", "0:10", "0:00", "0:05"]);
   await page.click('#revenueBody tr[data-planting="pl2"]');
@@ -333,6 +333,6 @@ test("作業時間: 区画全体の作業は、その日の畝の作付に面積
   await page.waitFor(`document.querySelectorAll("#revenueBody tbody tr[data-planting]").length === 2`, "収支の作付の行");
   const cells = await page.run(`[...document.querySelectorAll("${PLANTING_ROWS}")].map((tr) => [0, 1, 8, 9].map((i) => tr.cells[i].textContent))`);
   assert.deepEqual(cells, [["A 畝1", "試験菜", "0:28", "0:08"], ["A 畝2", "試験菜", "1:08", "1:08"]]);
-  assert.equal(await page.run(`document.querySelector("#revenueBody .revenue-table:not(.revenue-crops) tfoot .num").textContent`), "1:36");
+  assert.equal(await page.run(`document.querySelector("#revenueBody .revenue-table tfoot .num").textContent`), "1:36");
   assert.deepEqual(page.errors, []);
 });

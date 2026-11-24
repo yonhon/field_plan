@@ -860,6 +860,9 @@ create table if not exists field.audit_log (
   new_row jsonb              -- 変えたあとの行。消したときは空
 );
 alter table field.audit_log add column if not exists op_id uuid;  -- 画面の 1 回の操作の ID。ヘッダー x-op-id から。DB に直接つないだ変更などは空
+-- 誰が変えたか。Claude が scripts/save_logs.py で、持ち主としてログインした扱いで書いたときは claude（ヘッダー x-actor から）。
+-- 本人が画面から変えたときは空。user_id と db_role だけでは、本人の操作と見分けられないので持つ
+alter table field.audit_log add column if not exists actor text;
 
 create index if not exists audit_log_at_idx on field.audit_log (at);
 create index if not exists audit_log_row_idx on field.audit_log (table_name, row_id);
@@ -872,6 +875,7 @@ declare
   old_row jsonb := case when tg_op <> 'INSERT' then to_jsonb(old) end;
   new_row jsonb := case when tg_op <> 'DELETE' then to_jsonb(new) end;
   op_id uuid;
+  actor text;
 begin
   -- 中身の変わらない上書き（画面が同じ行を保存し直したとき）は残さない
   if tg_op = 'UPDATE' and old_row = new_row then
@@ -883,12 +887,17 @@ begin
   exception when others then
     op_id := null;
   end;
-  insert into field.audit_log (user_id, db_role, table_name, op, row_id, old_row, new_row, op_id)
+  begin
+    actor := nullif(nullif(current_setting('request.headers', true), '')::jsonb ->> 'x-actor', '');
+  exception when others then
+    actor := null;
+  end;
+  insert into field.audit_log (user_id, db_role, table_name, op, row_id, old_row, new_row, op_id, actor)
   values (
     -- この関数は持ち主の権限で動くので、current_user では見分けられない。画面からは auth.role() が入る
     auth.uid(), coalesce(auth.role(), session_user), tg_table_name, lower(tg_op),
     coalesce(new_row ->> 'id', old_row ->> 'id', new_row ->> 'code', old_row ->> 'code'),
-    old_row, new_row, op_id
+    old_row, new_row, op_id, actor
   );
   return null;
 end;

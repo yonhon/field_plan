@@ -255,7 +255,7 @@ export function renderToday() {
       (rows ? `<ul class="session-list">${rows}</ul>` : '<p class="muted">この日の計測はありません。</p>') +
       `<p class="session-totals">作業 ${formatMinutes(totals.work)}${COMMON_KINDS.map((kind) => `・${SESSION_KINDS[kind]} ${formatMinutes(totals[kind])}`).join("")}` +
       `<strong>合計 ${formatMinutes(totals.total)}</strong></p>` +
-      '<p class="muted">次の作業の「始める」を押すと、前の作業は止まります。休憩と、その日の最後の作業のあとは「止める」を押してください。押し忘れたときは「直す」で時刻を直すか、「＋ 時間を入れる」で入れます。</p>'
+      '<details class="note-fold"><summary>測り方</summary><p class="muted">次の作業の「始める」を押すと、前の作業は止まります。休憩と、その日の最後の作業のあとは「止める」を押してください。押し忘れたときは「直す」で時刻を直すか、「＋ 時間を入れる」で入れます。</p></details>'
   );
 }
 

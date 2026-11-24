@@ -25,6 +25,7 @@ import {
   shiftAfterActual,
   cropDiffText,
   specDiff,
+  SPEC_FIELDS,
   specText,
   layoutBars,
   stackLanes,
@@ -800,7 +801,21 @@ test("資材の文: 1 穴あたりの量で決めたものは、1 穴の量も�
   assert.equal(inputText({ kind: "pesticide", name: "試験粒剤", method: "植穴処理", amount: 2468, unit: "g", per_hole: "2.0" }), "試験粒剤 植穴処理 1 穴 2 g");
 });
 
-test("株の手入れの仕様の文に、抜き取った株数と理由を入れる", () => {
-  assert.equal(specText("care", { items: ["抜き取り"], pulled_plants: 3, pull_reason: "青枯病" }), "抜き取った株数 3・抜き取りの理由 青枯病");
+test("株の手入れの仕様の文に、株数の変動（符号つき）と理由を入れる", () => {
+  assert.equal(specText("care", { items: ["抜き取り"], plant_change: -3, change_reason: "青枯病" }), "株数の変動 −3・変動の理由 青枯病");
+  assert.equal(specText("care", { items: ["補植"], plant_change: 2 }), "株数の変動 +2");
+  // DB の数は文字で届くことがある
+  assert.equal(specText("care", { items: ["補植"], plant_change: "-1" }), "株数の変動 −1");
+  assert.equal(specText("care", { plant_change: 0 }), "株数の変動 0");
+  // 理由は文字の欄、変動は正負の整数の欄（画面の欄の種類と、保存するときの扱いが決まる）
+  assert.deepEqual(
+    SPEC_FIELDS.care.map(([key, , kind]) => [key, kind]),
+    [["thin_gap_cm", undefined], ["plant_change", "signed"], ["change_reason", "text"]]
+  );
+});
+
+test("仕様の文: 空・null・入れていないチェックは出さず、チェックは見出しだけを出す", () => {
+  assert.equal(specText("plant", { plant_gap_cm: null, row_gap_cm: "", row_count: 3, staggered: false }), "条数 3");
+  assert.equal(specText("plant", { row_count: 2, staggered: true }), "条数 2・千鳥");
   assert.equal(specText("care", { items: ["間引き"], thin_gap_cm: 30 }), "間引きで残した株間 30cm");
 });
