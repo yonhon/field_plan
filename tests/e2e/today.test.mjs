@@ -251,12 +251,12 @@ test("起動: URL に画面がなければ、最後に開いていた上のタ�
   await page.loadApp(seed());
   await page.waitFor(`location.hash === "#map"`, "覚えていなければ圃場図");
   await page.openView("revenue");
-  await page.waitFor(`location.hash === "#revenue"`, "収支");
+  await page.waitFor(`location.hash === "#revenue/plantings"`, "収支（作付ごとの収支のサブタブ）");
   // メニューから開いた台帳は覚えない（その前の収支のまま）
   await page.openView("master");
   await page.waitFor(`location.hash.startsWith("#master/")`, "台帳");
   await reopen();
-  await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#revenue" && !document.getElementById("revenueView").hidden`, "収支で開く");
+  await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#revenue/plantings" && !document.getElementById("revenueView").hidden`, "収支で開く");
   await page.openView("today");
   await reopen();
   await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#today" && !document.getElementById("todayView").hidden`, "今日で開く");

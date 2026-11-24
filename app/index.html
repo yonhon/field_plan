@@ -458,14 +458,26 @@
       <section id="todaySessions" class="panel today-sessions"></section>
     </main>
 
-    <!-- 収支: 作付ごとの収支の一覧（revenue-view.js）。収量と売上の見込み、収穫量の実績、作業時間 -->
+    <!-- 収支（revenue-view.js）。サブタブは「作付ごとの収支」（収量と売上の見込み、収穫量の実績、作業時間）と「月次」（月ごとの売上の見込み）。
+         台帳と同じく、サブタブごとに URL（#revenue/plantings、#revenue/monthly）を持つ -->
     <main id="revenueView" class="schedule" hidden>
-      <section class="panel">
+      <div class="master-tabs" role="tablist" aria-label="収支">
+        <button type="button" role="tab" class="master-tab" data-revenuetab="plantings">作付ごとの収支</button>
+        <button type="button" role="tab" class="master-tab" data-revenuetab="monthly">月次</button>
+      </div>
+      <section class="panel" data-revenuepanel="plantings" role="tabpanel">
         <div class="panel-heading">
           <h2>作付ごとの収支</h2>
-          <p class="muted">収量と売上の見込みは、品目（台帳）か作付（工程の計画）の収量・出荷率・単価から出します。単価は税抜きで、どちらにもなければ市況（卸値）から推定します。収穫量は、何本かの畝をまとめて量った分を、畝ごとに入れた量を除いて、畝＋通路の面積の比で分けています。作業時間は「今日」のタブで測った時間で、何本かの畝をまとめて測った時間と、区画全体にした作業の時間は、その日にある畝の作付に、面積の比で分けています（畝立ての前の作業は、次に入る作付に分けます）。開いている圃場の分だけです。経費は、これから足します。</p>
+          <p class="muted">収量と売上の見込みは、品目（台帳）か作付（工程の計画）の収量・出荷率・単価から出します。売上は、収穫の計画（日付の入った収穫の作業）がある作付だけに出し、出荷量を収穫の期間の日に均等に分けて、日ごとの単価を掛けて足します。単価は税抜きで、どちらにもなければ、その日の市況（卸値）から推定します。収穫量は、何本かの畝をまとめて量った分を、畝ごとに入れた量を除いて、畝＋通路の面積の比で分けています。作業時間は「今日」のタブで測った時間で、何本かの畝をまとめて測った時間と、区画全体にした作業の時間は、その日にある畝の作付に、面積の比で分けています（畝立ての前の作業は、次に入る作付に分けます）。開いている圃場の分だけです。経費は、これから足します。</p>
         </div>
         <div id="revenueBody"></div>
+      </section>
+      <section class="panel" data-revenuepanel="monthly" role="tabpanel" hidden>
+        <div class="panel-heading">
+          <h2>月ごとの売上の見込み</h2>
+          <p class="muted">作付ごとの売上の見込みを、収穫の計画の期間に均等に出荷するとして、月ごとに分けています。収穫の計画がない作付と、収量か単価が分からない作付は入れていません。金額は税抜きです。開いているプランの、開いている圃場の分だけです。</p>
+        </div>
+        <div id="revenueMonthly"></div>
       </section>
     </main>
 

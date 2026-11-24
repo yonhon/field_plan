@@ -293,7 +293,7 @@ export function initCrops(context) {
     });
   });
   // サブタブを押したら、そのサブタブの URL で台帳を開き直す（履歴に積む）
-  document.querySelector(".master-tabs").addEventListener("click", (event) => {
+  document.querySelector("#masterView .master-tabs").addEventListener("click", (event) => {
     const button = event.target.closest("[data-mastertab]");
     if (button && button.dataset.mastertab !== masterTab) {
       setMasterTab(button.dataset.mastertab);

@@ -39,7 +39,7 @@ import { MASTER_TABS, currentMasterTab, initCrops, renderCrops, setMasterTab } f
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
 import { setPlace, setPlaceActions, setUserMenu } from "./user-menu.js";
 import { initToday, renderToday, resetToday } from "./today-view.js";
-import { forgetMarket, initRevenue, loadMarket, renderRevenue } from "./revenue-view.js";
+import { REVENUE_TABS, currentRevenueTab, forgetMarket, initRevenue, loadMarket, renderRevenue, setRevenueTab } from "./revenue-view.js";
 import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.js";
 import { syncTimerNotice } from "./timer-notice.js";
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
@@ -4211,6 +4211,7 @@ $("fieldSettings").addEventListener("click", (event) => {
 // 作付の詳細（planting）は、日程のタブの中の画面として扱う
 // 画面の URL。#map、#schedule、#diary、#journal、作付の詳細は #detail/planting/作付の ID。
 // 台帳は、開いているサブタブを付けて #master/サブタブ（crops、work-days、fertilizers）。前の品目の画面の URL（#crops）は、台帳の品目を開く。
+// 収支も、開いているサブタブを付けて #revenue/サブタブ（plantings、monthly）。#revenue だけなら、最後に開いたサブタブ。
 // 日程の画面は、開いている区画を付けて #schedule/block/区画の ID、全体なら #schedule/all にする。
 // 前にあった区画の詳細（#detail/block/区画の ID）は、日程の画面でその区画を開く
 // 画面を移るたびに URL を書き換えて、ブラウザーの履歴に積む（戻る・進むで画面を行き来でき、再読み込みしても同じ画面を開く）
@@ -4236,6 +4237,10 @@ function routeFromHash(text = location.hash) {
   if (hash === "crops") {
     return { view: "master", tab: "crops" };
   }
+  const revenue = /^revenue\/([\w-]+)$/.exec(hash);
+  if (revenue && REVENUE_TABS.includes(revenue[1])) {
+    return { view: "revenue", revenueTab: revenue[1] };
+  }
   return VIEW_NAMES.includes(hash) ? { view: hash } : null;
 }
 
@@ -4246,6 +4251,9 @@ function hashOf(view) {
   }
   if (view === "master") {
     return `#master/${currentMasterTab()}`;
+  }
+  if (view === "revenue") {
+    return `#revenue/${currentRevenueTab()}`;
   }
   return view === "schedule" ? scheduleHash() : `#${view}`;
 }
@@ -4259,6 +4267,8 @@ function openRoute(route, mode) {
     openInSchedule("all");
   } else if (route.tab) {
     setMasterTab(route.tab);
+  } else if (route.revenueTab) {
+    setRevenueTab(route.revenueTab);
   }
   showView(route.view, { history: mode });
 }
@@ -4581,6 +4591,7 @@ async function startApp(user = "local") {
   initRevenue({
     state,
     setStatus,
+    showView,
     // 市況が届いたら、台帳の市況の品目名の候補と、単価の推定を使う画面を描き直す。品目の市況を読まなかったときは、台帳だけ
     onMarket: ({ prices }) => {
       renderCrops();

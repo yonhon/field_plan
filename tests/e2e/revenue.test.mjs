@@ -189,43 +189,68 @@ test("収穫量: 畝ごとに入れた量はそのまま、残りを面積の比
   await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる");
   // 窓を閉じたときの「戻る」が終わってから、次のテストへ（終わる前に離れると、戻るがアプリの画面へ戻してしまう）
   await page.openView("revenue");
-  await page.waitFor(`location.hash === "#revenue" && !history.state?.fieldPlanDialog`, "収支のタブに戻る");
+  await page.waitFor(`location.hash === "#revenue/plantings" && !history.state?.fieldPlanDialog`, "収支のタブに戻る");
   assert.deepEqual(page.errors, []);
 });
 
-test("単価: 品目にも作付にもなければ市況の卸値の中央値。収穫の時期に足りなければ全期間と注記する", options, async () => {
-  // 収穫は、畝 1 が 6 月、畝 2 が 1 月。市況は 6 月の 5 日と 9 月の 5 日だけ
+test("単価: 品目にも作付にもなければ、収穫の日ごとにその日の市況から推す。足りなければ全期間と注記する。月次に月ごとの売上を出す", options, async () => {
+  // 畝 1 の収穫は 6/27〜7/2 の 6 日。市況は、その 6 つの月日に 5 年分ずつあり、6 月は 100 円、7 月は 400 円。
+  // 畝 2 の収穫は 1 月で、その時期の市況はない（全期間の中央値 = 100 円）。ほかの品目の市況も 1 つ入れておく
+  const dates = ["06-27", "06-28", "06-29", "06-30", "07-01", "07-02"];
   const market = [
-    ...[100, 200, 300, 400, 500].map((price, i) => ({ item_name: "しけんな", sale_date: `2026-06-0${i + 1}`, avg_price: price })),
-    ...[700, 800, 900, 1000, 1100].map((price, i) => ({ item_name: "しけんな", sale_date: `2026-09-0${i + 1}`, avg_price: price })),
+    ...[2021, 2022, 2023, 2024, 2025].flatMap((year) =>
+      dates.map((date) => ({ item_name: "しけんな", sale_date: `${year}-${date}`, avg_price: date.startsWith("06") ? 100 : 400 }))
+    ),
     { item_name: "ほかの品目", sale_date: "2026-06-01", avg_price: 50 },
   ];
   const works = [
-    { id: "w1", plan_id: "p1", planting_id: "pl1", block_id: null, seq: 1, work_type: "harvest", plan_start: "2027-06-01", plan_end: "2027-06-10" },
+    { id: "w1", plan_id: "p1", planting_id: "pl1", block_id: null, seq: 1, work_type: "harvest", plan_start: "2027-06-27", plan_end: "2027-07-02" },
     { id: "w2", plan_id: "p1", planting_id: "pl2", block_id: null, seq: 1, work_type: "harvest", plan_start: "2027-01-10", plan_end: "2027-01-20" },
   ];
   await page.loadApp(seed({ crop: { price_yen_per_kg: null, market_item_name: "しけんな" }, works, market }));
+  // 出荷量 16 kg を 6 日に均等に分ける。6 月の 4 日は 100 円、7 月の 2 日は 400 円。単価はその平均の 200 円
   await openPlanting("pl1");
   await page.waitFor(
-    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "300（市況・収穫期）")`,
-    "市況からの単価"
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "200（市況・収穫期）")`,
+    "日ごとの市況からの単価"
   );
-  assert.match(await panelNotes(), /市況「しけんな」の卸値から推しました。収穫の時期（6\/1〜6\/10）の中央値です（5 日分、2026\/06〜2026\/06、幅 200〜400 円）。手数料などを引く前の値です。/);
+  assert.deepEqual((await panelRows())[3], ["売上（円）", "3,200", "－"]);
+  assert.match(
+    await panelNotes(),
+    /単価は、収穫の予定（6\/27〜7\/2）に均等に出荷するとして、市況「しけんな」から推しました。収穫の予定の 6 日それぞれの卸値から推した単価の平均（その日の市況の中央値 6 日）。手数料などを引く前の卸値です。/
+  );
 
   await openPlanting("pl2");
   await page.waitFor(
-    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "600（市況・全期間）")`,
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "100（市況・全期間）")`,
     "全期間の中央値"
   );
-  assert.match(await panelNotes(), /収穫の時期（1\/10〜1\/20）の市況が足りないため、市況のある全期間の中央値です（10 日分/);
+  assert.match(await panelNotes(), /収穫の予定の 11 日それぞれの卸値から推した単価の平均（市況が足りず全期間の中央値 11 日）/);
 
-  // 「収支」のタブ: どの期間の市況から推したかを、単価に添える。指すと、日数と幅を出す
+  // 「収支」のタブ: どこまで広げた市況から推したかを、単価に添える。指すと、日ごとの内訳を出す
   await page.openView("revenue");
   await page.waitFor(`document.querySelectorAll("${PLANTING_ROWS}").length === 2`, "作付の行");
-  assert.deepEqual(await page.run(`[...document.querySelectorAll("${PLANTING_ROWS}")].map((tr) => [tr.cells[4].textContent, tr.cells[4].title])`), [
-    ["300（市況・収穫期）", "収穫の時期の卸値の中央値（5 日分、2026/06〜2026/06、幅 200〜400 円）"],
-    ["600（市況・全期間）", "収穫の時期の市況が足りないため、市況のある全期間の卸値の中央値（10 日分、2026/06〜2026/09、幅 325〜875 円）"],
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("${PLANTING_ROWS}")].map((tr) => [tr.cells[4].textContent, tr.cells[4].title, tr.cells[5].textContent])`), [
+    ["200（市況・収穫期）", "収穫の予定の 6 日それぞれの卸値から推した単価の平均（その日の市況の中央値 6 日）", "3,200"],
+    ["100（市況・全期間）", "収穫の予定の 11 日それぞれの卸値から推した単価の平均（市況が足りず全期間の中央値 11 日）", "1,600"],
   ]);
+
+  // 月次: 横に月（売上のない月も並べる）と合計、縦に作付と合計
+  await page.click('#revenueView [data-revenuetab="monthly"]');
+  await page.waitFor(`location.hash === "#revenue/monthly" && !document.querySelector('[data-revenuepanel="monthly"]').hidden`, "月次のサブタブ");
+  assert.equal(await page.run(`document.querySelector('[data-revenuepanel="plantings"]').hidden`), true);
+  const table = (part) => page.run(`[...document.querySelectorAll("#revenueMonthly ${part} tr")].map((tr) => [...tr.cells].map((cell) => cell.textContent))`);
+  assert.deepEqual(await table("thead"), [["場所", "品目", "2027/1", "2027/2", "2027/3", "2027/4", "2027/5", "2027/6", "2027/7", "合計"]]);
+  assert.deepEqual(await table("tbody"), [
+    ["A 畝1", "試験菜", "", "", "", "", "", "1,067", "2,133", "3,200"],
+    ["A 畝2", "試験菜", "1,600", "", "", "", "", "", "", "1,600"],
+  ]);
+  assert.deepEqual(await table("tfoot"), [["合計", "1,600", "0", "0", "0", "0", "1,067", "2,133", "4,800"]]);
+  // 再読み込みしても月次で開き、行を押すと作付の詳細を開く
+  await page.run(`location.reload()`);
+  await page.waitFor(`document.getElementById("viewTabs")?.hidden === false && location.hash === "#revenue/monthly" && document.querySelectorAll("#revenueMonthly tbody tr").length === 2`, "月次で開き直す");
+  await page.click('#revenueMonthly tr[data-planting="pl2"]');
+  await page.waitFor(`location.hash === "#detail/planting/pl2"`, "作付の詳細を開く");
 
   // 読んだ市況は端末に取っておき、次の起動では読み直さずに使う（ここでは、DB の側の市況を空にして開き直す）
   const kept = await page.run(`localStorage.getItem("field_plan_market")`);
@@ -233,7 +258,7 @@ test("単価: 品目にも作付にもなければ市況の卸値の中央値。
   await page.loadApp(seed({ crop: { price_yen_per_kg: null, market_item_name: "しけんな" }, works, market: [] }), { field_plan_market: kept });
   await openPlanting("pl1");
   await page.waitFor(
-    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "300（市況・収穫期）")`,
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "200（市況・収穫期）")`,
     "取っておいた市況からの単価"
   );
 

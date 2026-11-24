@@ -19,7 +19,41 @@ import { COMMON_KINDS, SESSION_KINDS, allocateMinutes, formatMinutes, splitMinut
 
 const $ = (id) => document.getElementById(id);
 
-let ctx = null; // { state, typeLabel, openDetail, setStatus, onMarket }
+let ctx = null; // { state, typeLabel, openDetail, setStatus, onMarket, showView }
+
+// 「収支」のサブタブ。URL は #revenue/サブタブ（app.js）。最後に開いたサブタブを、ブラウザーに覚える（台帳のサブタブと同じ）
+export const REVENUE_TABS = ["plantings", "monthly"];
+const REVENUE_TAB_KEY = "field_plan_revenue_tab";
+let revenueTab = (() => {
+  try {
+    const saved = localStorage.getItem(REVENUE_TAB_KEY);
+    return REVENUE_TABS.includes(saved) ? saved : REVENUE_TABS[0];
+  } catch {
+    return REVENUE_TABS[0];
+  }
+})();
+
+export const currentRevenueTab = () => revenueTab;
+
+export function setRevenueTab(tab) {
+  if (!REVENUE_TABS.includes(tab)) {
+    return;
+  }
+  revenueTab = tab;
+  try {
+    localStorage.setItem(REVENUE_TAB_KEY, tab);
+  } catch {
+    // 覚えられなくても、いまの表示は変わらない
+  }
+  document.querySelectorAll("[data-revenuetab]").forEach((button) => {
+    const on = button.dataset.revenuetab === tab;
+    button.classList.toggle("is-on", on);
+    button.setAttribute("aria-selected", String(on));
+  });
+  document.querySelectorAll("[data-revenuepanel]").forEach((panel) => {
+    panel.hidden = panel.dataset.revenuepanel !== tab;
+  });
+}
 const state = () => ctx.state;
 const bySeq = (a, b) => a.seq - b.seq;
 
@@ -300,10 +334,12 @@ export function plantingRevenue(planting, index = revenueIndex()) {
   const window = harvestWindow(index.works.get(planting.id) || []);
   const marketName = (crop?.market_item_name || "").trim();
   const prices = marketName ? s.market?.prices.get(marketName) : undefined;
-  const estimate = prices ? marketEstimate(prices, window) : null;
+  // 収穫の計画があれば、日ごとにその日の市況から推す。なければ、単価を見せるためだけに、市況の全期間から推す（売上は出さない）
+  const marketOn = prices ? (day) => marketOnDay(prices, day) : null;
+  const estimate = prices && !window ? marketEstimate(prices, null) : null;
   const active = Boolean(s.field) && s.field.active_plan_id === s.plan?.id;
   return {
-    ...forecast(planting, crop, { seedlings, areaM2, estimate }),
+    ...forecast(planting, crop, { seedlings, areaM2, window, marketOn, estimate }),
     crop,
     areaM2,
     seedlings,
@@ -343,26 +379,52 @@ export function revenueByCrop(plantings, index = revenueIndex()) {
 
 const PRICE_FROM = { planting: "作付", crop: "品目", market: "市況" };
 
-// 単価の出どころの短い名前。市況から推した単価は、どの期間の市況かも添える（revenue.js の marketEstimate の widen）:
-// 収穫の時期の市況なら「市況・収穫期」、前後に広げたなら「市況・前後 14 日」、足りずに全期間なら「市況・全期間」
+// その日の市況からの推定（revenue.js の marketEstimate に、その日だけを期間として渡す）。推定は月日で決まるので、
+// 同じ品目の市況（prices の並び）では、月日ごとに 1 回だけ計算する（作付ごと、日ごとに計算し直さない）
+const dailyEstimates = new WeakMap();
+function marketOnDay(prices, day) {
+  let byDay = dailyEstimates.get(prices);
+  if (!byDay) {
+    byDay = new Map();
+    dailyEstimates.set(prices, byDay);
+  }
+  const key = day.slice(5);
+  if (!byDay.has(key)) {
+    byDay.set(key, marketEstimate(prices, { start: day, end: day }));
+  }
+  return byDay.get(key);
+}
+
+// 単価の出どころの短い名前。市況から推した単価は、どこまで広げた市況かも添える（revenue.js の forecast の estimate）:
+// どの日もその日の市況なら「市況・収穫期」、前後に広げた日があれば、いちばん広げた日数で「市況・前後 14 日」、
+// どの日も全期間の中央値なら「市況・全期間」、一部の日だけなら「市況・一部全期間」。収穫の計画がない作付は「市況・全期間」
 export function priceSource(price) {
   if (price.from !== "market") {
     return PRICE_FROM[price.from];
   }
-  const widen = price.estimate.widen;
-  return widen === "all" ? "市況・全期間" : widen ? `市況・前後 ${widen} 日` : "市況・収穫期";
+  const { widen, counts } = price.estimate;
+  if (!counts || widen !== "all") {
+    return widen === "all" ? "市況・全期間" : widen ? `市況・前後 ${widen} 日` : "市況・収穫期";
+  }
+  return counts.all === price.estimate.days ? "市況・全期間" : "市況・一部全期間";
 }
 
-// 市況から推した単価の、指したときに出す説明。日数と、使った取引日の月、25〜75 % の幅
+// 市況から推した単価の説明（「収支」のタブで指したときと、作付の詳細の注）。市況からでなければ空
 export function priceTitle(price) {
   const estimate = price.from === "market" ? price.estimate : null;
   if (!estimate) {
     return "";
   }
-  const month = (iso) => iso.slice(0, 7).replace("-", "/");
-  const where = estimate.widen === "all" ? "収穫の時期の市況が足りないため、市況のある全期間" : estimate.widen ? `収穫の時期の前後 ${estimate.widen} 日` : "収穫の時期";
-  return `${where}の卸値の中央値（${estimate.days} 日分、${month(estimate.from)}〜${month(estimate.to)}、幅 ${formatYen(estimate.low)}〜${formatYen(estimate.high)} 円）`;
+  if (!estimate.counts) {
+    const month = (iso) => iso.slice(0, 7).replace("-", "/");
+    return `収穫の予定がないため、市況のある全期間の卸値の中央値（${estimate.days} 日分、${month(estimate.from)}〜${month(estimate.to)}、幅 ${formatYen(estimate.low)}〜${formatYen(estimate.high)} 円）`;
+  }
+  const parts = [0, 14, 30, 45, "all"]
+    .filter((widen) => estimate.counts[widen])
+    .map((widen) => `${widen === "all" ? "市況が足りず全期間の中央値" : widen ? `前後 ${widen} 日に広げた中央値` : "その日の市況の中央値"} ${estimate.counts[widen]} 日`);
+  return `収穫の予定の ${estimate.days} 日それぞれの卸値から推した単価の平均（${parts.join("、")}）`;
 }
+
 export const formatYen = (value) => (value === null || value === undefined ? "" : Math.round(value).toLocaleString("ja-JP"));
 export const formatKg = (value, digits = 1) =>
   value === null || value === undefined ? "" : value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -455,6 +517,42 @@ function cropTable(active, index) {
   );
 }
 
+// 月次の表。行は売上の見込みが出る作付、列は月（最初の月から最後の月まで、売上のない月も並べる）と合計。下に月ごとの合計
+function monthlyTable(index) {
+  const s = state();
+  const rows = s.plantings
+    .map((planting) => ({ id: planting.id, item: plantingRevenue(planting, index), ...plantingPlace(planting.id) }))
+    .filter((row) => row.item.monthly && row.item.salesYen !== null)
+    .sort((a, b) => compareSort(a.sort, b.sort));
+  const left = s.plantings.length - rows.length;
+  const note = left ? `<p class="muted">収穫の計画がないか、収量か単価が分からない作付 ${left} 件は入れていません。</p>` : "";
+  if (!rows.length) {
+    return `<p class="muted">売上の見込みが出る作付が、まだありません。</p>${note}`;
+  }
+  const keys = rows.flatMap((row) => [...row.item.monthly.keys()]).sort();
+  const months = [];
+  for (let [year, month] = keys[0].split("-").map(Number); `${year}-${String(month).padStart(2, "0")}` <= keys.at(-1); month = (month % 12) + 1, year += month === 1 ? 1 : 0) {
+    months.push(`${year}-${String(month).padStart(2, "0")}`);
+  }
+  const label = (key) => `${Number(key.slice(0, 4))}/${Number(key.slice(5))}`;
+  const totals = new Map(months.map((key) => [key, rows.reduce((sum, row) => sum + (row.item.monthly.get(key) || 0), 0)]));
+  const body = rows
+    .map(
+      (row) =>
+        `<tr data-planting="${escapeHtml(row.id)}" class="is-link"><td>${escapeHtml(row.place)}</td><td>${escapeHtml(row.crop)}</td>` +
+        months.map((key) => `<td class="num">${row.item.monthly.has(key) ? formatYen(row.item.monthly.get(key)) : ""}</td>`).join("") +
+        `<td class="num">${formatYen(row.item.salesYen)}</td></tr>`
+    )
+    .join("");
+  return (
+    '<div class="table-scroll"><table class="work-table revenue-table revenue-monthly">' +
+    `<thead><tr><th>場所</th><th>品目</th>${months.map((key) => `<th class="num">${label(key)}</th>`).join("")}<th class="num">合計</th></tr></thead>` +
+    `<tbody>${body}</tbody>` +
+    `<tfoot><tr><th colspan="2">合計</th>${months.map((key) => `<td class="num">${formatYen(totals.get(key))}</td>`).join("")}` +
+    `<td class="num">${formatYen(rows.reduce((sum, row) => sum + row.item.salesYen, 0))}</td></tr></tfoot></table></div>${note}`
+  );
+}
+
 export function renderRevenue() {
   if (!ctx || !state().field || $("revenueView").hidden) {
     return;
@@ -468,10 +566,26 @@ export function renderRevenue() {
       plantingTable(allocation, index) +
       cropTable(Boolean(allocation), index)
   );
+  draw($("revenueMonthly"), monthlyTable(index));
 }
 
 export function initRevenue(context) {
   ctx = context;
+  // サブタブを押したら、そのサブタブの URL で収支を開き直す（履歴に積む）
+  document.querySelector("#revenueView .master-tabs").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-revenuetab]");
+    if (button && button.dataset.revenuetab !== revenueTab) {
+      setRevenueTab(button.dataset.revenuetab);
+      ctx.showView("revenue");
+    }
+  });
+  $("revenueMonthly").addEventListener("click", (event) => {
+    const row = event.target.closest("tr[data-planting]");
+    if (row) {
+      ctx.openDetail("planting", row.dataset.planting);
+    }
+  });
+  setRevenueTab(revenueTab);
   // アプリに戻ったときに、古くなった市況を読み直す（loadMarket が、古いかを確かめる）
   document.addEventListener("app-returned", () => loadMarket());
   // 起動のときは、圃場を読み終えてからここへ来る（app.js の loadFieldData では、まだ ctx がない）

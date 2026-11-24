@@ -4,6 +4,7 @@ import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
 import {
   MARKET_MIN_DAYS,
+  daysOf,
   forecast,
   harvestActual,
   harvestWindow,
@@ -60,21 +61,68 @@ test("単価: 作付 → 品目 → 市況からの推定。どれもなけれ�
   assert.equal(resolvePrice({}, {}, { yen: null }), null);
 });
 
-test("見込み: 収量 × 出荷率 × 単価。分からない値は null", () => {
-  const result = forecast({ shippable_pct: 80 }, { yield_kg_per_10a: 2000, price_yen_per_kg: 300 }, { areaM2: 50 });
+const JUNE = { start: "2027-06-01", end: "2027-06-10" };
+
+test("見込み: 売上 = 出荷量を収穫の期間の日に均等に分け、日ごとの単価を掛けて足す。分からない値は null", () => {
+  const result = forecast({ shippable_pct: 80 }, { yield_kg_per_10a: 2000, price_yen_per_kg: 300 }, { areaM2: 50, window: JUNE });
   near(result.yieldKg, 100);
   near(result.shippedKg, 80);
   near(result.salesYen, 24000);
+  assert.deepEqual(result.price, { yen: 300, from: "crop" });
+  assert.deepEqual([...result.monthly.keys()], ["2027-06"]);
   // 単価がなければ、売上だけが null
-  const noPrice = forecast({}, { yield_kg_per_10a: 2000 }, { areaM2: 50 });
+  const noPrice = forecast({}, { yield_kg_per_10a: 2000 }, { areaM2: 50, window: JUNE });
   assert.equal(noPrice.shippedKg, 100);
-  assert.equal(noPrice.salesYen, null);
-  // 収量がなければ、出荷量も売上も null
-  const noYield = forecast({}, { price_yen_per_kg: 300 }, { areaM2: 50 });
-  assert.deepEqual([noYield.yieldKg, noYield.shippedKg, noYield.salesYen], [null, null, null]);
+  assert.deepEqual([noPrice.salesYen, noPrice.monthly, noPrice.price], [null, null, null]);
+  // 収量がなければ、出荷量も売上も null。単価は出す
+  const noYield = forecast({}, { price_yen_per_kg: 300 }, { areaM2: 50, window: JUNE });
+  assert.deepEqual([noYield.yieldKg, noYield.shippedKg, noYield.salesYen, noYield.monthly], [null, null, null, null]);
   assert.equal(noYield.price.yen, 300);
-  // 市況からの推定を単価に使う
-  near(forecast({}, { yield_g_per_plant: 200 }, { seedlings: 50, estimate: { yen: 150 } }).salesYen, 1500);
+});
+
+test("見込み: 収穫の計画がなければ、売上を出さない。単価は、作付 → 品目 → 市況の全期間の順に見せる", () => {
+  const plain = forecast({}, { yield_kg_per_10a: 2000, price_yen_per_kg: 300 }, { areaM2: 50 });
+  near(plain.shippedKg, 100);
+  assert.deepEqual([plain.salesYen, plain.monthly], [null, null]);
+  assert.deepEqual(plain.price, { yen: 300, from: "crop" });
+  const estimate = { yen: 150, widen: "all" };
+  assert.deepEqual(forecast({}, { yield_g_per_plant: 200 }, { seedlings: 50, estimate }).price, { yen: 150, from: "market", estimate });
+  assert.equal(forecast({}, {}, { estimate: null }).price, null);
+});
+
+test("見込み: 市況のときは、日ごとにその日の市況から推し、月ごとに分ける", () => {
+  // 6/29〜7/2 の 4 日。6 月の 2 日は 100 円、7 月の 2 日は 300 円（7/2 だけ前後 14 日に広げた）
+  const marketOn = (day) => (day < "2027-07-01" ? { yen: 100, widen: 0 } : { yen: 300, widen: day === "2027-07-02" ? 14 : 0 });
+  const result = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: { start: "2027-06-29", end: "2027-07-02" }, marketOn });
+  // 出荷量 8 kg を 4 日に 2 kg ずつ
+  assert.deepEqual([...result.monthly], [
+    ["2027-06", 400],
+    ["2027-07", 1200],
+  ]);
+  assert.equal(result.salesYen, 1600);
+  assert.deepEqual(result.price, { yen: 200, from: "market", estimate: { widen: 14, counts: { 0: 3, 14: 1 }, days: 4 } });
+  // 全期間を使った日があれば、いちばん広げた印は all
+  const some = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE, marketOn: (day) => ({ yen: 100, widen: day === "2027-06-05" ? "all" : 30 }) });
+  assert.deepEqual(some.price.estimate, { widen: "all", counts: { 30: 9, all: 1 }, days: 10 });
+  // 1 日でも市況から推せなければ、単価も売上も null
+  const gap = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE, marketOn: (day) => (day === "2027-06-03" ? null : { yen: 100, widen: 0 }) });
+  assert.deepEqual([gap.price, gap.salesYen, gap.monthly], [null, null, null]);
+  // 市況がない品目（marketOn なし）も null
+  assert.equal(forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE }).price, null);
+  // 3 種類が混ざっても、いちばん広げた印（all）
+  const mixed = forecast({}, { yield_g_per_plant: 1000 }, { seedlings: 8, window: { start: "2027-06-01", end: "2027-06-03" }, marketOn: (day) => ({ yen: 100, widen: { "2027-06-01": 0, "2027-06-02": "all", "2027-06-03": 30 }[day] }) });
+  assert.equal(mixed.price.estimate.widen, "all");
+  // 作付か品目に単価があれば、市況は使わない（引きもしない）
+  let asked = 0;
+  const manual = forecast({ price_yen_per_kg: 500 }, { yield_g_per_plant: 1000 }, { seedlings: 8, window: JUNE, marketOn: () => (asked += 1, { yen: 1, widen: 0 }) });
+  assert.deepEqual([manual.price, manual.salesYen, asked], [{ yen: 500, from: "planting" }, 4000, 0]);
+});
+
+test("収穫の期間の日: 始まりから終わりまで。終わりが前か空なら、始まりの 1 日", () => {
+  assert.deepEqual(daysOf({ start: "2027-02-27", end: "2027-03-02" }), ["2027-02-27", "2027-02-28", "2027-03-01", "2027-03-02"]);
+  assert.deepEqual(daysOf({ start: "2027-06-05", end: "2027-06-01" }), ["2027-06-05"]);
+  assert.deepEqual(daysOf({ start: "2027-06-05", end: null }), ["2027-06-05"]);
+  assert.deepEqual(daysOf({ start: "2027-06-05", end: "2027-06-05" }), ["2027-06-05"]);
 });
 
 const target = (planting_id, area_m2, harvest_kg = null) => ({ planting_id, area_m2, harvest_kg });

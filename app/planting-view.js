@@ -28,7 +28,7 @@ import {
 import { draw } from "./draw.js";
 import { openDiaryTarget } from "./diary-view.js";
 import { escapeHtml } from "./html.js";
-import { actualSales, formatKg, formatYen, plantingRevenue, priceSource, timeAllocation, typesText } from "./revenue-view.js";
+import { actualSales, formatKg, formatYen, plantingRevenue, priceSource, priceTitle, timeAllocation, typesText } from "./revenue-view.js";
 import { formatMinutes } from "./work-time.js";
 
 const $ = (id) => document.getElementById(id);
@@ -392,22 +392,13 @@ function asideHtml(c, active) {
 const VALUE_FROM = { planting: "この作付の値", crop: "品目の値" };
 const shortDate = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
 
-// 市況から推した単価の説明。広げた日数や、全期間を使ったことが分かるようにする（revenue.js の marketEstimate）
+// 市況から推した単価の説明。日ごとにどこまで広げた市況かが分かるようにする（revenue-view.js の priceTitle）
 function estimateNote(item) {
-  const estimate = item.price?.estimate;
-  if (!estimate) {
+  if (!item.price?.estimate) {
     return "";
   }
-  const range = `${estimate.days} 日分、${estimate.from.slice(0, 7).replace("-", "/")}〜${estimate.to.slice(0, 7).replace("-", "/")}、幅 ${formatYen(estimate.low)}〜${formatYen(estimate.high)} 円`;
-  const how =
-    estimate.widen === "all"
-      ? item.window
-        ? `収穫の時期（${shortDate(item.window.start)}〜${shortDate(item.window.end)}）の市況が足りないため、市況のある全期間の中央値です`
-        : "収穫の計画に日付がないため、市況のある全期間の中央値です"
-      : estimate.widen
-        ? `収穫の時期（${shortDate(item.window.start)}〜${shortDate(item.window.end)}）の前後 ${estimate.widen} 日の中央値です`
-        : `収穫の時期（${shortDate(item.window.start)}〜${shortDate(item.window.end)}）の中央値です`;
-  return `単価は、市況「${item.marketName}」の卸値から推しました。${how}（${range}）。手数料などを引く前の値です。`;
+  const when = item.window ? `収穫の予定（${shortDate(item.window.start)}〜${shortDate(item.window.end)}）に均等に出荷するとして、` : "";
+  return `単価は、${when}市況「${item.marketName}」から推しました。${priceTitle(item.price)}。手数料などを引く前の卸値です。`;
 }
 
 // 収量と売上。見込み（品目か作付の値、市況からの推定）と、収穫量の実績を並べる。計算は revenue.js、値を集めるのは revenue-view.js
@@ -436,6 +427,7 @@ function revenueHtml(c) {
   const harvesting = item.window && item.window.end >= localToday();
   const notes = [
     `収量: ${how}。出荷率 ${item.rate.pct} %（${item.rate.from === "default" ? "値がないので 100 %" : VALUE_FROM[item.rate.from]}）。金額は税抜きです。`,
+    item.window ? "" : "収穫の計画（日付の入った収穫の作業）がないので、売上は出しません。",
     item.price?.from === "market" ? estimateNote(item) : "",
     !item.price && item.marketLoading ? "市況を読んでいます。" : "",
     !item.price && item.marketName && !item.marketLoading ? `市況「${item.marketName}」に取引がないため、単価を推せません。` : "",

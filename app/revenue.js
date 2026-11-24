@@ -2,7 +2,8 @@
 // 値は、作付に入っていればその値、なければ品目の設定値を使う（条数や株間と同じ）。金額は税抜き。
 //   収量   = 苗数 × 1 株あたりの収量（g）÷ 1,000、または 畝＋通路の面積 × 10 a あたりの収量 ÷ 1,000 ㎡
 //   出荷量 = 収量 × 出荷率（空なら 100 %）
-//   売上   = 出荷量 × 単価（作付 → 品目 → 市況からの推定の順）
+//   売上   = 出荷量を収穫の期間の日に均等に分け、日ごとの単価（作付 → 品目 → その日の市況からの推定の順）を掛けて足す。
+//            収穫の計画のない作付には出さない
 import { addDays } from "./schedule.js";
 
 const TEN_ARES_SQM = 1000;
@@ -58,21 +59,58 @@ export function resolvePrice(planting, crop, estimate = null) {
   return null;
 }
 
-// 1 つの作付の見込み。分からない値は null（収量がなければ出荷量も売上も null、単価がなければ売上が null）
-export function forecast(planting, crop, { seedlings = null, areaM2 = null, estimate = null } = {}) {
+// 収穫の期間の日（ISO の日付）の並び。終わりが始まりより前なら、始まりの 1 日
+export function daysOf(window) {
+  const days = [];
+  for (let day = window.start; day <= window.end || !days.length; day = addDays(day, 1)) {
+    days.push(day);
+  }
+  return days;
+}
+
+// 広げた日数の重さ。いちばん広げた日を、市況から推した単価の印にする
+const WIDEN_ORDER = [0, 14, 30, 45, "all"];
+
+// 1 つの作付の見込み。分からない値は null。
+// 売上は、収穫の計画（window）がある作付だけに出す。出荷量を収穫の期間の日に均等に分け、日ごとの単価を掛けて足す。
+// 日ごとの単価は、作付か品目に単価があればその値、なければ marketOn(日付)（その日の市況からの推定。marketEstimate の返り値）。
+// 1 日でも単価が分からなければ、売上は null。monthly は 月（YYYY-MM）→ その月の売上。
+// price は、日ごとの単価の平均。市況からのときは estimate に、日ごとの推定のまとめ（widen はいちばん広げた日数、counts は広げた日数ごとの日数）。
+// 収穫の計画がないときは、売上を出さず、単価だけを作付 → 品目 → estimate（市況の全期間）の順に出す
+export function forecast(planting, crop, { seedlings = null, areaM2 = null, window = null, marketOn = null, estimate = null } = {}) {
   const yieldInfo = resolveYield(planting, crop, { seedlings, areaM2 });
   const rate = resolveRate(planting, crop);
-  const price = resolvePrice(planting, crop, estimate);
+  const manual = resolvePrice(planting, crop, null);
   const yieldKg = yieldInfo ? yieldInfo.kg : null;
   const shippedKg = yieldKg === null ? null : (yieldKg * rate.pct) / 100;
-  return {
-    yieldKg,
-    shippedKg,
-    salesYen: shippedKg === null || !price ? null : shippedKg * price.yen,
-    yield: yieldInfo,
-    rate,
-    price,
-  };
+  const result = { yieldKg, shippedKg, salesYen: null, monthly: null, yield: yieldInfo, rate, price: manual };
+  if (!window) {
+    result.price = resolvePrice(planting, crop, estimate);
+    return result;
+  }
+  const days = daysOf(window);
+  const estimates = manual ? null : days.map((day) => (marketOn ? marketOn(day) : null));
+  const daily = manual ? days.map(() => manual.yen) : estimates.map((item) => (item ? item.yen : null));
+  if (daily.some((yen) => yen === null)) {
+    result.price = null;
+    return result;
+  }
+  if (!manual) {
+    const counts = {};
+    estimates.forEach((item) => (counts[item.widen] = (counts[item.widen] || 0) + 1));
+    const widen = WIDEN_ORDER.filter((step) => counts[step]).at(-1);
+    result.price = { yen: daily.reduce((sum, yen) => sum + yen, 0) / days.length, from: "market", estimate: { widen, counts, days: days.length } };
+  }
+  if (shippedKg !== null) {
+    const perDay = shippedKg / days.length;
+    result.monthly = new Map();
+    days.forEach((day, i) => {
+      const month = day.slice(0, 7);
+      result.monthly.set(month, (result.monthly.get(month) || 0) + perDay * daily[i]);
+    });
+    result.salesYen = [...result.monthly.values()].reduce((sum, yen) => sum + yen, 0);
+  }
+  return result;
 }
 
 // 1 件の収穫の記録を、作付ごとの量に分ける。畝ごとに入れた量（target.harvest_kg）はそのまま使い、
