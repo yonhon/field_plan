@@ -39,7 +39,7 @@ import { MASTER_TABS, currentMasterTab, initCrops, renderCrops, setMasterTab } f
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
 import { setPlace, setPlaceActions, setUserMenu } from "./user-menu.js";
 import { initToday, renderToday, resetToday } from "./today-view.js";
-import { REVENUE_TABS, currentRevenueTab, forgetMarket, initRevenue, loadMarket, renderRevenue, setRevenueTab } from "./revenue-view.js";
+import { REVENUE_TABS, currentRevenueTab, forgetMarket, initRevenue, loadMarket, renderRevenue, restoreMarket, setRevenueTab } from "./revenue-view.js";
 import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.js";
 import { syncTimerNotice } from "./timer-notice.js";
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
@@ -4520,6 +4520,8 @@ async function startApp(user = "local") {
       state.fields = [await state.store.createField({ name: config.defaultFieldName })];
     }
     const field = state.fields.find((item) => item.id === loaded.fieldId);
+    // 端末に取っておいた市況を、最初に画面を描く前に入れておく（描いたあとで入れると、見込みを描き直すことになる）
+    restoreMarket(state);
     await (field ? loadFieldData(field, fieldDataOf(loaded)) : loadFieldData(state.fields[0]));
     // 読んだ中身と同じ時点の DB の変更の印を覚える。起動のあと最初に戻ったときも、変わっていなければ読み直さない
     syncedMark = field ? (loaded.mark ?? null) : null;

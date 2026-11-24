@@ -22,6 +22,7 @@ import {
   modeButtons,
   openProblemTarget,
   openProcessPlan,
+  renderSummary,
   scopeProblemsHtml,
   setGanttMode,
 } from "./schedule-view.js";
@@ -1111,6 +1112,10 @@ function onClick(event) {
     // 苗と肥料の集計の出し入れ
     summaryOpen = !summaryOpen;
     $("blockSummary").hidden = !summaryOpen;
+    // 見込みの列は、窓を出しているときだけ計算するので、出したら描き直す（schedule-view.js の renderSummary）
+    if (summaryOpen) {
+      renderSummary();
+    }
     el.setAttribute("aria-expanded", summaryOpen);
     el.textContent = el.textContent.replace(/[▸▾]$/, summaryOpen ? "▾" : "▸");
   } else if (act === "go") {

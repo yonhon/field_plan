@@ -227,8 +227,8 @@ export function renderSchedule() {
   $("scheduleEmpty").hidden = blocks.length > 0;
   $("scheduleBody").hidden = blocks.length === 0;
   renderOverview();
-  renderSummary();
   if (!blocks.length) {
+    renderSummary();
     return;
   }
   // 全体: 工程表（すべての区画）と苗と肥料の集計だけを出す。区画と畝の図と、区画の作業の計画と実績は出さない
@@ -241,6 +241,8 @@ export function renderSchedule() {
     renderStrip();
     ctx.renderBlockRecord(sel.blockId);
   }
+  // 集計の窓を出すかは、頭を描くとき（planting-view.js）に決まる。見込みの列は窓を出しているときだけ計算するので、そのあとで描く
+  renderSummary();
   renderGantt();
   renderTypes();
   if (!$("scheduleView").hidden) {
@@ -835,13 +837,16 @@ function printGantt() {
 }
 
 // 選んでいる区画（全体ならすべての区画）の、品目ごとの苗数と、肥料ごとの量。区画の頭の面積・畝・苗の行を押すと開く（planting-view.js）。
-function renderSummary() {
+export function renderSummary() {
   $("summaryTitle").textContent = sel.whole ? "苗・肥料・収量の集計（全体）" : "苗・肥料・収量の集計（この区画）";
   const beds = sel.whole ? state().beds : blockBeds(sel.blockId);
   const summary = summarize({ ...state(), beds, logs: state().logs || [] });
-  // 収量と売上の見込み（revenue-view.js）。品目の名前で、苗と肥料の行に合わせる
+  // 収量と売上の見込み（revenue-view.js）。品目の名前で、苗と肥料の行に合わせる。
+  // 作付ごとの見込みの計算は重い（1 年後の量で、起動が 1 割ほど遅くなった。2026-11-24）ので、窓を出しているときだけ計算する。
+  // 窓を出すとき（頭の面積・畝の行を押したとき）は、planting-view.js がここを呼んで描き直す
   const bedIds = new Set(beds.map((bed) => bed.id));
-  const revenue = new Map(revenueByCrop(state().plantings.filter((planting) => bedIds.has(planting.bed_id))).map((row) => [row.name, row]));
+  const shown = !$("blockSummary").hidden;
+  const revenue = shown ? new Map(revenueByCrop(state().plantings.filter((planting) => bedIds.has(planting.bed_id))).map((row) => [row.name, row])) : new Map();
   const number = (value, digits = 0) => value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   // 値のない作付があれば、その数を添える（合計に入れていない）
   const partial = (row, missing, text) => (missing ? `${missing < row.count ? text : "-"}<span class="muted">（${missing} 件は値なし）</span>` : text);

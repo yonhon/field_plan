@@ -131,6 +131,10 @@ test("収量と売上: 品目の値から見込みを出し、作付の値を優
   await page.waitFor(`document.getElementById("blockSummary").hidden === false`, "集計の窓");
   assert.deepEqual(await page.run(`[...document.querySelector("#cropSummary tr").cells].slice(5).map((cell) => cell.textContent)`), ["40.0", "11,200"]);
   assert.equal(await page.run(`document.getElementById("revenueSummary").textContent`), "見込みの合計: 収量 40.0 kg・売上 11,200 円（税抜き）");
+  // 日程の「全体」でも、窓を出していれば見込みを出す（見込みは、窓を出しているときだけ計算する）
+  await page.run(`location.hash = "#schedule/all"`);
+  await page.waitFor(`document.getElementById("summaryTitle").textContent === "苗・肥料・収量の集計（全体）" && document.getElementById("blockSummary").hidden === false`, "全体の集計");
+  await page.waitFor(`document.getElementById("revenueSummary").textContent === "見込みの合計: 収量 40.0 kg・売上 11,200 円（税抜き）"`, "全体でも見込みの合計");
   assert.deepEqual(page.errors, []);
 });
 

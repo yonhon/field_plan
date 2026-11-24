@@ -223,13 +223,17 @@ export function forgetMarket() {
   }
 }
 
-function market() {
-  const s = state();
+// 端末に取っておいた市況を、state に入れる。起動のとき、最初に画面を描く前に呼ぶ（app.js）。
+// 描く前に入れておけば、取っておいた市況で最初から見込みを描けるので、描き直さなくて済む
+export function restoreMarket(s) {
   if (!s.market) {
-    const kept = keptMarket();
-    s.market = { items: null, prices: new Map(), at: 0, failedAt: 0, loading: false, ...kept, restored: Boolean(kept) };
+    s.market = { items: null, prices: new Map(), at: 0, failedAt: 0, loading: false, ...keptMarket() };
   }
-  return s.market;
+}
+
+function market() {
+  restoreMarket(state());
+  return state().market;
 }
 
 // 品目に結んだ市況の品目名のうち、まだ読んでいないものと、品目名の一覧を読む。古くなっていれば読み直す。
@@ -239,11 +243,6 @@ export async function loadMarket() {
     return;
   }
   const m = market();
-  // 端末に取っておいた市況を使い始めたら、それで見込みを描き直す（起動のときの画面は、市況なしで描いている）
-  if (m.restored) {
-    m.restored = false;
-    ctx.onMarket?.({ prices: true });
-  }
   const now = Date.now();
   if (m.loading || now - m.failedAt < MARKET_RETRY_MS) {
     return;
