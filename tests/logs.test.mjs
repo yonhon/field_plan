@@ -26,7 +26,10 @@ import {
   cropDiffText,
   specDiff,
   SPEC_FIELDS,
+  blockPlantings,
+  plantingSpan,
   specText,
+  withBlockShares,
   layoutBars,
   stackLanes,
   withActualDates,
@@ -81,6 +84,161 @@ const works = [
   { id: "w6", planting_id: "p3", work_type: "plant", seq: 2, plan_start: "2026-03-20", plan_end: "2026-03-20" },
   { id: "w7", block_id: "k1", work_type: "rotary", seq: 1, plan_start: "2026-02-20", plan_end: "2026-02-20" },
 ];
+
+test("区画の作業・記録を分ける作付: その日に畝にある作付、なければ次に入る作付。重みは、選んだ畝の畝＋通路の面積", () => {
+  const plantingsOn = blockPlantings({ blocks: [block], beds, plantings, works });
+  const ids = (date) => plantingsOn("k1", date).map((item) => [item.planting.id, item.bed.id, Math.round(item.weight * 10) / 10]);
+  // 4/1: 畝1 は p1（3/1〜4/30）。畝2 の p3 は 3/20 で終わり、次の作付もない。畝3 の p4 は日付がなく、ずっとある扱い
+  // 畝1 と畝3 だけで区画を分ける（畝1: 端まで 1.0 m と、畝3 までの隙間 1.9 m の半分。畝3: 半分と端まで 1.7 m）
+  assert.deepEqual(ids("2026-04-01"), [["p1", "b1", 21.2], ["p4", "b3", 26.8]]);
+  // 畝立ての前（2/20）は、次に入る作付
+  assert.deepEqual(ids("2026-02-20").map((item) => item[0]), ["p1", "p3", "p4"]);
+  // 5/10 は畝3 がもうない。畝1 は p2（5/10 から）
+  assert.deepEqual(ids("2026-05-10").map((item) => item[0]), ["p2"]);
+  // 作付の期間は、作付の記録も見る（p3 の 4/5 の記録で、p3 は 4/5 まである）
+  const withLog = blockPlantings({ blocks: [block], beds, plantings, works, logs: [{ date: "2026-04-05", targets: [{ planting_id: "p3" }] }] });
+  assert.deepEqual(withLog("k1", "2026-04-01").map((item) => item.planting.id), ["p1", "p3", "p4"]);
+  // 区画も日付もなければ空
+  assert.deepEqual(plantingsOn("nothing", "2026-04-01"), []);
+  assert.deepEqual(plantingsOn("k1", null), []);
+  // 畝がまだない日は、あとでできる畝で分ける
+  const later = beds.map((bed) => ({ ...bed, start_date: "2026-06-01", removed_on: null }));
+  assert.deepEqual(blockPlantings({ blocks: [block], beds: later, plantings, works })("k1", "2026-02-01").map((item) => item.bed.id), ["b1", "b2", "b3"]);
+  // 作付自身の期間
+  assert.deepEqual(plantingSpan(plantings[0], works), { start: "2026-03-01", end: "2026-04-30" });
+  assert.deepEqual(plantingSpan(plantings[3], works), { start: null, end: null });
+  const cancelled = [...works, { id: "wc", planting_id: "p1", work_type: "residue", plan_start: "2026-06-01", plan_end: "2026-06-01", cancelled_on: "2026-05-01" }];
+  assert.equal(plantingSpan(plantings[0], cancelled).end, "2026-04-30");
+});
+
+test("区画の作業と、区画を対象にした記録を、その日に区画にある作付にも付ける", () => {
+  const harvest = { id: "wh", block_id: "k1", planting_id: null, work_type: "harvest", seq: 9, plan_start: "2026-04-01", plan_end: "2026-04-03" };
+  const undated = { id: "wu", block_id: "k1", planting_id: null, work_type: "harvest", seq: 10, plan_start: null, plan_end: null };
+  const spray = { id: "L1", date: "2026-04-01", work_type: "spray", targets: [{ block_id: "k1", bed_id: null, planting_id: null, crop_name: "", label: "区画A", area_m2: 48 }], inputs: [{ kind: "pesticide", reg_no: 100, name: "試験乳剤" }] };
+  const mixed = { id: "L2", date: "2026-04-01", work_type: "spray", targets: [{ planting_id: "p1", bed_id: "b1", block_id: "k1", crop_name: "レタス", area_m2: 20 }, { ...spray.targets[0], area_m2: null }] };
+  // 畝を消した記録の対象（品目の名前が残る）は、区画の対象ではない
+  const orphan = { id: "L3", date: "2026-04-01", work_type: "spray", targets: [{ block_id: "k1", bed_id: null, planting_id: null, crop_name: "レタス", label: "区画A 畝9 レタス", area_m2: 5 }] };
+  const plain = { id: "L4", date: "2026-04-01", work_type: "spray", targets: [{ planting_id: "p1" }] };
+  const shared = withBlockShares({ blocks: [block], beds, plantings, works: [...works, harvest, undated], logs: [spray, mixed, orphan, plain] });
+  // 区画の収穫は、4/1 に区画にある p1 と p4 の収穫にもなる。区画のロータリー（2/20）は、次に入る p1、p3、p4 に
+  const copies = shared.works.filter((work) => work.from_block);
+  assert.deepEqual(copies.map((work) => [work.id, work.planting_id, work.block_id]), [
+    ["w7", "p1", null],
+    ["w7", "p3", null],
+    ["w7", "p4", null],
+    ["wh", "p1", null],
+    ["wh", "p4", null],
+  ]);
+  assert.equal(shared.works.length, works.length + 2 + copies.length);
+  // 区画の防除の記録は、区画の対象を残したまま、p1 と p4 の対象を足す。面積は区画の 48 ㎡ を畝＋通路の面積の比で分ける
+  const added = shared.logs[0].targets.slice(1);
+  assert.equal(shared.logs[0].targets[0], spray.targets[0]);
+  assert.deepEqual(added.map((target) => [target.planting_id, target.bed_id, target.label, target.crop_name, target.from_block]), [
+    ["p1", "b1", "区画A 畝1 レタス", "レタス", true],
+    ["p4", "b3", "区画A 畝3 レタス", "レタス", true],
+  ]);
+  near(added[0].area_m2, 21.2);
+  near(added[1].area_m2, 26.8);
+  assert.deepEqual([added[0].spray_l, added[0].harvest_kg], [null, null]);
+  // もう p1 を対象にしている記録には、p4 だけを足す（区画の面積が空なら、面積も空）
+  assert.deepEqual(shared.logs[1].targets.slice(2).map((target) => [target.planting_id, target.area_m2]), [["p4", null]]);
+  // 品目の名前のある対象と、区画の対象のない記録は、そのまま
+  assert.equal(shared.logs[2], orphan);
+  assert.equal(shared.logs[3], plain);
+  // 区画の防除も、p4 の使用回数に数える（元の記録だけなら数えない）
+  assert.equal(pesticideCounts([spray], "p4").products.size, 0);
+  assert.equal(pesticideCounts(shared.logs, "p4").products.get("100"), 1);
+  // 足した写しは、作付ごとの計算にだけ使う。元の記録と作業は変えない
+  assert.equal(spray.targets.length, 1);
+  assert.equal(harvest.planting_id, null);
+});
+
+test("区画の作業・記録を分ける作付: 作付の期間、ほかの区画、畝の並び、日付のない作付", () => {
+  // 作付の期間の終わりは、日付のない作業を除いた、計画の作業の終わりと記録の日のいちばん遅い日（記録は終えた日まで）
+  const undated = [...works, { id: "wx", planting_id: "p1", work_type: "residue", plan_start: null, plan_end: null }];
+  assert.equal(plantingSpan(plantings[0], undated).end, "2026-04-30");
+  const logs = [
+    { date: "2026-04-01", targets: [{ planting_id: "p1" }] }, // 計画の作業より前の記録で、終わりは変わらない（並べてからいちばん遅い日）
+    { date: "2026-05-02", end_date: "2026-05-04", targets: [{ planting_id: "p3" }, { planting_id: "p1" }] },
+    { date: "2026-06-01", targets: [{ planting_id: "p3" }] }, // ほかの作付の記録
+    { date: "2026-07-01" }, // 対象のない記録
+  ];
+  assert.deepEqual(plantingSpan(plantings[0], works, logs), { start: "2026-04-01", end: "2026-05-04" });
+  assert.deepEqual(plantingSpan(plantings[0], works, logs.slice(0, 1)), { start: "2026-04-01", end: "2026-04-30" });
+
+  // 区画 k2（もう 1 つの区画）には、日付のない作付が 2 つ（並びが逆）ある畝と、なくなった畝と、あとでできる畝
+  const k2 = { id: "k2", name: "区画B", shape: rect(0, 10, 10, 16), start_date: null, end_date: null };
+  const k2Beds = [
+    { id: "c1", block_id: "k2", seq: 1, shape: rect(1, 11, 9, 11.7), start_date: "2025-01-01", removed_on: "2026-01-01" },
+    { id: "c2", block_id: "k2", seq: 2, shape: rect(1, 13, 9, 13.7), start_date: "2026-09-01", removed_on: null },
+  ];
+  const k2Plantings = [
+    { id: "q0", bed_id: "c1", seq: 1, crop_name: "カブ" }, // なくなった畝の作付（日付なし）は、あとでできる畝で分けるときに入れない
+    { id: "q2", bed_id: "c2", seq: 2, crop_name: "カブ" },
+    { id: "q1", bed_id: "c2", seq: 1, crop_name: "" },
+  ];
+  const data = { blocks: [block, k2], beds: [...beds, ...k2Beds], plantings: [...plantings, ...k2Plantings], works };
+  const plantingsOn = blockPlantings(data);
+  // 6/1 は k2 にある畝がない（畝1 はもうない）。あとでできる畝2 だけで、作付は並びの先の q1。面積は k2 の形で求める
+  const k2On = plantingsOn("k2", "2026-06-01");
+  assert.deepEqual(k2On.map((item) => [item.planting.id, item.bed.id]), [["q1", "c2"]]);
+  near(k2On[0].weight, 8 * 6);
+  // 区画 k1 の作付には、k2 の畝が入らない
+  assert.deepEqual(plantingsOn("k1", "2026-02-20").map((item) => item.bed.id), ["b1", "b2", "b3"]);
+  // 日付がなければ、日付のない作付があっても空
+  assert.deepEqual(plantingsOn("k2", null), []);
+
+  // 写しの細かいところ
+  const shared = withBlockShares({
+    ...data,
+    works: [
+      ...works,
+      { id: "wk", block_id: "k2", planting_id: null, work_type: "harvest", plan_start: "2026-06-01", plan_end: "2026-06-02" },
+      // 作付の作業は、区画が入っていても写さない
+      { id: "wp", block_id: "k2", planting_id: "q2", work_type: "harvest", plan_start: "2026-06-01", plan_end: "2026-06-02" },
+      { id: "wn", block_id: "k2", planting_id: null, work_type: "harvest", plan_start: null, plan_end: null },
+    ],
+    logs: [
+      // 品目のない作付の対象の名前と品目、面積の入っていない区画の対象
+      { id: "La", date: "2026-06-01", targets: [{ block_id: "k2", label: "区画B" }] },
+      { id: "Lb", date: "2026-06-01" },
+    ],
+  });
+  assert.deepEqual(
+    shared.works.filter((work) => work.from_block).map((work) => [work.id, work.planting_id]),
+    [["w7", "p1"], ["w7", "p3"], ["w7", "p4"], ["wk", "q1"]]
+  );
+  assert.deepEqual(shared.logs[0].targets[1], {
+    block_id: "k2",
+    bed_id: "c2",
+    planting_id: "q1",
+    crop_name: "",
+    label: "区画B 畝2",
+    area_m2: null,
+    spray_l: null,
+    harvest_kg: null,
+    from_block: true,
+  });
+  assert.equal(shared.logs[1].targets, undefined);
+  // 作業も記録もなければ空
+  assert.deepEqual(withBlockShares({ blocks: [block], beds, plantings }), { works: [], logs: [] });
+  // 畝の面積が 0（大きさのない畝）なら、面積は分けられない（空）
+  const flat = { blocks: [block], beds: [{ id: "f1", block_id: "k1", seq: 1, shape: rect(1, 1, 1, 1), start_date: null, removed_on: null }], plantings: [{ id: "pf", bed_id: "f1", seq: 1 }] };
+  assert.equal(withBlockShares({ ...flat, logs: [{ date: "2026-01-01", targets: [{ block_id: "k1", label: "区画A", area_m2: 10 }] }] }).logs[0].targets[1].area_m2, null);
+  // 作付の並びが日付の順でなくても、その日に畝にある作付を選ぶ（並びの先の作付は、まだ始まっていない）
+  const swapped = blockPlantings({
+    ...flat,
+    plantings: [{ id: "late", bed_id: "f1", seq: 1 }, { id: "now", bed_id: "f1", seq: 2 }],
+    works: [
+      { id: "x1", planting_id: "late", work_type: "plant", plan_start: "2026-06-01", plan_end: "2026-06-30" },
+      { id: "x2", planting_id: "now", work_type: "plant", plan_start: "2026-03-01", plan_end: "2026-03-30" },
+    ],
+  });
+  assert.deepEqual(swapped("k1", "2026-03-15").map((item) => item.planting.id), ["now"]);
+  // 日付がなければ、ずっとある畝の日付のない作付があっても空
+  assert.deepEqual(blockPlantings({ ...flat, works: [] })("k1", null), []);
+  assert.equal(blockPlantings({ ...flat, works: [] })("k1", "2026-01-01").length, 1);
+});
 
 test("その日の作付は、その日までに始まった作付のうちいちばん新しいもの。始まった日は、記録があれば記録の日", () => {
   const onBed1 = plantings.filter((item) => item.bed_id === "b1");

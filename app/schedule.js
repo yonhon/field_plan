@@ -302,14 +302,25 @@ export function planProblems({ blocks, beds, plantings, works: allWorks, workTyp
     if (range && block.end_date && range.end >= block.end_date) {
       add(owner, null, `区画がなくなる日（${monthDay(block.end_date)}）以降に作業があります。`);
     }
-    // 区画でいちばん最後に終わる作業。畝の最初の作業は、このあとに始める
-    const last = blockWorks.filter((work) => work.plan_start && work.plan_end).sort((a, b) => a.plan_end.localeCompare(b.plan_end)).at(-1);
+    // 区画でいちばん最後に終わる、畝立ての前の作業。畝の最初の作業は、このあとに始める。
+    // 区画に入れた畝の作業（収穫など。区画にある作付の作業として扱う）は、畝立ての前の作業ではないので入れない
+    const prep = blockWorks.filter((work) => types.get(work.work_type)?.scope !== "bed");
+    const last = prep.filter((work) => work.plan_start && work.plan_end).sort((a, b) => a.plan_end.localeCompare(b.plan_end)).at(-1);
+    // 区画に入れた収穫の作業。その日に畝にある作付（その日より前に始まった、いちばんあとの作付）の収穫として見る
+    const blockHarvests = blockWorks.filter((work) => work.work_type === HARVEST && work.plan_start && work.plan_end);
 
     for (const bed of beds.filter((item) => item.block_id === block.id)) {
       let previous = null; // 前の作付 { end: 収穫完了予定日 }
-      for (const planting of plantings.filter((item) => item.bed_id === bed.id).sort(bySeq)) {
+      const bedPlantings = plantings.filter((item) => item.bed_id === bed.id).sort(bySeq);
+      const starts = bedPlantings.map((item) => worksRange(works.filter((work) => work.planting_id === item.id))?.start || null);
+      for (const [index, planting] of bedPlantings.entries()) {
         const mine = { planting_id: planting.id };
         const own = works.filter((work) => work.planting_id === planting.id).sort(bySeq);
+        // この作付の収穫として見る、区画の収穫の作業。この作付が始まったあと、次の作付が始まる前に始まるもの
+        const nextStart = starts.slice(index + 1).find(Boolean) || null;
+        const shared = blockHarvests.filter(
+          (work) => (!starts[index] || starts[index] <= work.plan_start) && (!nextStart || work.plan_start < nextStart)
+        );
         // 品目を登録してある作付は、その品目の日数で見る
         const crop = crops.find((item) => item.id === planting.crop_id);
         addSequence(mine, own, typesForCrop(workTypes, crop, own));
@@ -350,10 +361,11 @@ export function planProblems({ blocks, beds, plantings, works: allWorks, workTyp
             add(mine, null, `畝をなくす日（${monthDay(bed.removed_on)}）以降に作業があります。`);
           }
         }
-        const dated = own.filter((work) => work.plan_start && work.plan_end);
+        const dated = [...own, ...shared].filter((work) => work.plan_start && work.plan_end);
         previous = {
-          end: harvestEnd(own),
+          end: harvestEnd([...own, ...shared]),
           harvest: dated.filter((work) => work.work_type === HARVEST).sort((a, b) => a.plan_end.localeCompare(b.plan_end)).at(-1) || null,
+          // 区画の収穫の終わりは end に入るので、ここには作付自身の作業の終わりだけでよい（end より遅いときだけ、下の指摘に使う）
           last: span?.end || null,
           lastWork: dated.sort((a, b) => a.plan_end.localeCompare(b.plan_end)).at(-1) || null,
         };

@@ -39,6 +39,103 @@ export function plantingStart(planting, works, logs = []) {
   return recorded || worksRange(works.filter((work) => work.planting_id === planting.id && !isManagement(work.work_type)))?.start || null;
 }
 
+// ---- 区画の作業と、区画を対象にした記録 ----
+// 作付の画面には、その区画の作業と、区画を対象にした記録も出す。作付ごとの計算（農薬の使用回数、収穫前日数の指摘、
+// 収穫の計画、収穫量の実績など）でも、それを、その日に区画にある畝の作付の作業・記録として扱う（2026-11-24）。
+// 作付自身の作業・記録と合わせて、どれも有効にする（どちらかを優先しない）。
+
+// 作付自身の期間（作付に付いた計画の作業と記録から）。始まりは plantingStart、終わりは計画の作業の終わりと記録の日のうち、いちばん遅い日
+export function plantingSpan(planting, works, logs = []) {
+  const ends = [
+    ...works.filter((work) => work.planting_id === planting.id && !work.cancelled_on).map((work) => work.plan_end || work.plan_start),
+    ...logs.filter((log) => (log.targets || []).some((target) => target.planting_id === planting.id)).map(logEnd),
+  ].filter(Boolean);
+  return { start: plantingStart(planting, works, logs), end: ends.sort().at(-1) || null };
+}
+
+// その日に、区画の作業・記録を分ける畝の作付を求める関数を作る。その日にある畝（なければ、あとでできる畝）ごとに、
+// その日に畝にある作付、なければ次に入る作付（畝立ての前の作業は、次に入る作付に分ける）。どちらもない畝は入れない。
+// 返す関数は (区画の ID, 日付) → [{ planting, bed, weight（畝＋通路の面積） }]。作付の期間は作付自身の作業と記録から求める
+export function blockPlantings({ blocks, beds, plantings, works, logs = [] }) {
+  const spans = new Map();
+  const spanOf = (planting) => {
+    if (!spans.has(planting.id)) {
+      spans.set(planting.id, plantingSpan(planting, works, logs));
+    }
+    return spans.get(planting.id);
+  };
+  const cache = new Map();
+  return (blockId, date) => {
+    const key = `${blockId}:${date}`;
+    if (cache.has(key)) {
+      return cache.get(key);
+    }
+    const block = blocks.find((item) => item.id === blockId);
+    let chosen = [];
+    if (block && date) {
+      const all = beds.filter((bed) => bed.block_id === blockId);
+      let live = all.filter((bed) => existsOn(bed.start_date, bed.removed_on, date));
+      if (!live.length) {
+        live = all.filter((bed) => bed.start_date && bed.start_date > date);
+      }
+      for (const bed of live) {
+        const list = plantings
+          .filter((planting) => planting.bed_id === bed.id)
+          .sort(bySeq)
+          .map((planting) => ({ planting, ...spanOf(planting) }));
+        const current = list.find((item) => (!item.start || item.start <= date) && (!item.end || date <= item.end));
+        const next = list.find((item) => item.start && item.start > date);
+        const planting = (current || next)?.planting;
+        if (planting) {
+          chosen.push({ planting, bed });
+        }
+      }
+      const areas = bedAreas(block, chosen.map((item) => item.bed));
+      chosen = chosen.map((item) => ({ ...item, weight: areas.get(item.bed.id) || 0 }));
+    }
+    cache.set(key, chosen);
+    return chosen;
+  };
+}
+
+// 区画の作業と、区画を対象にした記録を、その日に区画にある畝の作付にも付けた写しを返す。
+// works: 区画の作業（作付の欄が空）を、始まる日に区画にある作付ごとに写して足す（写しは from_block が true）。
+// logs: 区画を対象にした記録に、その日に区画にある作付の対象を足す（足した対象は from_block が true。面積は、区画の面積を畝＋通路の面積の比で分けた値）。
+// 同じ記録が、その作付をもう対象にしていれば足さない。区画そのものの対象は残す。
+// 足した写しは、作付ごとの計算にだけ使う（区画の面積の合計や、記録の一覧には使わない。数が二重になる）
+export function withBlockShares(data) {
+  const { works = [], logs = [] } = data;
+  const plantingsOn = blockPlantings({ ...data, works, logs });
+  // 日付のない区画の作業は、どの作付にも写さない（blockPlantings が空を返す）
+  const blockWorks = works
+    .filter((work) => work.block_id && !work.planting_id)
+    .flatMap((work) => plantingsOn(work.block_id, work.plan_start).map(({ planting }) => ({ ...work, block_id: null, planting_id: planting.id, from_block: true })));
+  const sharedLogs = logs.map((log) => {
+    const targets = log.targets || [];
+    const direct = new Set(targets.map((target) => target.planting_id));
+    const added = targets.filter(isBlockTarget).flatMap((target) => {
+      // 面積は、区画にある作付すべての比で分ける（記録がもう対象にしている作付の分は、その対象が持つ）
+      const all = plantingsOn(target.block_id, log.date);
+      const total = all.reduce((sum, item) => sum + item.weight, 0);
+      return all
+        .filter((item) => !direct.has(item.planting.id))
+        .map(({ planting, bed, weight }) => ({
+          block_id: target.block_id,
+          bed_id: bed.id,
+          planting_id: planting.id,
+          crop_name: planting.crop_name || "",
+          label: `${target.label} 畝${bed.seq} ${planting.crop_name || ""}`.trim(),
+          area_m2: target.area_m2 !== null && target.area_m2 !== undefined && total > 0 ? (Number(target.area_m2) * weight) / total : null,
+          spray_l: null,
+          harvest_kg: null,
+          from_block: true,
+        }));
+    });
+    return added.length ? { ...log, targets: [...targets, ...added] } : log;
+  });
+  return { works: [...works, ...blockWorks], logs: sharedLogs };
+}
+
 // その日に畝にある作付。その日までに始まった作付のうち、いちばん新しいもの。まだどれも始まっていなければ、次に来る作付。
 // 計画に収穫が入っていない作付（計画を作りかけの作付）も、次の作付が始まるまでは、その畝の作付として扱う
 export function plantingOnDate(plantings, works, date, logs = []) {

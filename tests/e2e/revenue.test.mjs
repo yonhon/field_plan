@@ -144,6 +144,30 @@ test("収量と売上: 品目の値から見込みを出し、作付の値を優
   assert.deepEqual(page.errors, []);
 });
 
+test("区画に入れた収穫の計画は、その日に区画にある作付の収穫の計画として、作付自身の収穫の計画と合わせて売上を出す", options, async () => {
+  // 区画 A の収穫（6/1〜6/3）と、畝 1 の作付だけの収穫（6/20〜6/21）。畝 2 は区画の収穫だけ
+  const works = [
+    { id: "wb", plan_id: "p1", planting_id: null, block_id: "b1", seq: 1, work_type: "harvest", plan_start: "2027-06-01", plan_end: "2027-06-03" },
+    { id: "w1", plan_id: "p1", planting_id: "pl1", block_id: null, seq: 1, work_type: "harvest", plan_start: "2027-06-20", plan_end: "2027-06-21" },
+  ];
+  await page.loadApp(seed({ works }));
+  await openPlanting("pl2");
+  assert.deepEqual((await panelRows())[3], ["売上（円）", "4,800", "－"]);
+  assert.doesNotMatch(await panelNotes(), /収穫の計画（日付の入った収穫の作業）がないので/);
+  // 作付の詳細の頭の収穫完了予定日も、区画の収穫の終わり
+  assert.match(await page.run(`document.getElementById("plantingBody").textContent`), /6\/3/);
+  await openPlanting("pl1");
+  assert.deepEqual((await panelRows())[3], ["売上（円）", "4,800", "－"]);
+  // 月次: 両方の作付が 6 月に出る
+  await page.openView("revenue");
+  await page.click('#revenueView [data-revenuetab="monthly"]');
+  await page.waitFor(`document.querySelectorAll("#revenueMonthly tbody tr").length === 2`, "月次に 2 つの作付");
+  assert.deepEqual(await page.run(`[...document.querySelector("#revenueMonthly tfoot tr").cells].map((cell) => cell.textContent)`), ["合計", "9,600", "9,600"]);
+  await page.click('#revenueView [data-revenuetab="plantings"]');
+  await page.waitFor(`location.hash === "#revenue/plantings"`, "作付ごとの収支に戻す");
+  assert.deepEqual(page.errors, []);
+});
+
 test("収穫量: 畝ごとに入れた量はそのまま、残りを面積の比で分ける。合計を超えると保存しない", options, async () => {
   // 入力の窓の対象は、その日にある作付なので、収穫の計画を今日にする
   const works = [1, 2].map((seq) => ({ id: `w${seq}`, plan_id: "p1", planting_id: `pl${seq}`, block_id: null, seq: 1, work_type: "harvest", plan_start: TODAY, plan_end: TODAY }));

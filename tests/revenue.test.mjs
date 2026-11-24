@@ -236,19 +236,28 @@ test("作付の収穫量の実績: 収穫量の入っていない記録は、量
   assert.deepEqual(harvestActual("a", [twice]), { kg: 2, splitKg: 0, count: 1, unmeasured: 0 });
 });
 
-test("収穫の計画の期間: 取りやめていない収穫の作業の、最初の始まりから最後の終わりまで", () => {
+test("収穫の計画の期間: 取りやめていない収穫の作業すべての日を合わせる。作業の間の日は入れない", () => {
   const works = [
-    { work_type: "harvest", plan_start: "2027-01-10", plan_end: "2027-01-31" },
+    { work_type: "harvest", plan_start: "2027-01-10", plan_end: "2027-01-12" },
     { work_type: "harvest", plan_start: "2027-01-05", plan_end: null },
     { work_type: "harvest", plan_start: "2026-12-01", plan_end: "2027-03-01", cancelled_on: "2026-11-30" },
     { work_type: "plant", plan_start: "2026-11-01", plan_end: "2026-11-02" },
     { work_type: "harvest", plan_start: null, plan_end: "2027-02-01" },
   ];
-  assert.deepEqual(harvestWindow(works), { start: "2027-01-05", end: "2027-01-31" });
-  // 収穫の作業が 3 つ以上でも、いちばん遅い終わり
-  assert.deepEqual(harvestWindow([...works, { work_type: "harvest", plan_start: "2027-01-07", plan_end: "2027-01-08" }]), { start: "2027-01-05", end: "2027-01-31" });
+  assert.deepEqual(harvestWindow(works), { start: "2027-01-05", end: "2027-01-12", days: ["2027-01-05", "2027-01-10", "2027-01-11", "2027-01-12"] });
+  // 重なった日は 1 日（作付の収穫と、区画の収穫の写しが重なるときなど）。いちばん遅い終わりが end
+  assert.deepEqual(harvestWindow([...works, { work_type: "harvest", plan_start: "2027-01-11", plan_end: "2027-01-14" }]), {
+    start: "2027-01-05",
+    end: "2027-01-14",
+    days: ["2027-01-05", "2027-01-10", "2027-01-11", "2027-01-12", "2027-01-13", "2027-01-14"],
+  });
   assert.equal(harvestWindow([{ work_type: "plant", plan_start: "2026-11-01" }]), null);
   assert.equal(harvestWindow([]), null);
+  // 売上は、収穫の作業のある日だけに分ける
+  const window = harvestWindow(works);
+  assert.deepEqual(daysOf(window), window.days);
+  const item = forecast({}, { yield_kg_per_10a: 400, price_yen_per_kg: 100 }, { areaM2: 1000, window });
+  assert.deepEqual([...item.monthly.entries()], [["2027-01", 40000]]);
 });
 
 // 1 日ごとの市況。from から days 日、値は value（関数なら日付から）

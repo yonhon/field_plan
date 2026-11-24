@@ -50,7 +50,7 @@ import { showUndoPad } from "./undo-pad.js";
 import { decorateIcons } from "./icons.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
-import { plantingOnDate } from "./logs.js";
+import { plantingOnDate, withBlockShares } from "./logs.js";
 import { initProcessEditor } from "./process-editor.js";
 import { initForecastEditor } from "./forecast-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail, renderWholeHead } from "./planting-view.js";
@@ -431,6 +431,9 @@ function nextBlockName() {
 
 const bedPlantings = (bed) => state.plantings.filter((planting) => planting.bed_id === bed.id).sort((a, b) => a.seq - b.seq);
 const plantingWorks = (planting) => state.works.filter((work) => work.planting_id === planting.id);
+// 作付の収穫完了予定日。作付の収穫の計画と、区画の収穫の計画（その日に区画にある作付の分。logs.js の withBlockShares）を合わせて見る
+const plantingHarvestEnd = (planting) =>
+  harvestEnd(withBlockShares({ ...state, logs: state.logs || [] }).works.filter((work) => work.planting_id === planting.id));
 
 // 表示日に畝にある作付。その日がどの作付の期間でもなければ、次に来る作付、それもなければ最後の作付
 function plantingOn(bed) {
@@ -1064,7 +1067,7 @@ function renderSelection() {
         ? plantings
             .map((planting) => {
               const range = worksRange(plantingWorks(planting));
-              const end = harvestEnd(plantingWorks(planting));
+              const end = plantingHarvestEnd(planting);
               return (
                 `<li><span>作付 ${planting.seq}${planting.crop_name ? `: ${escapeHtml(planting.crop_name)}` : ""}</span>` +
                 `<span>${range ? `${formatDate(range.start)}〜${end ? formatDate(end) : "収穫完了は未定"}` : "日付なし"}</span></li>`
@@ -2587,7 +2590,7 @@ function appendBeds(blockId, widthCm, aisleCm, count, side = "long") {
 function removalProblem(bed) {
   let last = null;
   for (const planting of bedPlantings(bed)) {
-    const end = harvestEnd(plantingWorks(planting));
+    const end = plantingHarvestEnd(planting);
     if (!end) {
       return "収穫完了予定日が決まっていない作付があります。日程で「収穫」の終了日を入れてください。";
     }

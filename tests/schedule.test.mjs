@@ -131,6 +131,90 @@ test("作業の名前に、株の手入れとその他の中身を添える", ()
   assert.equal(isManagement("plant"), false);
 });
 
+test("区画に入れた収穫は、畝立ての前の作業と見ず、その日に畝にある作付の収穫として見る", () => {
+  const data = plan();
+  // p1 の収穫（7/x〜8/11）を、区画の作業に移す
+  data.works = data.works.map((work) => (work.planting_id === "p1" && work.work_type === "harvest" ? { ...work, planting_id: null, block_id: "b1", seq: 99 } : work));
+  // 区画の最後の作業は、収穫ではなく、すき込み（6/14）のまま。畝立て（7/6）を「区画の作業が終わる前」とは言わない
+  assert.deepEqual(planProblems(data), []);
+  // 次の作付は、区画の収穫の終わり（8/11）を、前の作付の収穫完了予定日として見る
+  data.plantings.push({ id: "p2", bed_id: "bed1", seq: 2, crop_name: "リーフレタス" });
+  data.works.push(...scheduleForward(worksOf(TEMPLATES.bed.bare.codes, { planting_id: "p2" }), types, "2027-08-05"));
+  const overlap = planProblems(data);
+  assert.equal(overlap.length, 1);
+  assert.match(overlap[0].message, /前の作付の収穫完了予定日（8\/11）より前に始まっています/);
+  // 次の作付が始まったあとの区画の収穫は、前の作付のものとは見ない（前の作付の収穫完了予定日は決まらない）
+  data.works = data.works.map((work) => (work.block_id === "b1" && work.work_type === "harvest" ? { ...work, plan_start: "2027-09-20", plan_end: "2027-09-21" } : work));
+  assert.match(planProblems(data).find((problem) => problem.planting_id === "p2").message, /前の作付の収穫完了予定日が決まっていません/);
+});
+
+test("区画に入れた収穫を、どの作付の収穫として見るか: その作付が始まった日から、次の作付が始まる前の日までに始まるもの", () => {
+  const w = (id, owner, type, start, end, seq = 1) => ({ id, block_id: null, planting_id: null, ...owner, work_type: type, seq, plan_start: start, plan_end: end });
+  const B = { block_id: "b1" };
+  const P = (id) => ({ planting_id: id });
+  // 同じ畝に 3 つの作付（並びは逆に入れる）。どれも定植だけを持ち、収穫は区画に入れる
+  const base = {
+    blocks: [{ id: "b1", start_date: null, end_date: null }],
+    beds: [{ id: "bed1", block_id: "b1", seq: 1, start_date: null, removed_on: null }],
+    plantings: [{ id: "p3", bed_id: "bed1", seq: 3 }, { id: "p2", bed_id: "bed1", seq: 2 }, { id: "p1", bed_id: "bed1", seq: 1 }],
+    workTypes: types,
+  };
+  const run = (works) => planProblems({ ...base, works }).map((problem) => `${problem.planting_id || problem.block_id}: ${problem.message}`);
+  const own = [w("a1", P("p1"), "plant", "2027-03-01", "2027-03-01"), w("a2", P("p2"), "plant", "2027-04-10", "2027-04-10"), w("a3", P("p3"), "plant", "2027-05-10", "2027-05-10")];
+  const h1 = w("h1", B, "harvest", "2027-03-20", "2027-04-09", 9);
+  // 3/20 の収穫は p1、4/20 の収穫は p2 のもの。どちらも次の作付が始まる前に終わる
+  assert.deepEqual(run([...own, h1, w("h2", B, "harvest", "2027-04-20", "2027-05-09", 9)]), []);
+  // p1 に収穫がなく、p2 の収穫が p3 の始まりより後まで続く
+  assert.deepEqual(run([...own, w("h2", B, "harvest", "2027-04-20", "2027-05-12", 9)]), [
+    "p2: 前の作付の収穫完了予定日が決まっていません。",
+    "p3: 前の作付の収穫完了予定日（5/12）より前に始まっています。",
+  ]);
+  // p2 が始まる日（4/10）に始まる収穫は、p1 ではなく p2 のもの
+  assert.deepEqual(run([...own, w("h3", B, "harvest", "2027-04-10", "2027-04-12", 9)]), ["p2: 前の作付の収穫完了予定日が決まっていません。"]);
+  // 区画に入れた収穫のほかの畝の作業（残渣処理）は、作付の作業として見ない。日付のない収穫も見ない
+  const early = [own[0], own[1], w("a3", P("p3"), "plant", "2027-05-01", "2027-05-01")];
+  assert.deepEqual(
+    run([...early, h1, w("h2", B, "harvest", "2027-04-20", "2027-04-25", 9), w("r1", B, "residue", "2027-04-28", "2027-05-03", 10), w("hn", B, "harvest", null, null, 11), w("hs", B, "harvest", "2027-04-26", null, 12)]),
+    ["b1: 日付の入っていない作業が 2 件あります。"]
+  );
+  // 作付の作業に終わりの日がなくても、前の作付の終わりを求められる
+  assert.deepEqual(run([...own, h1, w("h2", B, "harvest", "2027-04-20", "2027-05-09", 9), w("x1", P("p1"), "ridge", "2027-02-27", null, 0)]), ["p1: 日付の入っていない作業が 1 件あります。"]);
+  // 畝立ての前の区画の作業のうち、いちばん遅く終わるもの（並びの順ではなく日付）のあとをあける。日付のない作業と、種類の分からない作業も扱える
+  assert.deepEqual(
+    run([
+      ...own,
+      h1,
+      w("h2", B, "harvest", "2027-04-20", "2027-05-09", 9),
+      w("k1", B, "incorporate", "2027-02-25", "2027-02-25", 1),
+      w("k2", B, "subsoil", "2027-02-20", "2027-02-20", 2),
+      w("k3", B, "rotary", null, null, 3),
+      w("k4", B, "custom", "2027-02-01", "2027-02-01", 4),
+      w("k5", B, "rotary", "2027-02-10", null, 5),
+    ]),
+    [
+      "b1: 前の作業（すき込み（ロータリー））と重なっているか、順番が逆です。",
+      "b1: 前の作業（心土破砕）と重なっているか、順番が逆です。",
+      "b1: 日付の入っていない作業が 2 件あります。",
+      "p1: 区画のすき込み（ロータリー）のあとは 21 日あけるのが目安です（いま 3 日）。",
+    ]
+  );
+  // 作付が始まる前に始まる区画の収穫は、その作付のものではない（p1 は 3/1 から）
+  assert.deepEqual(run([...own, w("h0", B, "harvest", "2027-02-20", "2027-02-25", 9)]), [
+    "p2: 前の作付の収穫完了予定日が決まっていません。",
+    "p3: 前の作付の収穫完了予定日が決まっていません。",
+  ]);
+  // 前の作付の収穫完了の日に始めてよいかは、いちばん遅く終わる収穫（作付自身の 3/30 の 1 日）で見る。区画の収穫（3/20〜3/25）ではない
+  const p2Ridge = w("a2", P("p2"), "ridge", "2027-03-30", "2027-03-31");
+  assert.deepEqual(run([own[0], w("o1", P("p1"), "harvest", "2027-03-30", "2027-03-30", 2), w("h4", B, "harvest", "2027-03-20", "2027-03-25", 9), p2Ridge]), []);
+  // 前の作付の作業が終わる日に始めてよいかは、作付自身のいちばん遅い作業（4/5 の 1 日の残渣処理）で見る。区画の残渣処理（4/4〜4/5）は見ない
+  const p1Own = [own[0], w("o1", P("p1"), "harvest", "2027-03-20", "2027-03-25", 2), w("o2", P("p1"), "residue", "2027-04-05", "2027-04-05", 3)];
+  assert.deepEqual(run([...p1Own, w("r2", B, "residue", "2027-04-04", "2027-04-05", 10), w("a2", P("p2"), "ridge", "2027-04-05", "2027-04-06")]), []);
+  // 作付の収穫に終わりの日がなくても、区画の収穫と合わせて扱える
+  assert.deepEqual(run([own[0], w("o3", P("p1"), "harvest", "2027-03-22", null, 2), w("h5", B, "harvest", "2027-03-20", "2027-03-25", 9), own[1]]), [
+    "p1: 日付の入っていない作業が 1 件あります。",
+  ]);
+});
+
 test("区画の作業と、畝の最初の作業のつながり", () => {
   // すき込みは 6/14。21 日あけるので、畝立ては 7/6 から
   const early = planProblems(plan({ ridge: "2027-06-25" }));

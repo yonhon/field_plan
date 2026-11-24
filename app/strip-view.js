@@ -4,7 +4,7 @@ import { cropLabel, plantingNumbers, plantingSpec } from "./crops.js";
 import { notify } from "./dialog.js";
 import { bedAngle, edgeAngles, rectSize, viewAxes } from "./geometry.js";
 import { record } from "./journal.js";
-import { workActuals } from "./logs.js";
+import { withBlockShares, workActuals } from "./logs.js";
 import { WORK_COLORS, existsOn, harvestEnd, workName } from "./schedule.js";
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
@@ -193,6 +193,8 @@ export function renderStrip() {
     dim(strip.min, strip.max, `width:${index}`);
     const width = (strip.max - strip.min) * view.scale;
     const sections = [];
+    // 収穫完了予定日は、区画の収穫の計画（その日に区画にある作付の分）も合わせて見る（logs.js の withBlockShares）
+    const sharedWorks = withBlockShares({ ...state, logs: state.logs || [] }).works.filter((work) => work.from_block);
     strip.beds.forEach((bed, row) => {
       const plantings = state.plantings.filter((planting) => planting.bed_id === bed.id).sort(bySeq);
       const names = plantings.map((planting) => planting.crop_name).filter(Boolean);
@@ -213,7 +215,7 @@ export function renderStrip() {
         ? plantings
             .map((planting) => {
               const works = state.works.filter((work) => work.planting_id === planting.id).sort(bySeq);
-              const end = harvestEnd(works);
+              const end = harvestEnd([...works, ...sharedWorks.filter((work) => work.planting_id === planting.id)]);
               return (
                 `<div class="strip-planting" data-planting="${planting.id}"><div class="strip-crop">${planting.seq}. ${escapeHtml(planting.crop_name || "品目なし")}</div>` +
                 `${numbersLine(bed, planting)}` +

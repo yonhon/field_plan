@@ -12,9 +12,9 @@ import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
 import { polygonArea } from "./geometry.js";
 import { cropLabel, plantingNumbers, plantingSpec } from "./crops.js";
-import { bedAreas, logEnd, plantingStart } from "./logs.js";
+import { bedAreas, blockPlantings, plantingStart, withBlockShares } from "./logs.js";
 import { MARKET_WIDEN_DAYS, effectiveForecast, forecast, forecastValues, harvestActual, harvestWindow, marketEstimate, plantingBedArea } from "./revenue.js";
-import { existsOn, localToday } from "./schedule.js";
+import { localToday } from "./schedule.js";
 import { COMMON_KINDS, SESSION_KINDS, allocateMinutes, formatMinutes, splitMinutes } from "./work-time.js";
 
 const $ = (id) => document.getElementById(id);
@@ -56,44 +56,6 @@ export function setRevenueTab(tab) {
 }
 const state = () => ctx.state;
 const bySeq = (a, b) => a.seq - b.seq;
-
-// 作付の期間（始まりと終わりの日）。始まりは plantingStart、終わりは計画の作業の終わりと記録の日のうち、いちばん遅い日
-function plantingSpan(planting) {
-  const s = state();
-  const ends = [
-    ...s.works.filter((work) => work.planting_id === planting.id && !work.cancelled_on).map((work) => work.plan_end || work.plan_start),
-    ...(s.logs || []).filter((log) => (log.targets || []).some((target) => target.planting_id === planting.id)).map(logEnd),
-  ].filter(Boolean);
-  return { start: plantingStart(planting, s.works, s.logs || []), end: ends.sort().at(-1) || null };
-}
-
-// その日に、区画全体の作業を分ける畝の作付。その日にある畝（なければ、あとでできる畝）ごとに、
-// その日に畝にある作付、なければ次に入る作付。どちらもない畝は入れない
-function blockPlantingsOn(blockId, date) {
-  const s = state();
-  const block = s.blocks.find((item) => item.id === blockId);
-  if (!block) {
-    return [];
-  }
-  const all = s.beds.filter((bed) => bed.block_id === blockId);
-  let beds = all.filter((bed) => existsOn(bed.start_date, bed.removed_on, date));
-  if (!beds.length) {
-    beds = all.filter((bed) => bed.start_date && bed.start_date > date);
-  }
-  const chosen = [];
-  for (const bed of beds) {
-    const list = s.plantings.filter((planting) => planting.bed_id === bed.id).sort(bySeq);
-    const spans = list.map((planting) => ({ planting, ...plantingSpan(planting) }));
-    const current = spans.find((item) => (!item.start || item.start <= date) && (!item.end || date <= item.end));
-    const next = spans.find((item) => item.start && item.start > date);
-    const planting = (current || next)?.planting;
-    if (planting) {
-      chosen.push({ bed, planting });
-    }
-  }
-  const areas = bedAreas(block, chosen.map((item) => item.bed));
-  return chosen.map((item) => ({ id: item.planting.id, weight: areas.get(item.bed.id) }));
-}
 
 // 計測の持ち主（作付か区画）。key は "planting:ID" か "block:ID"
 function ownersOf(session, area) {
@@ -144,7 +106,11 @@ export function timeAllocation() {
       const planting = s.plantings.find((item) => item.id === id);
       return s.beds.find((bed) => bed.id === planting?.bed_id)?.block_id || null;
     },
-    blockPlantings: blockPlantingsOn,
+    // その日に区画全体の作業を分ける作付（logs.js の blockPlantings。区画の作業・記録を作付の計算に使うときと同じ決め方）
+    blockPlantings: (() => {
+      const plantingsOn = blockPlantings({ ...s, logs: s.logs || [] });
+      return (blockId, date) => plantingsOn(blockId, date).map((item) => ({ id: item.planting.id, weight: item.weight }));
+    })(),
   });
 }
 
@@ -284,21 +250,28 @@ export const marketItems = () => (ctx ? state().market?.items || null : null);
 
 // 何件もの作付の見込みを出すときに、作付ごとの作業と記録、畝の面積を 1 回だけ集める（作付ごとに全体をなめ直さない）。
 // 面積は、作付が始まる日に区画にある畝で分けた畝＋通路の面積（revenue.js の plantingBedArea）
-function revenueIndex() {
+// shares を false にすると、区画の作業・記録の写しを作らない（面積だけを求めるとき）
+function revenueIndex(shares = true) {
   const s = state();
   const push = (map, key, item) => (map.has(key) ? map.get(key).push(item) : map.set(key, [item]));
-  const works = new Map();
-  for (const work of s.works) {
-    if (work.planting_id) {
-      push(works, work.planting_id, work);
+  // 作付ごとの作業と記録。区画の作業と区画を対象にした記録も、その日に区画にある作付のものとして入れる（logs.js の withBlockShares）。
+  // ownWorks・ownLogs は作付自身のものだけ（作付が始まる日を決めるのに使う。区画の準備の作業で、始まりが早まらないように）
+  const shared = shares ? withBlockShares({ ...s, logs: s.logs || [] }) : { works: s.works, logs: s.logs || [] };
+  const byPlanting = (list, ids) => {
+    const map = new Map();
+    for (const item of list) {
+      for (const id of ids(item)) {
+        push(map, id, item);
+      }
     }
-  }
-  const logs = new Map();
-  for (const log of s.logs || []) {
-    for (const id of new Set((log.targets || []).map((target) => target.planting_id).filter(Boolean))) {
-      push(logs, id, log);
-    }
-  }
+    return map;
+  };
+  const workIds = (work) => (work.planting_id ? [work.planting_id] : []);
+  const logIds = (log) => new Set((log.targets || []).map((target) => target.planting_id).filter(Boolean));
+  const works = byPlanting(shared.works, workIds);
+  const logs = byPlanting(shared.logs, logIds);
+  const ownWorks = byPlanting(s.works, workIds);
+  const ownLogs = byPlanting(s.logs || [], logIds);
   const forecasts = new Map();
   for (const entry of s.planting_forecasts || []) {
     push(forecasts, entry.planting_id, entry);
@@ -309,7 +282,7 @@ function revenueIndex() {
   for (const bed of s.beds) {
     push(blockBeds, bed.block_id, bed);
   }
-  return { works, logs, forecasts, beds, blocks, blockBeds, crops: new Map(s.crops.map((crop) => [crop.id, crop])) };
+  return { works, logs, ownWorks, ownLogs, forecasts, beds, blocks, blockBeds, crops: new Map(s.crops.map((crop) => [crop.id, crop])) };
 }
 
 // 作付の畝＋通路の面積（㎡）。今日ない畝は、その畝だけで求める
@@ -319,13 +292,13 @@ function plantingArea(planting, bed, index) {
   if (!block) {
     return null;
   }
-  const start = plantingStart(planting, index.works.get(planting.id) || [], index.logs.get(planting.id) || []) || localToday();
+  const start = plantingStart(planting, index.ownWorks.get(planting.id) || [], index.ownLogs.get(planting.id) || []) || localToday();
   return plantingBedArea(block, index.blockBeds.get(block.id) || [bed], bed, start);
 }
 
 // 作付の畝＋通路の面積（㎡）。作付の詳細の頭に出す（見込みと同じ求め方）
 export const plantingAreaOf = (planting) => {
-  const index = revenueIndex();
+  const index = revenueIndex(false);
   return plantingArea(planting, index.beds.get(planting.bed_id), index);
 };
 

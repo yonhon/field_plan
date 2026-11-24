@@ -5,7 +5,7 @@ import { plantingNumbers, plantingSpec, summarize } from "./crops.js";
 import { notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { openLogEditor, openPlanEditor, revertWorks, uncancelWork } from "./log-view.js";
-import { compressedAxis, cropDiffText, dayGap, firstHarvestDay, logEnd, shiftAfterActual, specText, usageTable } from "./logs.js";
+import { compressedAxis, cropDiffText, dayGap, firstHarvestDay, logEnd, shiftAfterActual, specText, usageTable, withBlockShares } from "./logs.js";
 import { NOTICE_URL, famicEnabled, ingredientIconsHtml, inputHtml, nameHtml } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, isManagement, localToday, workName } from "./schedule.js";
 import { polygonArea } from "./geometry.js";
@@ -482,8 +482,9 @@ function workTimeHtml(c) {
 // 農薬の使用回数。有効成分ごとの回数と上限と、その下に、その成分を含む本剤ごとの回数と上限。
 // 並びは、最初に使った順。2 つの成分を含む本剤は、それぞれの成分の下に出す。総使用回数に数える成分のない本剤（成分の分からないものも）は、最後に出す。
 // 黄色い枠には、上限に達したものだけを出す。総使用回数の条件は、成分の行に添え書きで出す
+// 区画を対象にした防除の記録も、その日に区画にある作付の記録として数える（logs.js の withBlockShares）
 function usageHtml(c) {
-  const logs = state().logs || [];
+  const logs = withBlockShares({ ...state(), logs: state().logs || [] }).logs;
   const table = usageTable(logs, c.planting.id, c.planting.crop_name);
   if (!table.ingredients.length && !table.products.length) {
     return '<section class="panel"><h2>農薬の使用回数</h2><p class="muted">この作付の防除の実績は、まだありません。</p></section>';
@@ -686,7 +687,8 @@ function headHtml(c, active, rootId = "plantingBody") {
     const mulch = c.planting.mulch ?? crop?.mulch;
     // 畝＋通路の面積。作付が始まる日に区画にある畝で分ける（収量の見込みと同じ。revenue-view.js の plantingAreaOf）
     const area = plantingAreaOf(c.planting);
-    const end = harvestEnd(c.ownWorks);
+    // 収穫完了予定日は、作付の収穫の計画と、区画の収穫の計画（その日に区画にある作付の分）を合わせて見る
+    const end = harvestEnd(withBlockShares(state()).works.filter((work) => work.planting_id === c.planting.id));
     // 苗数は、「区画と畝」の図と同じく、畝の寸法と株間・条数から計算する。株間・条数は、定植・播種の実績があればその値
     // （品目を登録していない作付には出さない）
     const fertilizer = crop && state().fertilizers.find((item) => item.id === crop.fertilizer_id);

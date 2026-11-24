@@ -3,7 +3,7 @@
 // 面積、苗数、肥料の量、日程の無理、農薬の使用回数は、画面と同じ部品（lib/）で計算する。
 import { plantingNumbers, plantingSpec, summarize, cropLabel } from "./lib/crops.js";
 import { outlineArea, outlineParts, polygonArea, rectSize } from "./lib/geometry.js";
-import { firstHarvestDay, inputText, logEnd, specText, usageTable } from "./lib/logs.js";
+import { firstHarvestDay, inputText, logEnd, specText, usageTable, withBlockShares } from "./lib/logs.js";
 import { productCodes } from "./lib/rac.js";
 import { harvestEnd, isManagement, planProblems, workName, worksRange } from "./lib/schedule.js";
 
@@ -228,6 +228,8 @@ export const TOOLS = [
         throw new ToolInputError(`区画「${args.block}」はありません。区画の名前: ${part.blocks.map((block) => block.name).join("、") || "（なし）"}`);
       }
       const problems = planProblems({ ...part, workTypes: data.workTypes, crops: data.crops });
+      // 収穫完了予定日は、区画の収穫の計画（その日に区画にある作付の分）も合わせて見る（画面と同じ。logs.js の withBlockShares）
+      const blockShared = withBlockShares({ ...part, logs: data.workLogs || [] }).works.filter((work) => work.from_block);
       const where = (problem) => {
         if (problem.block_id) {
           return part.blocks.find((block) => block.id === problem.block_id)?.name || "";
@@ -271,7 +273,7 @@ export const TOOLS = [
                       ...(numbers.seedlings !== null ? { seedlings: numbers.seedlings } : {}),
                       ...(numbers.nitrogenKg !== null ? { nitrogen_kg: round(numbers.nitrogenKg, 2) } : {}),
                       ...(numbers.fertilizerKg !== null ? { fertilizer: fertilizer.name, fertilizer_kg: round(numbers.fertilizerKg, 2) } : {}),
-                      harvest_end: harvestEnd(works),
+                      harvest_end: harvestEnd([...works, ...blockShared.filter((work) => work.planting_id === planting.id)]),
                       works: works.map((work) => workLine(part, work)),
                     };
                   }),
@@ -545,7 +547,8 @@ export const TOOLS = [
         throw new ToolInputError("この圃場には、実際に使うプランが決まっていません。防除の記録は、実際に使うプランの作付につなぎます。");
       }
       const part = scope(data, active);
-      const logs = data.workLogs;
+      // 区画を対象にした防除の記録も、その日に区画にある作付の記録として数える（画面と同じ。logs.js の withBlockShares）
+      const logs = withBlockShares({ blocks: part.blocks, beds: part.beds, plantings: part.plantings, works: part.works, logs: data.workLogs || [] }).logs;
       const rac = racOf(all);
       const spraysOf = (planting) =>
         logs.filter((log) => (log.inputs || []).some((input) => input.kind === "pesticide") && (log.targets || []).some((target) => target.planting_id === planting.id));

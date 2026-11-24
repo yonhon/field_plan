@@ -3,7 +3,7 @@
 import { WORK_COLORS, WORK_ITEMS, addDays, diffDays, isManagement, localToday, workName } from "./schedule.js";
 import { confirmAction, confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
-import { SPEC_FIELDS, formatAmount, isBlockTarget, logEnd, perHoleScale, perHoleUnit, productAmount, specText, splitByArea, targetChoices, targetSummary, workActuals } from "./logs.js";
+import { SPEC_FIELDS, blockPlantings, formatAmount, isBlockTarget, logEnd, perHoleScale, perHoleUnit, productAmount, specText, splitByArea, targetChoices, targetSummary, withBlockShares, workActuals } from "./logs.js";
 import * as famic from "./pesticide.js";
 import { draw } from "./draw.js";
 import { holesOf } from "./crops.js";
@@ -1089,7 +1089,7 @@ function spraySection(items) {
   let standards = "";
   if (famic.famicEnabled()) {
     const list = sprayGroups();
-    const boxes = famic.standardsHtml(draft.inputs, list, state().logs || [], draft.id);
+    const boxes = famic.standardsHtml(draft.inputs, list, sharedData().logs, draft.id);
     const notes = draft.inputs
       .filter((input) => input.kind === "pesticide" && input._dilutionBy)
       .map((input) => `<p class="muted">${famic.nameHtml(input.name, input.reg_no)}の希釈倍率は、いちばん厳しい${escapeHtml(input._dilutionBy)}の基準（${input._dilutionValue} 倍）に合わせました。直せます。</p>`)
@@ -1137,13 +1137,25 @@ function sprayGroups(items = pickedItems()) {
       group.plantingIds.push(item.planting_id);
     }
   }
+  // 区画で選んだときは、その日に区画にある畝の作付の使用回数と収穫の開始で照らす（logs.js の blockPlantings。
+  // 区画を対象にした記録は、その作付の記録として数える）
+  if (draft.mode === "blocks" && draft.date) {
+    const plantingsOn = blockPlantings({ ...data, logs: state().logs || [] });
+    for (const group of groups.values()) {
+      group.plantingIds = plantingsOn(group.key, draft.date).map((item) => item.planting.id);
+    }
+  }
   return [...groups.values()];
 }
 
-// 作付の収穫が始まる日。収穫の計画の開始日か、収穫の記録のいちばん早い日（早いほう）
-function harvestStartOf(plantingId) {
-  const planned = data.works.filter((work) => work.planting_id === plantingId && work.work_type === "harvest" && !work.cancelled_on && work.plan_start).map((work) => work.plan_start);
-  const recorded = (state().logs || []).filter((log) => log.work_type === "harvest" && log.targets.some((target) => target.planting_id === plantingId)).map((log) => log.date);
+// 作付ごとの計算に使う記録と作業。区画の作業と区画を対象にした記録も、その日に区画にある作付のものとして入れる（logs.js の withBlockShares）
+const sharedData = () => withBlockShares({ ...data, logs: state().logs || [] });
+
+// 作付の収穫が始まる日。収穫の計画の開始日か、収穫の記録のいちばん早い日（早いほう）。
+// shared は sharedData() の返り値（区画の収穫の計画と、区画を対象にした収穫の記録も、その作付のものとして見る）
+function harvestStartOf(plantingId, shared) {
+  const planned = shared.works.filter((work) => work.planting_id === plantingId && work.work_type === "harvest" && !work.cancelled_on && work.plan_start).map((work) => work.plan_start);
+  const recorded = shared.logs.filter((log) => log.work_type === "harvest" && (log.targets || []).some((target) => target.planting_id === plantingId)).map((log) => log.date);
   return [...planned, ...recorded].sort()[0] || null;
 }
 
@@ -1247,14 +1259,15 @@ function updateTotals() {
         : ""
     );
   }
+  const shared = sharedData();
   const list = famic.warnings({
     inputs: draft.inputs.map((input) => ({ ...input, dilution: num(input.dilution) })),
     groups,
     date: draft.date,
     sprayOf: (key) => num(draft.spray[key]),
-    logs: state().logs || [],
+    logs: shared.logs,
     excludeLogId: draft.id,
-    harvestStartOf,
+    harvestStartOf: (id) => harvestStartOf(id, shared),
   });
   const box = dialog.querySelector("#logWarnings");
   if (box) {

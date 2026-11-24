@@ -97,8 +97,11 @@ export function resolvePrice(planting, crop, estimate = null) {
   return null;
 }
 
-// 収穫の期間の日（ISO の日付）の並び。終わりが始まりより前なら、始まりの 1 日
+// 収穫の期間の日（ISO の日付）の並び。window.days（harvestWindow が作る）があればそれ。終わりが始まりより前なら、始まりの 1 日
 export function daysOf(window) {
+  if (window.days) {
+    return window.days;
+  }
   const days = [];
   for (let day = window.start; day <= window.end || !days.length; day = addDays(day, 1)) {
     days.push(day);
@@ -202,15 +205,21 @@ export function harvestActual(plantingId, logs) {
   return result;
 }
 
-// 収穫の計画の期間。取りやめていない収穫の作業の、いちばん早い始まりから、いちばん遅い終わりまで。なければ null
+// 収穫の計画の期間。取りやめていない収穫の作業すべて（作付の作業と、区画の作業の写し。logs.js の withBlockShares）の日を合わせる。
+// start はいちばん早い始まり、end はいちばん遅い終わり、days は収穫の作業のある日（重なった日は 1 日。作業の間の日は入れない）。なければ null
 export function harvestWindow(works) {
   const harvests = works.filter((work) => work.work_type === "harvest" && !work.cancelled_on && work.plan_start);
   if (!harvests.length) {
     return null;
   }
-  const starts = harvests.map((work) => work.plan_start).sort();
-  const ends = harvests.map((work) => work.plan_end || work.plan_start).sort();
-  return { start: starts[0], end: ends.at(-1) };
+  const days = new Set();
+  for (const work of harvests) {
+    for (const day of daysOf({ start: work.plan_start, end: work.plan_end || work.plan_start })) {
+      days.add(day);
+    }
+  }
+  const sorted = [...days].sort();
+  return { start: sorted[0], end: sorted.at(-1), days: sorted };
 }
 
 // ---- 市況からの単価の推定 ----

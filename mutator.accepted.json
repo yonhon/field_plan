@@ -19,6 +19,10 @@
     "reason": "等価: 文字がないときの予備 \"\" を変えても、使用量の形に合わないので null のまま",
     "where": "app/logs.js:567:28 \"\" -> \"Stryker was here!\""
   },
+  "1au4kusn8s": {
+    "reason": "対象のない記録の既定値の空の並びを、文字を 1 つ入れた並びにしても、文字には planting_id がないので、結果は同じ",
+    "where": "app/logs.js:114:36 [] -> [\"Stryker was here!\"]"
+  },
   "1d0s72jmbf0": {
     "reason": "等価: 使った量が 0 以下なら、基準の上限（0 以上）を超えることはなく、どちらでも指摘は出ない",
     "where": "app/logs.js:617:54 used.value <= 0 -> false"
@@ -39,6 +43,10 @@
     "reason": "等価: Number(undefined) は NaN なので、続く !Number.isFinite で null を返す",
     "where": "app/logs.js:555:26 amount === undefined -> false"
   },
+  "1m91u35y97h": {
+    "reason": "対象のない記録の既定値の空の並びを、文字を 1 つ入れた並びにしても、文字には planting_id がないので、結果は同じ",
+    "where": "app/logs.js:51:45 [] -> [\"Stryker was here!\"]"
+  },
   "1mnt2hget3g": {
     "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
     "where": "app/logs.js:371:53 [] -> [\"Stryker was here!\"]"
@@ -51,9 +59,17 @@
     "reason": "等価: 使った量が 0 以下なら、基準の上限（0 以上）を超えることはなく、どちらでも指摘は出ない",
     "where": "app/logs.js:617:54 used.value <= 0 -> used.value < 0"
   },
+  "1skplt8oxrg": {
+    "reason": "作付の期間と、区画と日付ごとの結果の写し（キャッシュ）。毎回求め直しても、同じ値になる（速さだけが変わる）",
+    "where": "app/logs.js:70:25 { return cache.get(key); } -> {}"
+  },
   "1tvn8y8goa0": {
     "reason": "等価: usageTable の並び順（ingredientOrder）と上限・条件の入れ物は、pesticideCounts が数えた成分の名前でしか読まない。空の名前や余分な名前、重なった名前が入っても、表には出ない。条件の文の予備 \"\" を変えても \"(\" を含まない",
     "where": "app/logs.js:445:13 name -> true"
+  },
+  "1tzizcqjzwa": {
+    "reason": "始まる日がその日と同じ作付は、その日に畝にある作付として先に見つかるので、次の作付の > と >= で結果は変わらない",
+    "where": "app/logs.js:87:56 item.start > date -> item.start >= date"
   },
   "1up2fpdrlxf": {
     "reason": "等価: 使用基準の行（_uses）を読むのは、登録番号を選んだ農薬だけ（pick、ensureUses。unpick で消す）。農薬でないものや登録番号のないものが _uses を持つことはない",
@@ -131,6 +147,10 @@
     "reason": "等価: 計算した値が、上限・下限から 1e-9 ずらした値とちょうど同じときだけ違う。浮動小数の計算でその値にはならない。上限・下限そのものはテストしている",
     "where": "app/logs.js:514:45 per10a > row.liquid_max + 1e-9 -> per10a >= row.liquid_max + 1e-9"
   },
+  "af8plk8ft3": {
+    "reason": "記録の既定値の空の並びを、文字を 1 つ入れた並びにしても、文字には targets がないので、どの作付の記録とも見なさず、結果は同じ",
+    "where": "app/logs.js:48:54 [] -> [\"Stryker was here!\"]"
+  },
   "blfyp4s6s5": {
     "reason": "等価: 同じ組み合わせを Map に入れ直しても、中身も並び順も変わらない",
     "where": "app/pesticide.js:282:9 !seen.has(key) -> true"
@@ -138,6 +158,10 @@
   "c3pe37t1ro": {
     "reason": "等価: 引数の既定値。呼ぶ所（fillChoices、previousChoice）は cropName と groupName を両方渡すので、既定値は使われない",
     "where": "app/logs.js:648:74 \"\" -> \"Stryker was here!\""
+  },
+  "dbt93bb7pe": {
+    "reason": "作付の期間と、区画と日付ごとの結果の写し（キャッシュ）。毎回求め直しても、同じ値になる（速さだけが変わる）",
+    "where": "app/logs.js:70:9 cache.has(key) -> false"
   },
   "dkrnre0m4g": {
     "reason": "等価: pesticideCounts が数えた登録番号は、同じ作付・同じ条件（農薬で登録番号がある）の繰り返しで、必ず productRows にも入る。?. と予備の [] は使われない",
@@ -187,8 +211,24 @@
     "reason": "等価: 条件の文の予備 \"\" を変えても \"(\" を含まないので、条件の指摘は出ない",
     "where": "app/logs.js:531:31 \"\" -> \"Stryker was here!\""
   },
+  "rwlrg9s3e9": {
+    "reason": "作付の期間と、区画と日付ごとの結果の写し（キャッシュ）。毎回求め直しても、同じ値になる（速さだけが変わる）",
+    "where": "app/logs.js:96:5 cache.set(key, chosen); -> ;"
+  },
+  "t5z0ni7hpj": {
+    "reason": "作付の期間と、区画と日付ごとの結果の写し（キャッシュ）。毎回求め直しても、同じ値になる（速さだけが変わる）",
+    "where": "app/logs.js:62:9 !spans.has(planting.id) -> true"
+  },
+  "ulkpcodwfs": {
+    "reason": "あとでできる畝を探すのは、その日にある畝がないときだけ。始まる日がその日と同じ畝は、その日にある畝に入るので、> と >= で結果は変わらない",
+    "where": "app/logs.js:79:54 bed.start_date > date -> bed.start_date >= date"
+  },
   "v703v58t9m": {
     "reason": "等価: log.targets がないときの予備 [] を文字の並びに変えても、文字には planting_id がないので、すぐ後の filter で除かれる",
     "where": "app/revenue.js:83:35 [] -> [\"Stryker was here!\"]"
+  },
+  "v7d9tbmjqz": {
+    "reason": "記録の既定値の空の並びを、文字を 1 つ入れた並びにしても、文字には targets がないので、どの作付の記録とも見なさず、結果は同じ",
+    "where": "app/logs.js:59:73 [] -> [\"Stryker was here!\"]"
   }
 }
