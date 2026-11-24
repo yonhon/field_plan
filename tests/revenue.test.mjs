@@ -2,6 +2,7 @@
 // 数字は、すべて説明のために作った値
 import { test } from "./test-api.mjs";
 import assert from "node:assert/strict";
+import { bedAreas } from "../app/logs.js";
 import {
   MARKET_MIN_DAYS,
   daysOf,
@@ -11,6 +12,7 @@ import {
   harvestActual,
   harvestWindow,
   marketEstimate,
+  plantingBedArea,
   rankMarketItems,
   resolvePrice,
   resolveRate,
@@ -367,4 +369,31 @@ test("市況の品目名の候補: ひらがなとカタカナをそろえ、同
     rankMarketItems("ネギ", [{ item_name: "あさつきねぎ" }, { item_name: "ねぎ" }]).map((item) => item.item_name),
     ["ねぎ", "あさつきねぎ"]
   );
+});
+
+test("作付の面積: 作付が始まる日に区画にある畝で分ける。その日に畝がなければ、畝ができる日の畝で分ける", () => {
+  // 10 m 四方の区画に、幅 1 m・長さ 10 m の畝を 3 本（x = 2、5、8）
+  const block = { id: "k", shape: [[0, 0], [10, 0], [10, 10], [0, 10]] };
+  const strip = (x) => [[x, 0], [x + 1, 0], [x + 1, 10], [x, 10]];
+  const a = { id: "a", block_id: "k", shape: strip(2), start_date: null, removed_on: "2026-05-01" };
+  // b は 1 月からある。b ができた日（a もある）と、6 月（a をなくしたあと）では、並びが違う
+  const b = { id: "b", block_id: "k", shape: strip(5), start_date: "2026-01-01", removed_on: null };
+  const c = { id: "c", block_id: "k", shape: strip(8), start_date: "2027-01-01", removed_on: null };
+  const beds = [a, b, c];
+  const area = (list, bed) => bedAreas(block, list).get(bed.id);
+  // 4 月は a と b がある（c はまだない）
+  assert.equal(plantingBedArea(block, beds, b, "2026-04-01"), area([a, b], b));
+  // 6 月は a をなくしたあとで、b だけ
+  assert.equal(plantingBedArea(block, beds, b, "2026-06-01"), area([b], b));
+  // 2027 年は b と c
+  assert.equal(plantingBedArea(block, beds, c, "2027-02-01"), area([b, c], c));
+  // b の作付が 2027 年に始まるなら、b ができた日（a と b）ではなく、その日（b と c）で分ける
+  assert.equal(plantingBedArea(block, beds, b, "2027-02-01"), area([b, c], b));
+  // c の作付が c のできる前の日付から始まるなら、c ができる日（b と c）で分ける
+  assert.equal(plantingBedArea(block, beds, c, "2026-06-01"), area([b, c], c));
+  // なくした畝の作付が、なくしたあとの日付なら、その畝だけで求める
+  assert.equal(plantingBedArea(block, beds, a, "2026-06-01"), area([a], a));
+  // 分け方で面積が変わる（今日の畝だけで求めると、区画の端までの隙間を全部持つ）
+  assert.ok(area([b], b) > area([b, c], b));
+  assert.ok(plantingBedArea(block, beds, b, "2026-04-01") < plantingBedArea(block, beds, b, "2026-06-01"));
 });

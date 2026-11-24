@@ -5,7 +5,7 @@ import { plantingNumbers, plantingSpec, summarize } from "./crops.js";
 import { notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { openLogEditor, openPlanEditor, revertWorks, uncancelWork } from "./log-view.js";
-import { bedAreas, compressedAxis, cropDiffText, dayGap, firstHarvestDay, logEnd, shiftAfterActual, specText, usageTable } from "./logs.js";
+import { compressedAxis, cropDiffText, dayGap, firstHarvestDay, logEnd, shiftAfterActual, specText, usageTable } from "./logs.js";
 import { NOTICE_URL, famicEnabled, ingredientIconsHtml, inputHtml, nameHtml } from "./pesticide.js";
 import { WORK_COLORS, addDays, diffDays, existsOn, harvestEnd, isManagement, localToday, workName } from "./schedule.js";
 import { polygonArea } from "./geometry.js";
@@ -29,7 +29,7 @@ import {
 import { draw } from "./draw.js";
 import { openDiaryTarget } from "./diary-view.js";
 import { escapeHtml } from "./html.js";
-import { actualSales, formatKg, formatYen, plantingRevenue, priceSource, priceTitle, timeAllocation, typesText } from "./revenue-view.js";
+import { actualSales, formatKg, formatYen, plantingAreaOf, plantingRevenue, priceSource, priceTitle, timeAllocation, typesText } from "./revenue-view.js";
 import { formatMinutes } from "./work-time.js";
 
 const $ = (id) => document.getElementById(id);
@@ -680,9 +680,8 @@ function headHtml(c, active, rootId = "plantingBody") {
     title = `${c.block.name} 畝${c.bed.seq} ${c.planting.crop_name || ""}${many ? `（作付 ${c.planting.seq}）` : ""}`;
     const crop = state().crops.find((item) => item.id === c.planting.crop_id);
     const mulch = c.planting.mulch ?? crop?.mulch;
-    const today = localToday();
-    const live = state().beds.filter((bed) => bed.block_id === c.block.id && existsOn(bed.start_date, bed.removed_on, today));
-    const area = bedAreas(c.block, live.some((bed) => bed.id === c.bed.id) ? live : [c.bed]).get(c.bed.id);
+    // 畝＋通路の面積。作付が始まる日に区画にある畝で分ける（収量の見込みと同じ。revenue-view.js の plantingAreaOf）
+    const area = plantingAreaOf(c.planting);
     const end = harvestEnd(c.ownWorks);
     // 苗数は、「区画と畝」の図と同じく、畝の寸法と株間・条数から計算する。株間・条数は、定植・播種の実績があればその値
     // （品目を登録していない作付には出さない）

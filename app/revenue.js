@@ -4,7 +4,8 @@
 //   出荷量 = 収量 × 出荷率（空なら 100 %）
 //   売上   = 出荷量を収穫の期間の日に均等に分け、日ごとの単価（作付 → 品目 → その日の市況からの推定の順）を掛けて足す。
 //            収穫の計画のない作付には出さない
-import { addDays } from "./schedule.js";
+import { bedAreas } from "./logs.js";
+import { addDays, existsOn } from "./schedule.js";
 
 const TEN_ARES_SQM = 1000;
 
@@ -32,6 +33,21 @@ export function resolveYield(planting, crop, { seedlings = null, areaM2 = null }
     }
   }
   return null;
+}
+
+// 作付の畝＋通路の面積（㎡）。作付が始まる日（date）に区画にある畝で分ける（logs.js の bedAreas）。
+// その日に畝がまだない（またはもうない）ときは、畝ができる日（start_date）にある畝で分ける。それでも決まらなければ、その畝だけで求める。
+// beds は同じ区画のすべての畝。今日の畝で分けると、これから作る畝やなくした畝の作付が、区画の端までの隙間を全部持って大きく出た（2026-11-24）
+export function plantingBedArea(block, beds, bed, date) {
+  const on = (day) => beds.filter((item) => existsOn(item.start_date, item.removed_on, day));
+  let live = on(date);
+  if (!live.some((item) => item.id === bed.id) && bed.start_date) {
+    live = on(bed.start_date);
+  }
+  if (!live.some((item) => item.id === bed.id)) {
+    live = [bed];
+  }
+  return bedAreas(block, live).get(bed.id) ?? null;
 }
 
 // 作付の見込みの記録（field.planting_forecasts の行）に持つ値

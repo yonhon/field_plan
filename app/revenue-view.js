@@ -13,7 +13,7 @@ import { escapeHtml } from "./html.js";
 import { polygonArea } from "./geometry.js";
 import { cropLabel, plantingNumbers, plantingSpec } from "./crops.js";
 import { bedAreas, logEnd, plantingStart } from "./logs.js";
-import { MARKET_WIDEN_DAYS, effectiveForecast, forecast, forecastValues, harvestActual, harvestWindow, marketEstimate } from "./revenue.js";
+import { MARKET_WIDEN_DAYS, effectiveForecast, forecast, forecastValues, harvestActual, harvestWindow, marketEstimate, plantingBedArea } from "./revenue.js";
 import { existsOn, localToday } from "./schedule.js";
 import { COMMON_KINDS, SESSION_KINDS, allocateMinutes, formatMinutes, splitMinutes } from "./work-time.js";
 
@@ -283,10 +283,9 @@ export async function loadMarket() {
 export const marketItems = () => (ctx ? state().market?.items || null : null);
 
 // 何件もの作付の見込みを出すときに、作付ごとの作業と記録、畝の面積を 1 回だけ集める（作付ごとに全体をなめ直さない）。
-// 面積は、作付の詳細の頭と同じく、今日ある区画の畝で分けた畝＋通路の面積
+// 面積は、作付が始まる日に区画にある畝で分けた畝＋通路の面積（revenue.js の plantingBedArea）
 function revenueIndex() {
   const s = state();
-  const today = localToday();
   const push = (map, key, item) => (map.has(key) ? map.get(key).push(item) : map.set(key, [item]));
   const works = new Map();
   for (const work of s.works) {
@@ -306,22 +305,29 @@ function revenueIndex() {
   }
   const beds = new Map(s.beds.map((bed) => [bed.id, bed]));
   const blocks = new Map(s.blocks.map((block) => [block.id, block]));
-  const areas = new Map();
-  for (const block of s.blocks) {
-    const live = s.beds.filter((bed) => bed.block_id === block.id && existsOn(bed.start_date, bed.removed_on, today));
-    bedAreas(block, live).forEach((area, id) => areas.set(id, area));
+  const blockBeds = new Map();
+  for (const bed of s.beds) {
+    push(blockBeds, bed.block_id, bed);
   }
-  return { works, logs, forecasts, beds, blocks, areas, crops: new Map(s.crops.map((crop) => [crop.id, crop])) };
+  return { works, logs, forecasts, beds, blocks, blockBeds, crops: new Map(s.crops.map((crop) => [crop.id, crop])) };
 }
 
 // 作付の畝＋通路の面積（㎡）。今日ない畝は、その畝だけで求める
-function plantingArea(bed, index) {
+// 作付が始まる日（計画と実績から。なければ今日）に区画にある畝で分ける
+function plantingArea(planting, bed, index) {
   const block = bed && index.blocks.get(bed.block_id);
   if (!block) {
     return null;
   }
-  return index.areas.get(bed.id) ?? bedAreas(block, [bed]).get(bed.id) ?? null;
+  const start = plantingStart(planting, index.works.get(planting.id) || [], index.logs.get(planting.id) || []) || localToday();
+  return plantingBedArea(block, index.blockBeds.get(block.id) || [bed], bed, start);
 }
+
+// 作付の畝＋通路の面積（㎡）。作付の詳細の頭に出す（見込みと同じ求め方）
+export const plantingAreaOf = (planting) => {
+  const index = revenueIndex();
+  return plantingArea(planting, index.beds.get(planting.bed_id), index);
+};
 
 // 1 つの作付の収量と売上の見込み（revenue.js の forecast）と、収穫量の実績。
 // 実績は、実際に使うプランを開いているときだけ（記録は実際に使うプランの作付につないでいる）。それ以外は actual が null。
@@ -333,7 +339,7 @@ export function plantingRevenue(planting, index = revenueIndex()) {
   const crop = index.crops.get(planting.crop_id) || null;
   const logs = index.logs.get(planting.id) || [];
   const own = effectiveForecast(index.forecasts.get(planting.id) || []);
-  const areaM2 = plantingArea(bed, index);
+  const areaM2 = plantingArea(planting, bed, index);
   const seedlings = bed && crop ? plantingNumbers(bed.shape, crop, null, plantingSpec(planting, crop, logs)).seedlings : null;
   const window = harvestWindow(index.works.get(planting.id) || []);
   const marketName = (crop?.market_item_name || "").trim();

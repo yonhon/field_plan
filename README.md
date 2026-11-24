@@ -98,6 +98,7 @@ Supabase のプロジェクトは共用で（プロジェクト参照 ID: `byhth
 | `scripts/fetch-news.mjs` | 県のページ（病害虫防除技術センターの「新着更新情報」、農業研究センターの「お知らせ」）を読み、新しい記事を DB の `field.news` に足す。読み取りは `scripts/news.mjs`。`.github/workflows/news.yml` が 1 日 2 回（日本時間の 7 時と 16 時ごろ）動かす。初めて読むときは、載っている記事を確認済みとして入れる |
 | `scripts/import_jma_csv.py` | 気象庁の過去の気象データ（日別の CSV）を DB に入れる。いまは `fetch-weather.mjs` に日付を渡せば日別の表から入れ直せるので、ふだんは使わない |
 | `scripts/check_field_sql.py` | `sql/field.sql` を、手元の空の DB で流して確かめる（12 章） |
+| `scripts/save_logs.py` | 作業の記録（実績）を、本番の DB にまとめて入れる。画面と同じ `field.save_work_log` を、持ち主として操作の ID を付けて呼び、変更の履歴にも 1 行残す。`--dry-run` で、保存してから取り消して形を確かめる |
 | `scripts/sync-mcp-lib.mjs` | 画面の計算の部品を、MCP サーバーのフォルダーへ写す（テストと配備の前に自動で呼ばれる） |
 | `tests/` | 図形、日程、苗数と施肥量の計算、作業の実績の計算、元に戻すと、MCP サーバーのテスト |
 | `tests/e2e/` | 主な操作と、DB からの読み直しを、Chrome で通して動かすテスト |
