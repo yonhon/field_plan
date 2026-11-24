@@ -120,6 +120,27 @@ export function withBlockShares(data) {
   return { works: [...works, ...blockWorks], logs: sharedLogs };
 }
 
+// 畝を最初からなかったことにして消したあと、記録の畝の対象の面積（畝＋通路）を、記録の日に区画にある畝で求め直す。
+// beds は消したあとの畝。消した畝の隣の畝は、その分だけ広くなる（記録の面積の合計が、区画の畝の面積とそろう）。
+// 区画の対象（畝のない対象）と、beds にない畝の対象は、そのまま。面積は画面の保存と同じく小数 2 桁
+export function reareaTargets(log, blocks, beds) {
+  const byBlock = new Map();
+  const areaOf = (bed) => {
+    if (!byBlock.has(bed.block_id)) {
+      const block = blocks.find((item) => item.id === bed.block_id);
+      const live = beds.filter((item) => item.block_id === bed.block_id && existsOn(item.start_date, item.removed_on, log.date));
+      byBlock.set(bed.block_id, block ? bedAreas(block, live) : new Map());
+    }
+    return byBlock.get(bed.block_id).get(bed.id);
+  };
+  const targets = (log.targets || []).map((target) => {
+    const bed = target.bed_id && beds.find((item) => item.id === target.bed_id);
+    const area = bed ? areaOf(bed) : undefined;
+    return area === undefined ? target : { ...target, area_m2: Math.round(area * 100) / 100 };
+  });
+  return { ...log, targets };
+}
+
 // その日に畝にある作付。その日までに始まった作付のうち、いちばん新しいもの。まだどれも始まっていなければ、次に来る作付。
 // 計画に収穫が入っていない作付（計画を作りかけの作付）も、次の作付が始まるまでは、その畝の作付として扱う
 export function plantingOnDate(plantings, works, date, logs = []) {

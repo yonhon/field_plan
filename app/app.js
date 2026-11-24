@@ -50,7 +50,7 @@ import { showUndoPad } from "./undo-pad.js";
 import { decorateIcons } from "./icons.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
-import { plantingOnDate, withBlockShares } from "./logs.js";
+import { plantingOnDate, reareaTargets, withBlockShares } from "./logs.js";
 import { initProcessEditor } from "./process-editor.js";
 import { initForecastEditor } from "./forecast-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail, renderWholeHead } from "./planting-view.js";
@@ -2228,7 +2228,8 @@ async function deleteSelectedShape() {
   const logs = logsWithout(blocks.map((block) => block.id), beds.map((bed) => bed.id));
   const logNote = logs.count
     ? `\n作業の記録 ${logs.count} 件から、${kind === "bed" ? "この畝" : "消える区画と畝"}を対象から外します。` +
-      (logs.emptied.length ? `そのうち、ほかに対象のない記録 ${logs.emptied.length} 件は、記録ごと消えます。` : "")
+      (logs.emptied.length ? `そのうち、ほかに対象のない記録 ${logs.emptied.length} 件は、記録ごと消えます。` : "") +
+      (kind === "bed" && logs.changed.length ? "残る記録の畝の面積は、この畝がないものとして求め直します。" : "")
     : "";
   // 確かめているあいだに、選んだ図形が変わったり消えたりしていたら、何も消さない
   if (!(await confirmDelete(message + logNote, shapeName(id))) || state.selected !== id || !findShape(id)) {
@@ -2241,6 +2242,12 @@ async function deleteSelectedShape() {
   });
   // 確かめているあいだに記録が変わっていることがあるので、数え直してから外す
   const dropped = logsWithout(blocks.map((block) => block.id), beds.map((bed) => bed.id));
+  // 畝を最初からなかったことにするので、残る記録の畝の面積を、この畝のない並びで求め直す（隣の畝が広くなる）。
+  // 区画や区域を消すときは、その区画の対象ごと外れるので、ほかの区画の面積は変わらない
+  if (kind === "bed") {
+    const rest = state.beds.filter((bed) => bed.id !== item.id);
+    dropped.changed = dropped.changed.map((log) => reareaTargets(log, state.blocks, rest));
+  }
   const emptied = new Set(dropped.emptied.map((log) => log.id));
   const changed = new Map(dropped.changed.map((log) => [log.id, log]));
   state.logs = (state.logs || []).filter((log) => !emptied.has(log.id)).map((log) => changed.get(log.id) || log);

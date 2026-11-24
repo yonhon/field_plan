@@ -27,6 +27,7 @@ import {
   specDiff,
   SPEC_FIELDS,
   blockPlantings,
+  reareaTargets,
   specText,
   withBlockShares,
   layoutBars,
@@ -225,6 +226,39 @@ test("区画の作業・記録を分ける作付: ほかの区画、畝の並び
   // 日付がなければ、ずっとある畝の日付のない作付があっても空
   assert.deepEqual(blockPlantings({ ...flat, works: [] })("k1", null), []);
   assert.equal(blockPlantings({ ...flat, works: [] })("k1", "2026-01-01").length, 1);
+});
+
+test("畝を最初からなかったことにしたあと、記録の畝の面積を、記録の日に区画にある畝で求め直す", () => {
+  // 畝2 を消したあと。3/15 は畝1 と畝3 で区画を分ける（畝1: 端まで 1.0 m と、畝3 までの隙間 1.9 m の半分。畝3: 半分と端まで 1.7 m）
+  const rest = beds.filter((bed) => bed.id !== "b2");
+  const log = {
+    id: "L",
+    date: "2026-03-15",
+    targets: [
+      { bed_id: "b1", planting_id: "p1", block_id: "k1", area_m2: 16 },
+      { bed_id: "b3", planting_id: "p4", block_id: "k1", area_m2: 21.6 },
+      { bed_id: null, planting_id: null, block_id: "k1", area_m2: 48 }, // 区画の対象は、そのまま
+      { bed_id: "gone", planting_id: null, block_id: "k1", area_m2: 5 }, // 畝の並びにない畝も、そのまま
+    ],
+  };
+  const result = reareaTargets(log, [block], rest);
+  assert.deepEqual(result.targets.map((target) => target.area_m2), [21.2, 26.8, 48, 5]);
+  assert.equal(result.targets[2], log.targets[2]);
+  assert.equal(log.targets[0].area_m2, 16); // 元の記録は変えない
+  // 6/1 は畝3 がもうない（5/1 でなくした）。畝1 だけで区画を分ける
+  assert.deepEqual(reareaTargets({ ...log, date: "2026-06-01", targets: log.targets.slice(0, 1) }, [block], rest).targets[0].area_m2, 48);
+  // 小数 2 桁に丸める（区画の幅を 6.001 m にすると、畝1 は 21.2032…）
+  const wide = { ...block, shape: rect(0, 0, 10, 6.001) };
+  assert.equal(reareaTargets(log, [wide], rest).targets[0].area_m2, 21.2);
+  assert.equal(reareaTargets(log, [wide], rest).targets[1].area_m2, 26.81);
+  // ほかの区画の畝は、その区画の形と、その区画の畝だけで求める（区画B に畝が 1 本なら、区画の幅 6 m × 長さ 8 m）
+  const k2 = { id: "k2", name: "区画B", shape: rect(0, 10, 10, 16), start_date: null, end_date: null };
+  const c2 = { id: "c2", block_id: "k2", seq: 1, shape: rect(1, 13, 9, 13.7), start_date: null, removed_on: null };
+  const both = reareaTargets({ ...log, targets: [log.targets[0], { bed_id: "c2", block_id: "k2", area_m2: 1 }] }, [block, k2], [...rest, c2]);
+  assert.deepEqual(both.targets.map((target) => target.area_m2), [21.2, 48]);
+  // 区画が見つからない畝と、対象のない記録
+  assert.deepEqual(reareaTargets(log, [], rest).targets.map((target) => target.area_m2), [16, 21.6, 48, 5]);
+  assert.deepEqual(reareaTargets({ id: "E", date: "2026-03-15" }, [block], rest), { id: "E", date: "2026-03-15", targets: [] });
 });
 
 test("その日の作付は、その日までに始まった作付のうちいちばん新しいもの。始まった日は、記録があれば記録の日", () => {

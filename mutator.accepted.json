@@ -75,6 +75,10 @@
     "reason": "等価: pesticideCounts が数えた登録番号は、同じ作付・同じ条件（農薬で登録番号がある）の繰り返しで、必ず productRows にも入る。?. と予備の [] は使われない",
     "where": "app/logs.js:470:32 ?. -> ."
   },
+  "1xydar3wuow": {
+    "reason": "区画ごとの面積の写し（キャッシュ）。毎回求め直しても、同じ値になる（速さだけが変わる）",
+    "where": "app/logs.js:129:9 !byBlock.has(bed.block_id) -> true"
+  },
   "1z2ygeyz3mv": {
     "reason": "等価: 一覧がないときの予備の || []。文字列 1 つの配列に変えても、その要素は読む欄（planting_id、kind、crop、crop_name、group）を持たないので、どの確かめでも飛ばされる",
     "where": "app/logs.js:376:39 [] -> [\"Stryker was here!\"]"

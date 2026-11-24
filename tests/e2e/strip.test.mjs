@@ -106,6 +106,7 @@ test("記録のある畝を削除: 記録の対象から外し、ほかに対象
   await page.click("#stripDeleteBtn");
   await page.waitFor(`document.querySelector("dialog.notice")?.textContent.includes("作業の記録 2 件")`, "記録の件数を知らせる");
   assert.match(await page.run(`document.querySelector("dialog.notice").textContent`), /ほかに対象のない記録 1 件は、記録ごと消えます/);
+  assert.match(await page.run(`document.querySelector("dialog.notice").textContent`), /残る記録の畝の面積は、この畝がないものとして求め直します/);
   await page.click(CONFIRM);
   await waitBeds("bed2");
   const logsSaved = `JSON.parse(localStorage.getItem("field_plan_local")).workLogs`;
@@ -113,6 +114,10 @@ test("記録のある畝を削除: 記録の対象から外し、ほかに対象
   const [left] = (await page.saved()).workLogs;
   assert.equal(left.id, "both");
   assert.deepEqual(left.targets.map((item) => item.bed_id), ["bed2"]);
+  // 残った畝 2 の面積は、畝 1 のない並びで求め直す（入れておいた 10 ㎡ ではなくなり、区画の畝 1 本ぶんの面積になる）
+  const expected = await page.run(`import("./logs.js").then(({ bedAreas }) => Math.round(bedAreas(${JSON.stringify(data.blocks[0])}, ${JSON.stringify(data.beds.filter((bed) => bed.id === "bed2"))}).get("bed2") * 100) / 100)`);
+  assert.ok(expected > 10);
+  assert.equal(left.targets[0].area_m2, expected);
 
   await page.waitFor(`!document.getElementById("undoBtn").disabled`, "元に戻すが使える");
   await page.click("#undoBtn");
@@ -120,6 +125,7 @@ test("記録のある畝を削除: 記録の対象から外し、ほかに対象
   const saved = await page.saved();
   assert.equal(saved.beds.length, 2);
   assert.deepEqual(saved.workLogs.find((item) => item.id === "both").targets.map((item) => item.bed_id).sort(), ["bed1", "bed2"]);
+  assert.deepEqual(saved.workLogs.find((item) => item.id === "both").targets.map((item) => item.area_m2), [10, 10]);
   assert.deepEqual(saved.workLogs.find((item) => item.id === "only1").targets.map((item) => item.bed_id), ["bed1"]);
   assert.deepEqual(page.errors, []);
 });
