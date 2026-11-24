@@ -118,13 +118,16 @@ test("圃場とプラン: 読んでいない古い記録しかないプランに
 });
 
 test("履歴: 起動は履歴の読み込みを待たず、読んでいるあいだの変更も履歴に残る", options, async () => {
-  // 履歴の読み込みを 1.5 秒遅らせる。画面は、その前に出て操作できる
-  await page.loadApp(seed(), { field_plan_local_test: JSON.stringify({ readDelay: 1500 }) });
+  // 履歴の読み込みを、放すまで止めておく。画面は、その前に出て操作できる
+  // （前は 1.5 秒遅らせていたが、PC が忙しいと、履歴を開く前に読み終えて「読み込んでいます」が出ず、落ちることがあった）
+  await page.loadApp(seed(), { field_plan_local_test: JSON.stringify({ readHold: true }) });
   await page.openView("master");
   await page.click("#addCropBtn");
   await page.waitFor(`document.getElementById("saveStatus").textContent === "保存しました"`, "品目を足す");
   await page.openView("journal");
   assert.match(await page.run('document.getElementById("journalDays").textContent'), /読み込んでいます/);
+  // 読み込みを放す
+  await page.run(`localStorage.setItem("field_plan_local_test", "{}")`);
   // 読み終えると、読んでいるあいだに足した記録と、読んだ記録の両方が出る
   await page.waitFor(`Boolean(document.getElementById("change-${DAYS}"))`, "読んだ記録が出る");
   const texts = await page.run('[...document.querySelectorAll("#journalDays .change-text")].map((el) => el.textContent)');

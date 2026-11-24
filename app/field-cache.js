@@ -9,6 +9,10 @@ const STORE = "cache";
 const KEY = "field";
 const FORMAT = 3; // 取っておく形の版。形を変えたら上げる（前の形の中身は使わない）。3: プランの中身に planting_forecasts を足した
 const OPEN_WAIT_MS = 1500; // IndexedDB が開かないまま止まることがあるので、これを過ぎたら使わない（起動を止めない）
+// 書くとき・消すときの待ち。書くのは画面の裏で行うので、起動のように急がない。初めてデータベースを作るときや、端末が忙しいときは、
+// 開くのに 1.5 秒を超えることがあり、書くのをあきらめて、次の起動で使えなかった（2026-11-24。通しテストの全体で、
+// field-cache.test.mjs の最初の 1 件だけが、取っておいた中身が null で落ちていた）
+const WRITE_WAIT_MS = 10000;
 
 function open() {
   return new Promise((resolve, reject) => {
@@ -20,8 +24,8 @@ function open() {
   });
 }
 
-async function run(mode, action) {
-  const db = await Promise.race([open(), new Promise((_, reject) => setTimeout(() => reject(new Error("IndexedDB が開きません")), OPEN_WAIT_MS))]);
+async function run(mode, action, wait = OPEN_WAIT_MS) {
+  const db = await Promise.race([open(), new Promise((_, reject) => setTimeout(() => reject(new Error("IndexedDB が開きません")), wait))]);
   try {
     return await new Promise((resolve, reject) => {
       const transaction = db.transaction(STORE, mode);
@@ -57,10 +61,10 @@ export function writeFieldCache({ user, version, loaded }) {
   } catch {
     return Promise.resolve();
   }
-  return run("readwrite", (store) => store.put({ format: FORMAT, user, version, savedAt: new Date().toISOString(), loaded: copy }, KEY)).catch(() => {});
+  return run("readwrite", (store) => store.put({ format: FORMAT, user, version, savedAt: new Date().toISOString(), loaded: copy }, KEY), WRITE_WAIT_MS).catch(() => {});
 }
 
 // 取っておいた中身を消す（ログアウト）
 export function clearFieldCache() {
-  return run("readwrite", (store) => store.delete(KEY)).catch(() => {});
+  return run("readwrite", (store) => store.delete(KEY), WRITE_WAIT_MS).catch(() => {});
 }

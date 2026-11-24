@@ -1332,7 +1332,9 @@ const AUDITED_LOCAL = ["fields", "backdrops", "plans", "zones", "blocks", "beds"
 
 // 通しテストで、ローカルの保存の書き込みを遅らせたり、失敗させたりする（回線の遅さや、保存の失敗を確かめる）。
 // ブラウザーの保存の LOCAL_TEST_KEY に { "delay": ミリ秒, "fail": true } を入れる。書き込みのたびに読むので、起動のあとで切り替えられる。
-// "readDelay": ミリ秒 は、変更の履歴の読み込み（SLOW_READS）を遅らせる（起動がそれを待たないことを確かめる）。
+// "readHold": true は、変更の履歴の読み込み（SLOW_READS）を、テストが readHold を外すまで止めておく（起動がそれを待たないことを確かめる）。
+// 前は "readDelay": ミリ秒 で時間だけ遅らせていたが、PC が忙しいときに
+// テストの操作が終わる前に読み終えてしまい、読んでいるあいだの様子を確かめられなかった（2026-11-24。journal.test.mjs）。
 // 圃場の読み込み（loadFields。起動と、戻ってきたときの読み直しで読む）の回数を LOCAL_READS_KEY に、
 // ニュースの読み込み（loadNews）の回数を LOCAL_NEWS_READS_KEY に数える
 const LOCAL_TEST_KEY = "field_plan_local_test";
@@ -1365,9 +1367,8 @@ function withTestControl(store) {
   const reads = SLOW_READS.filter((name) => store[name]).map((name) => [name, store[name]]).map(([name, read]) => [
     name,
     async (...args) => {
-      const { readDelay = 0 } = control();
-      if (readDelay) {
-        await new Promise((resolve) => setTimeout(resolve, readDelay));
+      while (control().readHold) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
       return read(...args);
     },
