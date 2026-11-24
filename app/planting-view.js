@@ -405,7 +405,7 @@ function estimateNote(item) {
 function revenueHtml(c) {
   const item = plantingRevenue(c.planting);
   const title = "<h2>収量と売上</h2>";
-  if (!item.yield && !item.price && !item.actual?.count) {
+  if (!item.yield && !item.price && !item.actual?.count && !item.actual?.unmeasured) {
     const loading = item.marketLoading ? "市況を読んでいます。" : "";
     return (
       `<section class="panel revenue-panel">${title}<p class="muted">${loading}台帳の品目か、「工程の計画」のこの作付で、収量（10 a あたりか 1 株あたり）と単価を入れると、見込みが出ます。</p></section>`
@@ -432,6 +432,12 @@ function revenueHtml(c) {
     !item.price && item.marketLoading ? "市況を読んでいます。" : "",
     !item.price && item.marketName && !item.marketLoading ? `市況「${item.marketName}」に取引がないため、単価を推せません。` : "",
     actual?.splitKg ? `収穫量のうち ${formatKg(actual.splitKg)} kg は、何本かの畝をまとめて量った量を、畝＋通路の面積の比で分けた値です。` : "",
+    // 量を量らずに収穫だけを記録したものは、実績の収穫量に数えていない（0 kg とは分ける）
+    actual?.unmeasured
+      ? actual.count
+        ? `収穫の記録 ${actual.count + actual.unmeasured} 回のうち ${actual.unmeasured} 回は、収穫量が入っていません（実績の収穫量に数えていません）。`
+        : `収穫の記録 ${actual.unmeasured} 回に、収穫量が入っていません。`
+      : "",
   ].filter(Boolean);
   return (
     `<section class="panel revenue-panel">${title}<table class="usage-table revenue-panel-table">` +

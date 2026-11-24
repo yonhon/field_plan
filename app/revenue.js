@@ -133,15 +133,24 @@ export function splitHarvest(log) {
   ];
 }
 
-// 作付の収穫量の実績。kg は合計、splitKg はそのうち面積の比で分けた量、count は収穫の記録の件数
+// 作付の収穫量の実績。kg は合計、splitKg はそのうち面積の比で分けた量、count は収穫量の入った収穫の記録の件数、
+// unmeasured は収穫量の入っていない収穫の記録の件数。
+// 記録の収穫量（spec.harvest_kg）も、この作付の畝の量（target.harvest_kg）も空の記録は、量を量らずに収穫だけを
+// 記録したものとして、kg に数えない（0 kg とは分ける。0 と入れた記録は 0 kg として数える）
 export function harvestActual(plantingId, logs) {
-  const result = { kg: 0, splitKg: 0, count: 0 };
+  const result = { kg: 0, splitKg: 0, count: 0, unmeasured: 0 };
   for (const log of logs) {
     if (log.work_type !== "harvest") {
       continue;
     }
     const parts = splitHarvest(log).filter((part) => part.planting_id === plantingId);
     if (!parts.length) {
+      continue;
+    }
+    // parts があるので、log.targets はある
+    const own = log.targets.filter((target) => target.planting_id === plantingId);
+    if (!filled(log.spec?.harvest_kg) && !own.some((target) => filled(target.harvest_kg))) {
+      result.unmeasured += 1;
       continue;
     }
     result.count += 1;

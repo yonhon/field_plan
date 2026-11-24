@@ -180,8 +180,29 @@ test("作付の収穫量の実績: 収穫の記録だけを足し、分けた量
   near(a.kg, 10 + 7 + 15);
   near(a.splitKg, 10);
   assert.equal(a.count, 3);
-  assert.deepEqual(harvestActual("z", logs), { kg: 0, splitKg: 0, count: 0 });
-  assert.deepEqual(harvestActual("a", []), { kg: 0, splitKg: 0, count: 0 });
+  assert.equal(a.unmeasured, 0);
+  assert.deepEqual(harvestActual("z", logs), { kg: 0, splitKg: 0, count: 0, unmeasured: 0 });
+  assert.deepEqual(harvestActual("a", []), { kg: 0, splitKg: 0, count: 0, unmeasured: 0 });
+});
+
+test("作付の収穫量の実績: 収穫量の入っていない記録は、量に数えず、件数を別に数える。0 と入れた記録は 0 kg として数える", () => {
+  const logs = [
+    // 量を量らずに収穫だけを記録した
+    { work_type: "harvest", spec: {}, targets: [target("a", 10)] },
+    { work_type: "harvest", targets: [target("a", 10)] },
+    // 0 kg と入れた（穫れなかった）
+    { work_type: "harvest", spec: { harvest_kg: 0 }, targets: [target("a", 10)] },
+    // ほかの畝だけ量った。記録の収穫量は空なので、a は量っていない
+    { work_type: "harvest", spec: {}, targets: [target("a", 10), target("b", 10, 4)] },
+    // a の畝だけ量った
+    { work_type: "harvest", spec: {}, targets: [target("a", 10, 3), target("b", 10)] },
+  ];
+  assert.deepEqual(harvestActual("a", logs), { kg: 3, splitKg: 0, count: 2, unmeasured: 3 });
+  assert.deepEqual(harvestActual("b", logs), { kg: 4, splitKg: 0, count: 1, unmeasured: 1 });
+  assert.deepEqual(harvestActual("a", logs.slice(0, 2)), { kg: 0, splitKg: 0, count: 0, unmeasured: 2 });
+  // 同じ作付の対象が 2 つある記録（畝を作り直す前後の記録など）は、どちらかに量があれば量った記録
+  const twice = { work_type: "harvest", spec: {}, targets: [target("a", 10, 2), target("a", 10)] };
+  assert.deepEqual(harvestActual("a", [twice]), { kg: 2, splitKg: 0, count: 1, unmeasured: 0 });
 });
 
 test("収穫の計画の期間: 取りやめていない収穫の作業の、最初の始まりから最後の終わりまで", () => {

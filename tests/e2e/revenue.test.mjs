@@ -272,3 +272,37 @@ test("単価: 品目にも作付にもなければ、収穫の日ごとにその
   assert.equal(await page.run(`document.querySelector('#cropTable [data-field="market_item_name"]').value`), "しけんな");
   assert.deepEqual(page.errors, []);
 });
+
+test("収穫量: 量の入っていない収穫の記録は、実績の収穫量に数えない（0.0 と出さない）。作付の詳細にそのことを書く", options, async () => {
+  const log = (id, spec) => ({
+    id,
+    field_id: "f1",
+    date: TODAY,
+    end_date: null,
+    work_type: "harvest",
+    finishes: false,
+    spec,
+    note: "",
+    created_at: AT,
+    targets: [{ id: `${id}t`, log_id: id, planting_id: "pl1", bed_id: "bed1", block_id: null, work_id: null, label: "A 畝1 試験菜", crop_name: "試験菜", area_m2: 30, harvest_kg: null }],
+    inputs: [],
+  });
+  await page.loadApp(seed({ workLogs: [log("l1", {})] }));
+  await page.openView("revenue");
+  await page.waitFor(`document.querySelectorAll("${PLANTING_ROWS}").length === 2`, "作付の行");
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("${PLANTING_ROWS}")].map((tr) => [6, 7].map((i) => tr.cells[i].textContent))`), [
+    ["", ""],
+    ["", ""],
+  ]);
+  await openFromRevenue("pl1");
+  assert.deepEqual((await panelRows())[0], ["収量（kg）", "20.0", "－"]);
+  assert.match(await panelNotes(), /収穫の記録 1 回に、収穫量が入っていません。/);
+  assert.doesNotMatch(await panelNotes(), /収量の差/);
+
+  // 量の入った記録と混ざっていれば、入った分だけを足し、入っていない回数を添える
+  await page.loadApp(seed({ workLogs: [log("l1", {}), log("l2", { harvest_kg: 5 })] }));
+  await openPlanting("pl1");
+  assert.deepEqual((await panelRows())[0], ["収量（kg）", "20.0", "5.0（1 回）"]);
+  assert.match(await panelNotes(), /収穫の記録 2 回のうち 1 回は、収穫量が入っていません（実績の収穫量に数えていません）。/);
+  assert.deepEqual(page.errors, []);
+});
