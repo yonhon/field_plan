@@ -145,9 +145,11 @@ test("収量と売上: 品目の値から見込みを出し、作付の値を優
 });
 
 test("区画に入れた収穫の計画は、その日に区画にある作付の収穫の計画として、作付自身の収穫の計画と合わせて売上を出す", options, async () => {
-  // 区画 A の収穫（6/1〜6/3）と、畝 1 の作付だけの収穫（6/20〜6/21）。畝 2 は区画の収穫だけ
+  // 区画 A の収穫（6/1〜6/3）と、畝 1 の作付だけの収穫（6/20〜6/21）。畝 2 は区画の収穫だけで、作付の作業（定植）は 4/1 に終わる
+  // （作付の作業が終わったあとも、次の作付が始まるまでは畝にあるので、区画の収穫はその作付の収穫になる）
   const works = [
     { id: "wb", plan_id: "p1", planting_id: null, block_id: "b1", seq: 1, work_type: "harvest", plan_start: "2027-06-01", plan_end: "2027-06-03" },
+    { id: "w2", plan_id: "p1", planting_id: "pl2", block_id: null, seq: 1, work_type: "plant", plan_start: "2027-04-01", plan_end: "2027-04-01" },
     { id: "w1", plan_id: "p1", planting_id: "pl1", block_id: null, seq: 1, work_type: "harvest", plan_start: "2027-06-20", plan_end: "2027-06-21" },
   ];
   await page.loadApp(seed({ works }));

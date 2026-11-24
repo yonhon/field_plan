@@ -44,26 +44,11 @@ export function plantingStart(planting, works, logs = []) {
 // 収穫の計画、収穫量の実績など）でも、それを、その日に区画にある畝の作付の作業・記録として扱う（2026-11-24）。
 // 作付自身の作業・記録と合わせて、どれも有効にする（どちらかを優先しない）。
 
-// 作付自身の期間（作付に付いた計画の作業と記録から）。始まりは plantingStart、終わりは計画の作業の終わりと記録の日のうち、いちばん遅い日
-export function plantingSpan(planting, works, logs = []) {
-  const ends = [
-    ...works.filter((work) => work.planting_id === planting.id && !work.cancelled_on).map((work) => work.plan_end || work.plan_start),
-    ...logs.filter((log) => (log.targets || []).some((target) => target.planting_id === planting.id)).map(logEnd),
-  ].filter(Boolean);
-  return { start: plantingStart(planting, works, logs), end: ends.sort().at(-1) || null };
-}
-
 // その日に、区画の作業・記録を分ける畝の作付を求める関数を作る。その日にある畝（なければ、あとでできる畝）ごとに、
-// その日に畝にある作付、なければ次に入る作付（畝立ての前の作業は、次に入る作付に分ける）。どちらもない畝は入れない。
-// 返す関数は (区画の ID, 日付) → [{ planting, bed, weight（畝＋通路の面積） }]。作付の期間は作付自身の作業と記録から求める
+// その日に畝にある作付（plantingOnDate。その日までに始まった、いちばんあとの作付。まだどれも始まっていなければ次に入る作付）。
+// 作付は、次の作付が始まるまで畝にある（作付自身の最後の作業や記録のあとに、区画で収穫する作付もある。2026-11-24）。作付のない畝は入れない。
+// 返す関数は (区画の ID, 日付) → [{ planting, bed, weight（畝＋通路の面積） }]。作付が始まる日は、作付自身の作業と記録から求める
 export function blockPlantings({ blocks, beds, plantings, works, logs = [] }) {
-  const spans = new Map();
-  const spanOf = (planting) => {
-    if (!spans.has(planting.id)) {
-      spans.set(planting.id, plantingSpan(planting, works, logs));
-    }
-    return spans.get(planting.id);
-  };
   const cache = new Map();
   return (blockId, date) => {
     const key = `${blockId}:${date}`;
@@ -79,13 +64,12 @@ export function blockPlantings({ blocks, beds, plantings, works, logs = [] }) {
         live = all.filter((bed) => bed.start_date && bed.start_date > date);
       }
       for (const bed of live) {
-        const list = plantings
-          .filter((planting) => planting.bed_id === bed.id)
-          .sort(bySeq)
-          .map((planting) => ({ planting, ...spanOf(planting) }));
-        const current = list.find((item) => (!item.start || item.start <= date) && (!item.end || date <= item.end));
-        const next = list.find((item) => item.start && item.start > date);
-        const planting = (current || next)?.planting;
+        const planting = plantingOnDate(
+          plantings.filter((item) => item.bed_id === bed.id),
+          works,
+          date,
+          logs
+        );
         if (planting) {
           chosen.push({ planting, bed });
         }
