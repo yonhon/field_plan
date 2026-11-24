@@ -130,6 +130,47 @@ test("記録のある畝を削除: 記録の対象から外し、ほかに対象
   assert.deepEqual(page.errors, []);
 });
 
+test("記録のある畝の幅を変える: 今までの記録の面積にも当てはめるかを尋ね、当てはめると隣の畝も求め直す。当てはめなければそのまま", options, async () => {
+  const DAY = "2026-03-10";
+  const data = seed(2);
+  data.fields[0].active_plan_id = "p1";
+  data.plantings = ["bed1", "bed2"].map((bedId, i) => ({ id: `pl${i + 1}`, plan_id: "p1", bed_id: bedId, seq: 1, crop_id: "c1", crop_name: "試験菜", note: "" }));
+  const target = (n) => ({ id: `t${n}`, log_id: "both", planting_id: `pl${n}`, bed_id: `bed${n}`, block_id: "b1", work_id: null, label: `A 畝${n} 試験菜`, crop_name: "試験菜", area_m2: 10, spray_l: null });
+  data.workLogs = [{ id: "both", field_id: "f1", date: DAY, end_date: null, work_type: "spray", finishes: false, spec: {}, note: "", created_at: AT, inputs: [], targets: [target(1), target(2)] }];
+  await page.loadApp(data);
+  await page.click('.tab-btn[data-view="schedule"]');
+  await page.waitFor(`document.querySelectorAll("#strip .strip-bed").length === 2`, "図に畝が 2 本出る");
+  const areas = () => page.run(`JSON.parse(localStorage.getItem("field_plan_local")).workLogs[0].targets.map((item) => item.area_m2)`);
+  // 今の畝の形で求めた、2 本の畝の面積
+  const expected = () =>
+    page.run(`import("./logs.js").then(({ bedAreas }) => {
+      const local = JSON.parse(localStorage.getItem("field_plan_local"));
+      const areas = bedAreas(local.blocks[0], local.beds);
+      return ["bed1", "bed2"].map((id) => Math.round(areas.get(id) * 100) / 100);
+    })`);
+  const ASK = `document.querySelector("dialog.notice[open]")?.textContent.includes("記録にも当てはめる")`;
+
+  // 畝 1 の幅を 150 cm にする。少し待つと、記録 1 件の面積が変わると尋ねる。当てはめると、畝 1 と畝 2 の面積を今の形で求め直す
+  await widenBed();
+  await page.waitFor(ASK, "記録の面積に当てはめるかを尋ねる");
+  assert.match(await page.run(`document.querySelector("dialog.notice[open]").textContent`), /今までの作業の記録 1 件（.+）で、畝の面積（畝＋通路）が変わります/);
+  await page.click(CONFIRM);
+  const applied = await expected();
+  await page.waitFor(`JSON.stringify(JSON.parse(localStorage.getItem("field_plan_local")).workLogs[0].targets.map((item) => item.area_m2)) === ${JSON.stringify(JSON.stringify(applied))}`, "記録の面積が求め直される");
+  assert.notDeepEqual(applied, [10, 10]);
+
+  // もう一度幅を変えて、当てはめないと、記録の面積はそのまま。そのあと別の畝を触っても、同じ変更で尋ね直さない
+  await page.run(`window.prompt = () => "200"`);
+  await page.click('[data-dim="width:0"]');
+  await page.waitFor(ASK, "2 回目も尋ねる");
+  await page.click('dialog.notice [data-action="cancel"]');
+  await page.waitFor(`!document.querySelector("dialog.notice[open]")`, "窓が閉じる");
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  assert.equal(await page.run(`Boolean(${ASK})`), false);
+  assert.deepEqual(await areas(), applied);
+  assert.deepEqual(page.errors, []);
+});
+
 test("選んだ畝を表示日でなくす: 図からすぐ消える", options, async () => {
   await openStrip(3);
   await chooseBed("bed2");

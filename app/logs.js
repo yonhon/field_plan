@@ -141,6 +141,21 @@ export function reareaTargets(log, blocks, beds) {
   return { ...log, targets };
 }
 
+// 区画と畝の形を変える前（before）と後（after）で、求め直した記録の畝の面積が変わる記録。before・after は { blocks, beds }。
+// 返り値は、変わる対象の面積だけを後の値にした記録の並び（変わらない対象は、記録してある面積のまま。前からずれていた分は直さない）
+export function areaChanges(logs, before, after) {
+  const result = [];
+  for (const log of logs) {
+    const was = reareaTargets(log, before.blocks, before.beds).targets;
+    const now = reareaTargets(log, after.blocks, after.beds).targets;
+    const changed = now.some((target, i) => target.area_m2 !== was[i].area_m2);
+    if (changed) {
+      result.push({ ...log, targets: log.targets.map((target, i) => (now[i].area_m2 === was[i].area_m2 ? target : { ...target, area_m2: now[i].area_m2 })) });
+    }
+  }
+  return result;
+}
+
 // その日に畝にある作付。その日までに始まった作付のうち、いちばん新しいもの。まだどれも始まっていなければ、次に来る作付。
 // 計画に収穫が入っていない作付（計画を作りかけの作付）も、次の作付が始まるまでは、その畝の作付として扱う
 export function plantingOnDate(plantings, works, date, logs = []) {

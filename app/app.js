@@ -50,7 +50,7 @@ import { showUndoPad } from "./undo-pad.js";
 import { decorateIcons } from "./icons.js";
 import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJournalNow } from "./journal.js";
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
-import { plantingOnDate, reareaTargets, withBlockShares } from "./logs.js";
+import { areaChanges, plantingOnDate, reareaTargets, withBlockShares } from "./logs.js";
 import { initProcessEditor } from "./process-editor.js";
 import { initForecastEditor } from "./forecast-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail, renderWholeHead } from "./planting-view.js";
@@ -1477,6 +1477,8 @@ async function applyUndo({ changes = [], logs = [] }) {
   renderPlans();
   refreshFieldPlans();
   showUndone(shown);
+  // 元に戻した形を、記録の面積を確かめるときの「前の形」にする（戻した形の分は尋ねない）
+  resetAreaBase();
 }
 
 // 戻す・やり直すの前に、その操作をした画面へ移る。移ったら、少し待って、戻すところを見せる。
@@ -2248,6 +2250,7 @@ async function deleteSelectedShape() {
     const rest = state.beds.filter((bed) => bed.id !== item.id);
     dropped.changed = dropped.changed.map((log) => reareaTargets(log, state.blocks, rest));
   }
+
   const emptied = new Set(dropped.emptied.map((log) => log.id));
   const changed = new Map(dropped.changed.map((log) => [log.id, log]));
   state.logs = (state.logs || []).filter((log) => !emptied.has(log.id)).map((log) => changed.get(log.id) || log);
@@ -2260,6 +2263,8 @@ async function deleteSelectedShape() {
     forgetBeds([id]);
     renumberBlock(item.block_id);
   }
+  // 消した畝の分は、上で記録に当てはめたので、あとで尋ねない（消したあとの形を、前の形にする）
+  resetAreaBase();
   select(null);
   // 記録を先に直してから、図形を消す。同じ操作の書き込みとして、続けて送る（元に戻すと、図形を戻してから記録を戻す）
   const { store } = state;
@@ -2294,6 +2299,82 @@ function logsWithout(blockIds, bedIds) {
     }
   }
   return { changed, emptied, count: changed.length + emptied.length };
+}
+
+// ---- 畝の形を直したとき、今までの記録の面積にも当てはめるか ----
+// 記録の畝の面積は、記録した時点の値を保存している。畝を動かしたり、幅や隙間、区画の形を変えたりすると、その畝と隣の畝の
+// 面積（畝＋通路）が変わる。測り間違いや見積もりを直したのなら記録にも当てはめ、畝を実際に作り直したのなら記録した時点のまま
+// にしたい。アプリには見分けられないので尋ねる。
+// areaBase は、最後に確かめたとき（と、読み込んだとき、元に戻したとき）の区画と畝の形。形を変える操作を記録したら、
+// 少し待ってから（矢印キーで続けて動かすときなどに、1 回ずつ尋ねない）、この形と今の形で求めた記録の面積を比べる（logs.js の areaChanges）
+const AREA_CHECK_MS = 1500;
+const AREA_KINDS = /^(bed|block)\.(add|move|shape|width|gap|place)$/;
+let areaBase = null;
+let areaTimer = null;
+let pointerHeld = false;
+document.addEventListener("pointerdown", () => (pointerHeld = true), true);
+document.addEventListener("pointerup", () => (pointerHeld = false), true);
+document.addEventListener("pointercancel", () => (pointerHeld = false), true);
+
+const areaGeometry = () => ({
+  planId: state.plan?.id || null,
+  blocks: state.blocks.map(({ id, shape }) => ({ id, shape: structuredClone(shape) })),
+  beds: state.beds.map(({ id, block_id, seq, shape, start_date, removed_on }) => ({ id, block_id, seq, shape: structuredClone(shape), start_date, removed_on })),
+});
+
+function resetAreaBase() {
+  clearTimeout(areaTimer);
+  areaBase = areaGeometry();
+}
+
+function scheduleAreaCheck() {
+  clearTimeout(areaTimer);
+  areaTimer = setTimeout(checkAreas, AREA_CHECK_MS);
+}
+
+async function checkAreas() {
+  // 図の編集の書きかけ、ほかの窓、押している最中は、終わるまで待つ
+  if (state.mapEditing || state.planBusy || pointerHeld || document.querySelector("dialog[open]")) {
+    scheduleAreaCheck();
+    return;
+  }
+  const now = areaGeometry();
+  // 記録は実際に使うプランの畝につなぐので、ほかのプランの形を変えても、記録の面積は変わらない
+  if (!areaBase || areaBase.planId !== now.planId || state.field?.active_plan_id !== now.planId) {
+    areaBase = now;
+    return;
+  }
+  const changed = areaChanges(state.logs || [], areaBase, now);
+  if (!changed.length) {
+    areaBase = now;
+    return;
+  }
+  const dates = changed.map((log) => log.date).sort();
+  const span = dates[0] === dates.at(-1) ? formatDate(dates[0]) : `${formatDate(dates[0])}〜${formatDate(dates.at(-1))}`;
+  const ok = await confirmAction({
+    message:
+      `畝の形が変わったので、今までの作業の記録 ${changed.length} 件（${span}）で、畝の面積（畝＋通路）が変わります。
+` +
+      "測り間違いや見積もりを直したときは、記録の面積にも当てはめてください。畝を実際に作り直したときは、当てはめずに、記録した時点の面積のままにしてください。",
+    action: "記録にも当てはめる",
+    cancel: "当てはめない",
+  });
+  // 尋ねているあいだに形や記録が変わっていることがあるので、当てはめるときは求め直す
+  const base = areaBase;
+  areaBase = areaGeometry();
+  if (!ok) {
+    return;
+  }
+  const latest = areaChanges(state.logs || [], base, areaBase);
+  if (!latest.length) {
+    return;
+  }
+  record({ kind: "log.area", target: [], text: `畝の形の変更を、作業の記録 ${latest.length} 件の畝の面積にも当てはめた` });
+  const byId = new Map(latest.map((log) => [log.id, log]));
+  state.logs = (state.logs || []).map((log) => byId.get(log.id) || log);
+  const { store } = state;
+  persist(() => Promise.all(latest.map((log) => store.saveLog(log))));
+  render();
 }
 
 // ---- 耕起対象区画 ----
@@ -2896,6 +2977,8 @@ function setPlanData(plan, tables) {
   // 畝の番号を、決まりどおり（左から順、なくした畝の番号は欠番）に揃える。
   // 番号を詰め直す仕組みを入れる前に削除した畝の跡も、ここで詰まる
   state.blocks.forEach((block) => renumberBlock(block.id));
+  // 読み込んだ形を、記録の面積を確かめるときの「前の形」にする
+  resetAreaBase();
 }
 
 async function openPlan(plan) {
@@ -4651,7 +4734,7 @@ async function startApp(user = "local") {
   initCrops({ state, setStatus, showView });
   initDiary({ state, setStatus });
   // 変更の履歴は裏で読む。起動（元に戻すの用意、アプリの更新の確認）は、これを待たない
-  initJournal({ state, openTarget, setStatus });
+  initJournal({ state, openTarget, setStatus, onRecorded: (kind) => AREA_KINDS.test(kind) && scheduleAreaCheck() });
   if (route?.view === "journal") {
     openRoute(route, "replace");
   }

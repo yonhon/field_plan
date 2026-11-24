@@ -26,6 +26,7 @@ import {
   cropDiffText,
   specDiff,
   SPEC_FIELDS,
+  areaChanges,
   blockPlantings,
   reareaTargets,
   specText,
@@ -259,6 +260,34 @@ test("畝を最初からなかったことにしたあと、記録の畝の面�
   // 区画が見つからない畝と、対象のない記録
   assert.deepEqual(reareaTargets(log, [], rest).targets.map((target) => target.area_m2), [16, 21.6, 48, 5]);
   assert.deepEqual(reareaTargets({ id: "E", date: "2026-03-15" }, [block], rest), { id: "E", date: "2026-03-15", targets: [] });
+});
+
+test("畝の形を変える前と後で、求め直した記録の畝の面積が変わる記録と、その対象だけを後の値にした記録", () => {
+  const before = { blocks: [block], beds };
+  // 畝2 を 0.3 m 畝1 の側へ動かす（畝1 と畝2 の隙間が狭まり、畝2 と畝3 の隙間が広がる）
+  const moved = beds.map((bed) => (bed.id === "b2" ? { ...bed, shape: rect(1, 2.0, 9, 2.7) } : bed));
+  const after = { blocks: [block], beds: moved };
+  const log = (id, date, targets) => ({ id, date, targets });
+  const logs = [
+    // 畝1・畝2 の記録。畝1 の面積は前からずれていた（記録した 99）が、求め直しても変わらない分は直さない
+    log("L1", "2026-03-15", [
+      { bed_id: "b1", area_m2: 99 },
+      { bed_id: "b2", area_m2: 10.4 },
+      { bed_id: null, block_id: "k1", area_m2: 48 },
+    ]),
+    // 畝2 がない記録（区画の対象だけ）
+    log("L2", "2026-03-15", [{ bed_id: null, block_id: "k1", area_m2: 48 }]),
+    { id: "L3", date: "2026-03-15" },
+  ];
+  const changes = areaChanges(logs, before, after);
+  assert.deepEqual(changes.map((item) => item.id), ["L1"]);
+  // 畝1: 端まで 1.0 m と、畝2 までの隙間 0.3 m の半分 → 8 ×（1.0 + 0.7 + 0.15）。畝2: 隙間の半分 0.15 と 0.45 → 8 × 1.3
+  assert.deepEqual(changes[0].targets.map((target) => target.area_m2), [14.8, 10.4, 48]);
+  assert.equal(changes[0].targets[2], logs[0].targets[2]);
+  // 畝1 は求め直すと 16 → 14.8 に変わるので後の値。畝2 は 10.4 のまま（変わらない）なので、記録の値のまま
+  assert.equal(changes[0].targets[1], logs[0].targets[1]);
+  // 形が同じなら、何も変わらない
+  assert.deepEqual(areaChanges(logs, before, before), []);
 });
 
 test("その日の作付は、その日までに始まった作付のうちいちばん新しいもの。始まった日は、記録があれば記録の日", () => {

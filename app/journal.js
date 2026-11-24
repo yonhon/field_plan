@@ -11,7 +11,7 @@ const MERGE_MINUTES = 30; // 同じ相手への同じ操作が、この時間の
 const SAVE_DELAY_MS = 800;
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
-let ctx = null; // { state, setStatus, openTarget }
+let ctx = null; // { state, setStatus, openTarget, onRecorded }
 let updates = []; // アプリの更新（updates.json の中身）
 const unsaved = new Set(); // まだ保存していない記録
 let saveTimer = null;
@@ -63,6 +63,8 @@ export function record({ kind, target = [], text, before = null, after = null, p
     return;
   }
   const { state } = ctx;
+  // 記録した変更を、画面にも知らせる（畝の形を変えたら、今までの記録の面積にも当てはめるかを尋ねる。app.js）
+  ctx.onRecorded?.(kind);
   const owner = plan === false ? null : plan || state.plan;
   const fieldId = (field || state.field).id;
   const now = new Date();
