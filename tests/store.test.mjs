@@ -206,3 +206,25 @@ test("DB の関数が ID だけを返したときは、ID をそのまま返す"
   const store = logStore(() => "l1");
   assert.equal(await store.saveLog({ id: "l1", targets: [], inputs: [] }), "l1");
 });
+
+test("市況: API が 1 回に 1,000 行までしか返さなくても、分けて全部読む", async () => {
+  const rows = Array.from({ length: 2500 }, (_, i) => ({ item_name: i < 1200 ? "あ" : "い", sale_date: `d${i}`, avg_price: i }));
+  const calls = [];
+  const client = {
+    rpc: (name, args) => ({
+      range: async (from, to) => {
+        calls.push([name, args, from, to]);
+        // DB の API と同じく、頼んだ範囲のうち 1,000 行までを返す
+        return { data: rows.slice(from, Math.min(to + 1, from + 1000)), error: null };
+      },
+    }),
+  };
+  const store = createSupabaseStore(client, {});
+  const read = await store.marketPrices(["あ", "い"]);
+  assert.equal(read.length, 2500);
+  assert.deepEqual(read.at(-1), rows.at(-1));
+  assert.deepEqual(calls.map((call) => call.slice(2)), [[0, 999], [1000, 1999], [2000, 2999]]);
+  assert.deepEqual(calls[0].slice(0, 2), ["market_prices", { p_names: ["あ", "い"] }]);
+  assert.deepEqual(await store.marketPrices([]), [], "品目がなければ読まない");
+  assert.equal(calls.length, 3);
+});

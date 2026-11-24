@@ -416,12 +416,14 @@ export function createSupabaseStore(client, options) {
         check(await client.from("news").update({ read_at: readAt }).in("key", keys));
       }
     },
-    // 市況（agri_db の public.market_daily_item_stats）。品目名の一覧と、品目ごとの日々の中値（円/kg）。field の関数を通す
+    // 市況（agri_db の public.market_daily_item_stats）。品目名の一覧と、品目ごとの日々の中値（円/kg）。field の関数を通す。
+    // API は 1 回に 1,000 行までしか返さないので、分けて全部読む（品目が 25 あると 3,000 行を超える。2026-11-24 に、
+    // 品目名の順で後ろの品目の市況が届かず、単価を推せなかった）。関数は（品目名、日付）の順に返すので、分けても抜けない
     async marketItems() {
-      return check(await client.rpc("market_items"));
+      return allRows(() => client.rpc("market_items"));
     },
     async marketPrices(names) {
-      return names.length ? check(await client.rpc("market_prices", { p_names: names })) : [];
+      return names.length ? allRows(() => client.rpc("market_prices", { p_names: names })) : [];
     },
     // 2 週間気温予報。ブラウザーから気象庁を読めないので、Supabase の関数を通す
     async twoWeek(station) {
