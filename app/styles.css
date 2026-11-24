@@ -5320,3 +5320,46 @@ dialog.has-undo-pad {
 .work-time-total td {
   font-weight: 700;
 }
+
+/* 収量と売上（planting-view.js の revenueHtml）と、「収支」のタブの品目ごとの合計 */
+.revenue-panel-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.revenue-subhead {
+  margin: 16px 0 6px;
+  font-size: 14px;
+}
+
+.revenue-crops tfoot th,
+.revenue-crops tfoot td {
+  font-weight: 700;
+}
+
+/* 「工程の計画」の作付の、収量と単価の欄（process-editor.js） */
+.pe-values {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px 10px;
+  margin: 4px 0 8px;
+}
+
+.pe-values label {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* 収穫の畝ごとの量（log-view.js） */
+.log-harvest-bed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-harvest-bed input {
+  width: 7em;
+}

@@ -4,6 +4,8 @@ import { confirmDelete, notify, notifySaveFailed } from "./dialog.js";
 import { record } from "./journal.js";
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
+import { rankMarketItems } from "./revenue.js";
+import { loadMarket, marketItems } from "./revenue-view.js";
 
 const $ = (id) => document.getElementById(id);
 // [列の名前, 見出し, 入力の種類]。int は整数、number は小数、check はチェック、fertilizer は肥料の選択
@@ -21,6 +23,12 @@ const CROP_FIELDS = [
   ["fertilizer_id", "肥料", "fertilizer"],
   ["grow_days", "定植・播種から収穫開始まで（日）", "int"],
   ["harvest_days", "収穫の日数", "int"],
+  // 収量と売上の見込み（revenue.js）。作付の値（「工程の計画」で入れる）があれば、そちらを使う
+  ["yield_kg_per_10a", "収量（kg/10a）", "number"],
+  ["yield_g_per_plant", "収量（g/株）", "number"],
+  ["shippable_pct", "出荷率（%）", "pct"],
+  ["price_yen_per_kg", "想定単価（円/kg・税抜き）", "number"],
+  ["market_item_name", "市況での品目名", "market"],
   ["note", "メモ", "text"],
 ];
 const FERTILIZER_FIELDS = [
@@ -95,7 +103,21 @@ function cell(row, [key, , kind]) {
   if (kind === "text") {
     return `<input type="text" data-field="${key}" value="${escapeHtml(value)}" /><span class="cell-value">${escapeHtml(value || "")}</span>`;
   }
-  return `<input type="number" min="0" step="${kind === "int" ? 1 : "any"}" data-field="${key}" value="${value ?? ""}" />`;
+  if (kind === "market") {
+    // 市況の品目名の候補。品目名に近いもの（ひらがなとカタカナをそろえて、同じ、含む）を先に並べる。まだ読んでいなければ候補なし
+    const items = marketItems();
+    const list = items
+      ? `<datalist id="market-${row.id}">${rankMarketItems(row.name, items)
+          .map((item) => `<option value="${escapeHtml(item.item_name)}">${escapeHtml(`${item.item_name}（${item.days} 日）`)}</option>`)
+          .join("")}</datalist>`
+      : "";
+    return (
+      `<input type="text" data-field="${key}" list="market-${row.id}" value="${escapeHtml(value || "")}" placeholder="例: なす" />${list}` +
+      `<span class="cell-value">${escapeHtml(value || "")}</span>`
+    );
+  }
+  const max = kind === "pct" ? ' max="100"' : "";
+  return `<input type="number" min="0"${max} step="${kind === "int" ? 1 : "any"}" data-field="${key}" value="${value ?? ""}" />`;
 }
 
 function table(fields, rows, empty) {
@@ -121,7 +143,7 @@ function parse(input, kind) {
   if (kind === "check") {
     return input.checked;
   }
-  if (kind === "text") {
+  if (kind === "text" || kind === "market") {
     return input.value.trim();
   }
   if (kind === "fertilizer") {
@@ -131,6 +153,9 @@ function parse(input, kind) {
     return null;
   }
   const value = Number(input.value);
+  if (kind === "pct" && value > 100) {
+    return undefined;
+  }
   return Number.isFinite(value) && value >= 0 ? (kind === "int" ? Math.round(value) : value) : undefined;
 }
 
@@ -170,6 +195,10 @@ function saveValue(storeTable, row, field, value) {
       });
       await ctx.state.store.upsert("plantings", plantings);
     }
+    // 市況での品目名を変えたら、その品目名の市況を読む（読み終えたら、見込みを描き直す）
+    if (storeTable === "crops" && field[0] === "market_item_name") {
+      loadMarket();
+    }
   });
 }
 
@@ -182,7 +211,7 @@ function bind(tableId, storeTable, fields, rowsOf, afterDelete) {
     }
     const value = parse(event.target, field[2]);
     if (value === undefined || (field[0] === "name" && !value)) {
-      notify(field[0] === "name" ? "名前を入れてください。" : "0 以上の数を入れてください。");
+      notify(field[0] === "name" ? "名前を入れてください。" : field[2] === "pct" ? "0 から 100 までの数を入れてください。" : "0 以上の数を入れてください。");
       renderCrops();
       return;
     }

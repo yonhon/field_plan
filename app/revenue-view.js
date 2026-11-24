@@ -1,5 +1,6 @@
-// 「収支」のタブ。作付ごとの収支の一覧（docs の 7.2）。いまは、収支の数字のうち作業時間だけを出す。
-// 売上と経費の列は、収量・単価・資材の単価を入れられるようにしてから足す。
+// 「収支」のタブ。作付ごとの収支の一覧（docs の 7.2）。行はプランのすべての作付で、収量と売上の見込み、収穫量の実績、作業時間を出す。
+// 経費の列は、資材の単価を入れられるようにしてから足す。
+// 収量と売上の見込み（作付の詳細、苗と肥料の集計も、ここの plantingRevenue を使う。計算は revenue.js）と、市況の読み込みも置く。
 // 作業時間の分け方（作付の詳細と区画の頭も、ここの timeAllocation を使う）:
 // - 計測は、計画の作業（work_ids）か、つないだ実績（log_id）を通して、作付か区画に付ける。
 //   1 件の計測に作付がいくつもあるときは、畝＋通路の面積の比で分ける（区画の作業は区画の面積）。
@@ -10,13 +11,15 @@
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
 import { polygonArea } from "./geometry.js";
+import { cropLabel, plantingNumbers, plantingSpec } from "./crops.js";
 import { bedAreas, logEnd, plantingStart } from "./logs.js";
-import { existsOn } from "./schedule.js";
+import { forecast, harvestActual, harvestWindow, marketEstimate } from "./revenue.js";
+import { existsOn, localToday } from "./schedule.js";
 import { COMMON_KINDS, SESSION_KINDS, allocateMinutes, formatMinutes, splitMinutes } from "./work-time.js";
 
 const $ = (id) => document.getElementById(id);
 
-let ctx = null; // { state, typeLabel, openDetail }
+let ctx = null; // { state, typeLabel, openDetail, setStatus, onMarket }
 const state = () => ctx.state;
 const bySeq = (a, b) => a.seq - b.seq;
 
@@ -144,57 +147,270 @@ const compareSort = (a, b) => {
   return 0;
 };
 
-export function renderRevenue() {
-  if (!ctx || !state().field || $("revenueView").hidden) {
+// ---- 市況（品目の想定単価の推定に使う。revenue.js の marketEstimate） ----
+// state.market = { items: [{ item_name, days }] | null, prices: Map(品目名 → [{ sale_date, avg_price }]), at, failedAt, loading }。
+// 起動のときの読み込み（load_field）とは別に、あとから読む。届いたら ctx.onMarket で描き直す（{ prices } は、品目の市況を読んだか）。メモリにだけ持つ（field-cache には入れない）
+const MARKET_FRESH_MS = 6 * 60 * 60 * 1000; // 市況は 1 日 1 回増えるので、これより古ければ読み直す
+const MARKET_RETRY_MS = 5 * 60 * 1000; // 読めなかったあと、これより前には読み直さない（描き直しのたびに読まない）
+
+function market() {
+  const s = state();
+  if (!s.market) {
+    s.market = { items: null, prices: new Map(), at: 0, failedAt: 0, loading: false };
+  }
+  return s.market;
+}
+
+// 品目に結んだ市況の品目名のうち、まだ読んでいないものと、品目名の一覧を読む。古くなっていれば読み直す。
+// 起動や読み直しのあと（app.js の refreshViews）、アプリに戻ったとき、品目の市況での品目名を変えたときに呼ぶ
+export async function loadMarket() {
+  if (!ctx || !state().store?.marketPrices) {
     return;
   }
-  const allocation = timeAllocation();
-  if (!allocation) {
-    draw($("revenueBody"), '<p class="muted">開いているプランは、実際に使うプランではありません。作業時間は、実際に使うプランの作業につないでいるので、実際に使うプランを開くと出ます。</p>');
+  const m = market();
+  const now = Date.now();
+  if (m.loading || now - m.failedAt < MARKET_RETRY_MS) {
     return;
   }
+  const stale = now - m.at > MARKET_FRESH_MS;
+  const names = [...new Set(state().crops.map((crop) => (crop.market_item_name || "").trim()).filter(Boolean))];
+  const missing = stale ? names : names.filter((name) => !m.prices.has(name));
+  if (!stale && !missing.length) {
+    return;
+  }
+  m.loading = true;
+  try {
+    const [items, rows] = await Promise.all([stale ? state().store.marketItems() : m.items, state().store.marketPrices(missing)]);
+    const prices = new Map(missing.map((name) => [name, []]));
+    for (const row of rows) {
+      prices.get(row.item_name)?.push(row);
+    }
+    m.items = items;
+    if (stale) {
+      m.prices = prices;
+      m.at = now;
+    } else {
+      prices.forEach((list, name) => m.prices.set(name, list));
+    }
+  } catch (error) {
+    m.failedAt = now;
+    ctx.setStatus?.(`市況を読めませんでした: ${error.message}`);
+    return;
+  } finally {
+    m.loading = false;
+  }
+  // 見込みを描き直すのは、品目に結んだ市況を読んだときだけ。品目名の一覧だけなら、台帳の候補だけ（起動のたびに全部を描き直さない）
+  ctx.onMarket?.({ prices: missing.length > 0 });
+}
+
+// 市況の品目名の一覧（取引のあった日数つき）。まだ読んでいなければ null
+export const marketItems = () => (ctx ? state().market?.items || null : null);
+
+// 何件もの作付の見込みを出すときに、作付ごとの作業と記録、畝の面積を 1 回だけ集める（作付ごとに全体をなめ直さない）。
+// 面積は、作付の詳細の頭と同じく、今日ある区画の畝で分けた畝＋通路の面積
+function revenueIndex() {
+  const s = state();
+  const today = localToday();
+  const push = (map, key, item) => (map.has(key) ? map.get(key).push(item) : map.set(key, [item]));
+  const works = new Map();
+  for (const work of s.works) {
+    if (work.planting_id) {
+      push(works, work.planting_id, work);
+    }
+  }
+  const logs = new Map();
+  for (const log of s.logs || []) {
+    for (const id of new Set((log.targets || []).map((target) => target.planting_id).filter(Boolean))) {
+      push(logs, id, log);
+    }
+  }
+  const beds = new Map(s.beds.map((bed) => [bed.id, bed]));
+  const blocks = new Map(s.blocks.map((block) => [block.id, block]));
+  const areas = new Map();
+  for (const block of s.blocks) {
+    const live = s.beds.filter((bed) => bed.block_id === block.id && existsOn(bed.start_date, bed.removed_on, today));
+    bedAreas(block, live).forEach((area, id) => areas.set(id, area));
+  }
+  return { works, logs, beds, blocks, areas, crops: new Map(s.crops.map((crop) => [crop.id, crop])) };
+}
+
+// 作付の畝＋通路の面積（㎡）。今日ない畝は、その畝だけで求める
+function plantingArea(bed, index) {
+  const block = bed && index.blocks.get(bed.block_id);
+  if (!block) {
+    return null;
+  }
+  return index.areas.get(bed.id) ?? bedAreas(block, [bed]).get(bed.id) ?? null;
+}
+
+// 1 つの作付の収量と売上の見込み（revenue.js の forecast）と、収穫量の実績。
+// 実績は、実際に使うプランを開いているときだけ（記録は実際に使うプランの作付につないでいる）。それ以外は actual が null。
+// marketLoading は、市況での品目名を結んであるのに、まだ市況を読んでいないとき。
+// 何件も続けて出すときは、revenueIndex() を 1 回作って渡す
+export function plantingRevenue(planting, index = revenueIndex()) {
+  const s = state();
+  const bed = index.beds.get(planting.bed_id);
+  const crop = index.crops.get(planting.crop_id) || null;
+  const logs = index.logs.get(planting.id) || [];
+  const areaM2 = plantingArea(bed, index);
+  const seedlings = bed && crop ? plantingNumbers(bed.shape, crop, null, plantingSpec(planting, crop, logs)).seedlings : null;
+  const window = harvestWindow(index.works.get(planting.id) || []);
+  const marketName = (crop?.market_item_name || "").trim();
+  const prices = marketName ? s.market?.prices.get(marketName) : undefined;
+  const estimate = prices ? marketEstimate(prices, window) : null;
+  const active = Boolean(s.field) && s.field.active_plan_id === s.plan?.id;
+  return {
+    ...forecast(planting, crop, { seedlings, areaM2, estimate }),
+    crop,
+    areaM2,
+    seedlings,
+    window,
+    marketName,
+    marketLoading: Boolean(marketName) && prices === undefined,
+    actual: active ? harvestActual(planting.id, logs) : null,
+  };
+}
+
+// 収穫量の実績から見た売上（実績の収穫量 × 出荷率 × 単価）。収穫量か単価がなければ null
+export const actualSales = (item) => (item.actual?.kg && item.price ? (item.actual.kg * item.rate.pct * item.price.yen) / 100 : null);
+
+// 作付の品目の呼び名。苗と肥料の集計（crops.js の summarize）と同じ名前にする
+export const plantingCropName = (planting, crop) => (crop ? cropLabel(crop) : planting.crop_name || "品目なし");
+
+// 作付の並びの見込みを、品目ごとに足す。苗と肥料の集計の窓と、「収支」のタブの品目ごとの合計で使う。
+// 収量か売上の分からない作付は、その合計に入れず、数を missingYield、missingSales に数える
+export function revenueByCrop(plantings, index = revenueIndex()) {
+  const byCrop = new Map();
+  for (const planting of plantings) {
+    const item = plantingRevenue(planting, index);
+    const name = plantingCropName(planting, item.crop);
+    if (!byCrop.has(name)) {
+      byCrop.set(name, { name, count: 0, yieldKg: 0, salesYen: 0, harvestKg: 0, missingYield: 0, missingSales: 0 });
+    }
+    const row = byCrop.get(name);
+    row.count += 1;
+    row.yieldKg += item.yieldKg ?? 0;
+    row.salesYen += item.salesYen ?? 0;
+    row.harvestKg += item.actual?.kg ?? 0;
+    row.missingYield += item.yieldKg === null ? 1 : 0;
+    row.missingSales += item.salesYen === null ? 1 : 0;
+  }
+  return [...byCrop.values()].sort((a, b) => a.name.localeCompare(b.name, "ja"));
+}
+
+export const PRICE_FROM = { planting: "作付", crop: "品目", market: "市況" };
+export const formatYen = (value) => (value === null || value === undefined ? "" : Math.round(value).toLocaleString("ja-JP"));
+export const formatKg = (value, digits = 1) =>
+  value === null || value === undefined ? "" : value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+// 作付ごとの表。行はプランのすべての作付（作業時間だけが残った、もうない作付も）。作業時間と収穫の実績の列は、実際に使うプランのときだけ
+function plantingTable(allocation, index) {
+  const s = state();
+  const active = Boolean(allocation);
+  const ids = [...new Set([...s.plantings.map((planting) => planting.id), ...(allocation ? allocation.plantings.keys() : [])])];
+  const rows = ids
+    .map((id) => {
+      const planting = s.plantings.find((item) => item.id === id);
+      const time = allocation?.plantings.get(id);
+      return { id, item: planting ? plantingRevenue(planting, index) : null, time, ...plantingPlace(id) };
+    })
+    .sort((a, b) => compareSort(a.sort, b.sort));
+  const columns = active ? 11 : 6;
+  const body = rows
+    .map(({ id, item, time, place, crop, open }) => {
+      const cells = item
+        ? `<td class="num">${formatKg(item.yieldKg)}</td><td class="num">${item.rate.pct} %</td>` +
+          `<td class="num">${item.price ? `${formatYen(item.price.yen)}<span class="muted">（${PRICE_FROM[item.price.from]}）</span>` : ""}</td>` +
+          `<td class="num">${formatYen(item.salesYen)}</td>`
+        : "<td></td><td></td><td></td><td></td>";
+      const actual = active
+        ? `<td class="num">${item?.actual?.count ? formatKg(item.actual.kg) : ""}</td><td class="num">${item ? formatYen(actualSales(item)) : ""}</td>` +
+          `<td class="num">${time ? formatMinutes(time.direct + time.fromBlock) : ""}</td><td class="num">${time?.fromBlock ? formatMinutes(time.fromBlock) : ""}</td>` +
+          `<td class="muted">${time ? escapeHtml(typesText(time.types)) : ""}</td>`
+        : "";
+      return `<tr${open ? ` data-planting="${escapeHtml(id)}" class="is-link"` : ""}><td>${escapeHtml(place)}</td><td>${escapeHtml(crop)}</td>${cells}${actual}</tr>`;
+    })
+    .join("");
+  const head =
+    '<tr><th>場所</th><th>品目</th><th class="num">収量の見込み（kg）</th><th class="num">出荷率</th><th class="num">単価（円/kg）</th><th class="num">売上の見込み（円）</th>' +
+    (active ? '<th class="num">収穫量（kg）</th><th class="num">収穫量から見た売上（円）</th><th class="num">作業時間</th><th class="num">うち区画の作業</th><th>作業時間の内訳</th>' : "") +
+    "</tr>";
+  return (
+    `<div class="table-scroll"><table class="work-table revenue-table"><thead>${head}</thead>` +
+    `<tbody>${body || `<tr><td colspan="${columns}" class="muted">このプランには、まだ作付がありません。</td></tr>`}</tbody>` +
+    (active ? `<tfoot>${timeFoot(allocation)}</tfoot>` : "") +
+    "</table></div>"
+  );
+}
+
+// 作業時間の合計の行（区画にだけ残った時間、作付と区画の合計、どの作付にも分けない時間、実績につないでいない作業）。
+// 作業時間の列（9 列目）にそろえる
+function timeFoot(allocation) {
   const sessions = (state().sessions || []).filter((session) => session.field_id === state().field.id);
   const commonMinutes = (kind) => splitMinutes(sessions.filter((session) => session.kind === kind), () => []).unassigned;
-  const rows = [...allocation.plantings.entries()]
-    .map(([id, item]) => ({ id, ...item, total: item.direct + item.fromBlock, ...plantingPlace(id) }))
-    .sort((a, b) => compareSort(a.sort, b.sort));
   // 区画全体の作業のうち、分ける作付がなかった分（区画にだけ残る）
   const left = [...allocation.blocks.entries()]
     .map(([id, item]) => ({ id, minutes: item.own - item.shared, name: state().blocks.find((block) => block.id === id)?.name || "（もうない区画）" }))
     .filter((item) => item.minutes > 0.5);
-  const assigned = rows.reduce((sum, row) => sum + row.total, 0) + left.reduce((sum, item) => sum + item.minutes, 0);
-  const body =
-    rows
-      .map(
-        (row) =>
-          `<tr${row.open ? ` data-planting="${escapeHtml(row.id)}" class="is-link"` : ""}>` +
-          `<td>${escapeHtml(row.place)}</td><td>${escapeHtml(row.crop)}</td>` +
-          `<td class="num">${formatMinutes(row.total)}</td><td class="num">${row.fromBlock ? formatMinutes(row.fromBlock) : ""}</td>` +
-          `<td class="muted">${escapeHtml(typesText(row.types))}</td></tr>`
-      )
-      .join("") +
-    left
-      .map(
-        (item) =>
-          `<tr><td>${escapeHtml(item.name)} の区画の作業</td><td></td><td class="num">${formatMinutes(item.minutes)}</td><td></td>` +
-          '<td class="muted">その日に分ける作付がなかった、区画全体の作業</td></tr>'
-      )
-      .join("");
+  const assigned =
+    [...allocation.plantings.values()].reduce((sum, item) => sum + item.direct + item.fromBlock, 0) + left.reduce((sum, item) => sum + item.minutes, 0);
+  const row = (label, minutes, note) =>
+    `<tr><th colspan="8">${label}</th><td class="num">${formatMinutes(minutes)}</td><td></td><td class="muted">${note}</td></tr>`;
+  return (
+    left.map((item) => row(`${escapeHtml(item.name)} の区画の作業`, item.minutes, "その日に分ける作付がなかった、区画全体の作業")).join("") +
+    row("作業時間: 作付と区画の合計", assigned, "") +
+    COMMON_KINDS.map((kind) => row(SESSION_KINDS[kind], commonMinutes(kind), "どの作付にも分けない時間")).join("") +
+    row("実績につないでいない作業", allocation.unassigned, "計画にない作業。「今日」のタブの「直す」で、その日の実績につなげます")
+  );
+}
+
+// 品目ごとの合計の表
+function cropTable(active, index) {
+  const crops = revenueByCrop(state().plantings, index);
+  if (!crops.length) {
+    return "";
+  }
+  const sum = (key) => crops.reduce((total, row) => total + row[key], 0);
+  const missing = (count) => (count ? `<span class="muted">（${count} 件は値なし）</span>` : "");
+  const body = crops
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.name)}</td><td class="num">${row.count}</td>` +
+        `<td class="num">${formatKg(row.yieldKg)}${missing(row.missingYield)}</td><td class="num">${formatYen(row.salesYen)}${missing(row.missingSales)}</td>` +
+        (active ? `<td class="num">${formatKg(row.harvestKg)}</td>` : "") +
+        "</tr>"
+    )
+    .join("");
+  return (
+    '<h3 class="revenue-subhead">品目ごとの合計</h3><div class="table-scroll"><table class="work-table revenue-table revenue-crops">' +
+    `<thead><tr><th>品目</th><th class="num">作付の数</th><th class="num">収量の見込み（kg）</th><th class="num">売上の見込み（円）</th>${active ? '<th class="num">収穫量（kg）</th>' : ""}</tr></thead>` +
+    `<tbody>${body}</tbody>` +
+    `<tfoot><tr><th>合計</th><td class="num">${sum("count")}</td><td class="num">${formatKg(sum("yieldKg"))}</td><td class="num">${formatYen(sum("salesYen"))}</td>` +
+    `${active ? `<td class="num">${formatKg(sum("harvestKg"))}</td>` : ""}</tr></tfoot></table></div>`
+  );
+}
+
+export function renderRevenue() {
+  if (!ctx || !state().field || $("revenueView").hidden) {
+    return;
+  }
+  // 作業時間と収穫の実績は、実際に使うプランの作業と作付につないでいるので、ほかのプランでは見込みだけを出す
+  const allocation = timeAllocation();
+  const index = revenueIndex();
   draw(
     $("revenueBody"),
-    '<div class="table-scroll"><table class="work-table revenue-table"><thead><tr><th>場所</th><th>品目</th><th class="num">作業時間</th><th class="num">うち区画の作業</th><th>内訳</th></tr></thead>' +
-      `<tbody>${body || '<tr><td colspan="5" class="muted">作業時間を測った作付はまだありません。「今日」のタブの「始める」で測ります。</td></tr>'}</tbody>` +
-      `<tfoot><tr><th colspan="2">作付と区画の合計</th><td class="num">${formatMinutes(assigned)}</td><td></td><td></td></tr>` +
-      COMMON_KINDS.map(
-        (kind) => `<tr><th colspan="2">${SESSION_KINDS[kind]}</th><td class="num">${formatMinutes(commonMinutes(kind))}</td><td></td><td class="muted">どの作付にも分けない時間</td></tr>`
-      ).join("") +
-      `<tr><th colspan="2">実績につないでいない作業</th><td class="num">${formatMinutes(allocation.unassigned)}</td><td></td><td class="muted">計画にない作業。「今日」のタブの「直す」で、その日の実績につなげます</td></tr></tfoot>` +
-      "</table></div>"
+    (allocation ? "" : '<p class="muted">開いているプランは、実際に使うプランではありません。見込みだけを出します。作業時間と収穫量は、実際に使うプランを開くと出ます。</p>') +
+      plantingTable(allocation, index) +
+      cropTable(Boolean(allocation), index)
   );
 }
 
 export function initRevenue(context) {
   ctx = context;
+  // アプリに戻ったときに、古くなった市況を読み直す（loadMarket が、古いかを確かめる）
+  document.addEventListener("app-returned", () => loadMarket());
+  // 起動のときは、圃場を読み終えてからここへ来る（app.js の loadFieldData では、まだ ctx がない）
+  loadMarket();
   $("revenueBody").addEventListener("click", (event) => {
     const row = event.target.closest("tr[data-planting]");
     if (row) {

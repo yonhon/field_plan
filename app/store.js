@@ -20,7 +20,7 @@ const LOCAL_TAG_NAMES = {
 };
 // この画面の版。DB の field.app_compat の min_version より古ければ、起動のときに新しい版を読み込み直す。
 // 古い画面では正しく書けない形に DB を変えるときに 1 つ上げ、DB の min_version も同じ値にする（sql/field.sql）
-export const APP_VERSION = 3;
+export const APP_VERSION = 4;
 const LOCAL_KEY = "field_plan_local";
 
 // 下絵の署名付き URL。発行のたびに URL が変わると、ブラウザーのキャッシュが効かず、起動のたびに画像全体を読み直す。
@@ -415,6 +415,13 @@ export function createSupabaseStore(client, options) {
       if (keys.length) {
         check(await client.from("news").update({ read_at: readAt }).in("key", keys));
       }
+    },
+    // 市況（agri_db の public.market_daily_item_stats）。品目名の一覧と、品目ごとの日々の中値（円/kg）。field の関数を通す
+    async marketItems() {
+      return check(await client.rpc("market_items"));
+    },
+    async marketPrices(names) {
+      return names.length ? check(await client.rpc("market_prices", { p_names: names })) : [];
     },
     // 2 週間気温予報。ブラウザーから気象庁を読めないので、Supabase の関数を通す
     async twoWeek(station) {
@@ -1102,6 +1109,17 @@ function createLocalTables({ strict = false } = {}) {
           }
         }
       });
+    },
+    // 市況は、このブラウザーの保存の data.market（[{ item_name, sale_date, avg_price }]）から読む。動作確認とテストで入れる
+    async marketItems() {
+      const counts = new Map();
+      for (const row of read().market || []) {
+        counts.set(row.item_name, (counts.get(row.item_name) || 0) + 1);
+      }
+      return [...counts.entries()].map(([item_name, days]) => ({ item_name, days })).sort((a, b) => a.item_name.localeCompare(b.item_name));
+    },
+    async marketPrices(names) {
+      return (read().market || []).filter((row) => names.includes(row.item_name)).map((row) => ({ ...row }));
     },
     async twoWeek() {
       return { days: [] };

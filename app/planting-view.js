@@ -28,7 +28,7 @@ import {
 import { draw } from "./draw.js";
 import { openDiaryTarget } from "./diary-view.js";
 import { escapeHtml } from "./html.js";
-import { timeAllocation, typesText } from "./revenue-view.js";
+import { PRICE_FROM, actualSales, formatKg, formatYen, plantingRevenue, timeAllocation, typesText } from "./revenue-view.js";
 import { formatMinutes } from "./work-time.js";
 
 const $ = (id) => document.getElementById(id);
@@ -386,7 +386,72 @@ function asideHtml(c, active) {
   if (!c.planting) {
     return "";
   }
-  return [workTimeHtml(c), famicEnabled() && active ? usageHtml(c) : "", accumulationHtml(), forecastHtml()].join("");
+  return [revenueHtml(c), workTimeHtml(c), famicEnabled() && active ? usageHtml(c) : "", accumulationHtml(), forecastHtml()].join("");
+}
+
+const VALUE_FROM = { planting: "この作付の値", crop: "品目の値" };
+const shortDate = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+
+// 市況から推した単価の説明。広げた日数や、全期間を使ったことが分かるようにする（revenue.js の marketEstimate）
+function estimateNote(item) {
+  const estimate = item.price?.estimate;
+  if (!estimate) {
+    return "";
+  }
+  const range = `${estimate.days} 日分、${estimate.from.slice(0, 7).replace("-", "/")}〜${estimate.to.slice(0, 7).replace("-", "/")}、幅 ${formatYen(estimate.low)}〜${formatYen(estimate.high)} 円`;
+  const how =
+    estimate.widen === "all"
+      ? item.window
+        ? `収穫の時期（${shortDate(item.window.start)}〜${shortDate(item.window.end)}）の市況が足りないため、市況のある全期間の中央値です`
+        : "収穫の計画に日付がないため、市況のある全期間の中央値です"
+      : estimate.widen
+        ? `収穫の時期（${shortDate(item.window.start)}〜${shortDate(item.window.end)}）の前後 ${estimate.widen} 日の中央値です`
+        : `収穫の時期（${shortDate(item.window.start)}〜${shortDate(item.window.end)}）の中央値です`;
+  return `単価は、市況「${item.marketName}」の卸値から推しました。${how}（${range}）。手数料などを引く前の値です。`;
+}
+
+// 収量と売上。見込み（品目か作付の値、市況からの推定）と、収穫量の実績を並べる。計算は revenue.js、値を集めるのは revenue-view.js
+function revenueHtml(c) {
+  const item = plantingRevenue(c.planting);
+  const title = "<h2>収量と売上</h2>";
+  if (!item.yield && !item.price && !item.actual?.count) {
+    const loading = item.marketLoading ? "市況を読んでいます。" : "";
+    return (
+      `<section class="panel revenue-panel">${title}<p class="muted">${loading}台帳の品目か、「工程の計画」のこの作付で、収量（10 a あたりか 1 株あたり）と単価を入れると、見込みが出ます。</p></section>`
+    );
+  }
+  const actual = item.actual;
+  const showActual = Boolean(actual);
+  const per10a = (kg) => (kg !== null && item.areaM2 ? formatKg((kg / item.areaM2) * 1000, 0) : "");
+  const actualShipped = actual?.count ? (actual.kg * item.rate.pct) / 100 : null;
+  const row = (label, forecastText, actualText = "") =>
+    `<tr><td>${label}</td><td class="num">${forecastText || "－"}</td>${showActual ? `<td class="num">${actualText || "－"}</td>` : ""}</tr>`;
+  const how = item.yield
+    ? item.yield.method === "plant"
+      ? `1 株 ${formatKg(item.yield.value, 0)} g × 苗 ${item.seedlings.toLocaleString("ja-JP")}（${VALUE_FROM[item.yield.from]}）`
+      : `10 a あたり ${formatKg(item.yield.value, 0)} kg × ${formatKg(item.areaM2)} ㎡（${VALUE_FROM[item.yield.from]}）`
+    : "値がありません（品目か作付で、10 a あたりか 1 株あたりを入れます。1 株あたりは、苗数が分かる作付だけで使います）";
+  // 収量の差による売上の差 =（実績の出荷量 − 見込みの出荷量）× 単価。収穫の計画が終わる前は、途中の値
+  const gap = actualShipped !== null && item.shippedKg !== null && item.price ? (actualShipped - item.shippedKg) * item.price.yen : null;
+  const harvesting = item.window && item.window.end >= localToday();
+  const notes = [
+    `収量: ${how}。出荷率 ${item.rate.pct} %（${item.rate.from === "default" ? "値がないので 100 %" : VALUE_FROM[item.rate.from]}）。金額は税抜きです。`,
+    item.price?.from === "market" ? estimateNote(item) : "",
+    !item.price && item.marketLoading ? "市況を読んでいます。" : "",
+    !item.price && item.marketName && !item.marketLoading ? `市況「${item.marketName}」に取引がないため、単価を推せません。` : "",
+    actual?.splitKg ? `収穫量のうち ${formatKg(actual.splitKg)} kg は、何本かの畝をまとめて量った量を、畝＋通路の面積の比で分けた値です。` : "",
+  ].filter(Boolean);
+  return (
+    `<section class="panel revenue-panel">${title}<table class="usage-table revenue-panel-table">` +
+    `<thead><tr><th></th><th class="num">見込み</th>${showActual ? '<th class="num">実績</th>' : ""}</tr></thead><tbody>` +
+    row("収量（kg）", formatKg(item.yieldKg), actual?.count ? `${formatKg(actual.kg)}（${actual.count} 回）` : "") +
+    row("出荷量（kg）", formatKg(item.shippedKg), formatKg(actualShipped)) +
+    row("単価（円/kg）", item.price ? `${formatYen(item.price.yen)}（${PRICE_FROM[item.price.from]}）` : "") +
+    row("売上（円）", formatYen(item.salesYen), formatYen(actualSales(item))) +
+    row("10 a あたり収量（kg）", per10a(item.yieldKg), actual?.count ? per10a(actual.kg) : "") +
+    (gap !== null ? row(`収量の差による売上の差${harvesting ? "（収穫中）" : ""}`, "", `${gap > 0 ? "＋" : gap < 0 ? "−" : ""}${formatYen(Math.abs(gap))}`) : "") +
+    `</tbody></table>${notes.map((text) => `<p class="muted">${escapeHtml(text)}</p>`).join("")}</section>`
+  );
 }
 
 // 作業時間（「今日」のタブで測った時間）。その作付でした作業と、区画全体にした作業から面積の比で分けた分を分けて出す。
@@ -575,7 +640,7 @@ function blockInfoHtml(c) {
   if (!summary.crops.length) {
     return `<span class="muted detail-info">${escapeHtml(text)}</span>${timeHtml}`;
   }
-  return `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗と肥料の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>${timeHtml}`;
+  return `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗・肥料・収量の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>${timeHtml}`;
 }
 
 // 日程の画面で「全体」を選んだときの頭。名前と、すべての区画の面積・畝の本数（押すと苗と肥料の集計を出し入れする。区画の頭と同じ）、
@@ -589,7 +654,7 @@ export function renderWholeHead() {
   const summary = summarize({ ...s, beds: s.beds, logs: s.logs || [] });
   const text = `区画 ${blocks.reduce((sum, block) => sum + polygonArea(block.shape), 0).toFixed(1)} ㎡・畝 ${live.length} 本`;
   const info = summary.crops.length
-    ? `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗と肥料の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>`
+    ? `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗・肥料・収量の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>`
     : `<span class="muted detail-info">${escapeHtml(text)}</span>`;
   draw(
     $("blockHead"),

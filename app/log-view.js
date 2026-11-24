@@ -7,6 +7,7 @@ import { SPEC_FIELDS, formatAmount, isBlockTarget, logEnd, perHoleScale, perHole
 import * as famic from "./pesticide.js";
 import { draw } from "./draw.js";
 import { holesOf } from "./crops.js";
+import { splitHarvest } from "./revenue.js";
 import { confirmDiscard, processChange, processClick, processDirty, processHtml, processPreset, saveProcess, startProcess } from "./process-editor.js";
 import { escapeHtml } from "./html.js";
 
@@ -407,6 +408,7 @@ const draftSnapshot = () =>
     blocks: [...draft.blocks],
     linked: [...draft.linked],
     spray: draft.spray,
+    harvest: draft.harvest,
     inputs: draft.inputs.map(({ kind, name, reg_no, dilution, amount, unit, method, fertilizer_id, per_hole }) => ({ kind, name, reg_no, dilution, amount, unit, method, fertilizer_id, per_hole })),
   });
 const isDirty = () => Boolean(draft) && (draft.kind === "process" ? processDirty() : draftSnapshot() !== draft.baseline);
@@ -479,6 +481,9 @@ function makeDraft(log, preset) {
     blocks: new Set(),
     orphans: [], // 対象の一覧にない対象（畝や区画を消した記録など）。そのまま残す
     spray: {}, // 品目のまとまり（または区画）ごとの散布液の量（L）
+    // 収穫で、畝ごとに量った収穫量（kg）。畝の ID → 量。入れていない畝には、収穫量の残りを面積の比で分ける（revenue.js の splitHarvest）
+    harvest: Object.fromEntries((log?.targets || []).filter((target) => target.bed_id && num(target.harvest_kg) !== null).map((target) => [target.bed_id, num(target.harvest_kg)])),
+    harvestOpen: (log?.targets || []).some((target) => num(target.harvest_kg) !== null), // 畝ごとの欄を開いているか
     inputs: (log?.inputs || source?.detail?.inputs || []).map((input) => ({ ...input })),
     cancellable: open.works.map((work) => work.id), // 取りやめにできる計画の作業
   };
@@ -879,7 +884,86 @@ function specSection() {
       return `<label>${label}<input type="${type}" data-spec="${key}" value="${escapeHtml(value ?? "")}"${type === "number" ? ' step="any" min="0" inputmode="decimal"' : ""} /></label>`;
     })
     .join("");
-  return `<div class="log-section"><h3>${choices ? "中身" : draft.kind === "plan" ? "予定の仕様" : "実際の仕様"}</h3>${items}${inputs ? `<div class="form-grid">${inputs}</div>` : ""}</div>`;
+  return `<div class="log-section"><h3>${choices ? "中身" : draft.kind === "plan" ? "予定の仕様" : "実際の仕様"}</h3>${items}${inputs ? `<div class="form-grid">${inputs}</div>` : ""}${harvestBedsHtml()}</div>`;
+}
+
+// 収穫の実績で、畝を 2 本以上選んだとき: 畝ごとに量った収穫量を入れる欄。入れていない畝には、残りを面積の比で分ける
+const harvestByBeds = () => draft.work_type === "harvest" && draft.kind === "actual" && draft.mode !== "blocks";
+
+// 選んでいる畝ごとの量（入れた量と、分けた量）。revenue.js の splitHarvest で、畝の ID を作付の代わりにして求める
+function harvestSplit(items = pickedItems()) {
+  const parts = splitHarvest({
+    spec: { harvest_kg: num(draft.spec.harvest_kg) },
+    targets: items.map((item) => ({ planting_id: item.bed_id, area_m2: item.area_m2, harvest_kg: draft.harvest[item.bed_id] ?? null })),
+  });
+  return new Map(parts.map((part) => [part.planting_id, part]));
+}
+
+// 畝ごとの量の合計と、それが収穫量を超えていないか。超えていれば error に知らせる文
+function harvestBedsCheck(items = pickedItems()) {
+  const entered = items.map((item) => num(draft.harvest[item.bed_id])).filter((value) => value !== null);
+  const sum = entered.reduce((total, value) => total + value, 0);
+  const total = num(draft.spec.harvest_kg);
+  if (!entered.length) {
+    return { sum, error: "", note: "" };
+  }
+  if (total !== null && sum > total + 1e-9) {
+    return { sum, error: `畝ごとの量の合計（${fmt(sum, 2)} kg）が、収穫量（${fmt(total, 2)} kg）を超えています。`, note: "" };
+  }
+  return { sum, error: "", note: total === null ? `収穫量は、畝ごとの量の合計 ${fmt(sum, 2)} kg として保存します。` : "" };
+}
+
+const harvestHint = (part) => (part && !part.measured && num(draft.spec.harvest_kg) !== null ? `分けた量 ${fmt(part.kg, 2)} kg` : "");
+
+function harvestBedsHtml() {
+  if (!harvestByBeds()) {
+    return "";
+  }
+  const items = pickedItems();
+  if (items.length < 2) {
+    return "";
+  }
+  const count = items.filter((item) => num(draft.harvest[item.bed_id]) !== null).length;
+  const button =
+    `<button type="button" class="text-btn" data-act="harvestBeds" aria-expanded="${draft.harvestOpen}">` +
+    `${draft.harvestOpen ? "▾" : "▸"} 畝ごとに入れる${count && !draft.harvestOpen ? `（${count} 本に入力あり）` : ""}</button>`;
+  if (!draft.harvestOpen) {
+    return `<div class="log-harvest">${button}</div>`;
+  }
+  const split = harvestSplit(items);
+  const check = harvestBedsCheck(items);
+  const rows = items
+    .map(
+      (item) =>
+        `<label class="inline-field log-harvest-bed">${escapeHtml(item.label)}<span class="muted">${fmt(item.area_m2 ?? null)} ㎡</span>` +
+        `<input type="number" step="any" min="0" inputmode="decimal" data-harvest="${escapeHtml(item.bed_id)}" value="${draft.harvest[item.bed_id] ?? ""}" aria-label="${escapeHtml(item.label)}の収穫量（kg）" /> kg` +
+        `<span class="muted" data-harvest-hint="${escapeHtml(item.bed_id)}">${harvestHint(split.get(item.bed_id))}</span></label>`
+    )
+    .join("");
+  return (
+    `<div class="log-harvest">${button}<p class="muted">量った畝だけ入れます。入れていない畝には、収穫量の残りを、畝＋通路の面積の比で分けます。</p>` +
+    `${rows}<p class="muted" id="logHarvestNote">${escapeHtml(check.error || check.note)}</p></div>`
+  );
+}
+
+// 畝ごとの量の、分けた量と合計の文を、描き直さずに書き換える（打っている欄を作り直さないため）
+function updateHarvestHints() {
+  if (!harvestByBeds() || !draft.harvestOpen) {
+    return;
+  }
+  const items = pickedItems();
+  const split = harvestSplit(items);
+  for (const item of items) {
+    const hint = dialog.querySelector(`[data-harvest-hint="${CSS.escape(item.bed_id)}"]`);
+    if (hint) {
+      hint.textContent = harvestHint(split.get(item.bed_id));
+    }
+  }
+  const note = dialog.querySelector("#logHarvestNote");
+  if (note) {
+    const check = harvestBedsCheck(items);
+    note.textContent = check.error || check.note;
+  }
 }
 
 function inputSection(items) {
@@ -1192,6 +1276,9 @@ function onClick(event) {
     requestClose();
   } else if (act === "save" && draft.kind === "process") {
     saveProcessDraft();
+  } else if (act === "harvestBeds") {
+    draft.harvestOpen = !draft.harvestOpen;
+    renderDialog();
   } else if (act === "today") {
     setDate(localToday());
   } else if (act === "todayEnd") {
@@ -1445,6 +1532,9 @@ function onInput(event) {
     draft.note = el.value;
   } else if (el.dataset.spec && el.type !== "checkbox") {
     draft.spec[el.dataset.spec] = el.value;
+    if (el.dataset.spec === "harvest_kg") {
+      updateHarvestHints();
+    }
   } else if (el.dataset.in !== undefined && el.tagName === "INPUT") {
     const input = draft.inputs[Number(el.dataset.in)];
     input[el.dataset.k] = el.type === "number" ? num(el.value) : el.value;
@@ -1462,6 +1552,9 @@ function onInput(event) {
   } else if (el.dataset.spray !== undefined) {
     draft.spray[el.dataset.spray] = num(el.value);
     updateTotals();
+  } else if (el.dataset.harvest !== undefined) {
+    draft.harvest[el.dataset.harvest] = num(el.value);
+    updateHarvestHints();
   }
 }
 
@@ -1505,6 +1598,7 @@ function buildLog() {
         crop_name: item.crop_name || "",
         area_m2: round(item.area_m2 ?? null, 2),
         spray_l: round(sprayOf.get(item) ?? null, 3),
+        harvest_kg: harvestByBeds() ? round(num(draft.harvest[item.bed_id]), 3) : null,
       };
     }),
     ...draft.orphans,
@@ -1522,6 +1616,13 @@ function buildLog() {
       }
     } else if (num(value) !== null) {
       spec[key] = num(value);
+    }
+  }
+  // 畝ごとの収穫量だけを入れたときは、その合計を記録の収穫量にする
+  if (harvestByBeds() && spec.harvest_kg === undefined) {
+    const sum = harvestBedsCheck(items).sum;
+    if (sum > 0) {
+      spec.harvest_kg = round(sum, 3);
     }
   }
   // 株の手入れとその他の中身。その他の「その他」は、何をしたかの文字も
@@ -1597,6 +1698,11 @@ async function save() {
   const holesError = perHoleError();
   if (holesError) {
     showError(holesError);
+    return;
+  }
+  const harvestError = harvestByBeds() ? harvestBedsCheck().error : "";
+  if (harvestError) {
+    showError(harvestError);
     return;
   }
   // 登録番号のある農薬は、まとまりごとに作物名と使い方を選ばないと保存しない（当てはまる作物名がなければ使えない農薬）

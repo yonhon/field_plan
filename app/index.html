@@ -263,16 +263,17 @@
       <div id="scheduleBody" class="schedule-body">
         <!-- 区画の頭（前後の区画、名前と面積・畝・苗、入力と日記のボタン、表示の切り替え）。planting-view.js が描く -->
         <div id="blockHead" class="block-head"></div>
-        <!-- 苗と肥料の集計。区画では頭の面積・畝・苗の行を押すと開く。「全体」ではいつも出す（すべての区画の合計） -->
+        <!-- 苗・肥料・収量の集計。区画では頭の面積・畝・苗の行を押すと開く。「全体」ではいつも出す（すべての区画の合計） -->
         <section id="blockSummary" class="panel" hidden>
-          <h2 id="summaryTitle">苗と肥料の集計（この区画）</h2>
+          <h2 id="summaryTitle">苗・肥料・収量の集計（この区画）</h2>
           <div class="table-scroll">
             <table class="work-table summary-table">
-              <thead><tr><th>品目</th><th>作付の数</th><th>面積（㎡）</th><th>苗数</th><th>肥料</th></tr></thead>
+              <thead><tr><th>品目</th><th>作付の数</th><th>面積（㎡）</th><th>苗数</th><th>肥料</th><th>収量の見込み（kg）</th><th>売上の見込み（円）</th></tr></thead>
               <tbody id="cropSummary"></tbody>
             </table>
           </div>
           <p id="fertilizerSummary" class="muted"></p>
+          <p id="revenueSummary" class="muted"></p>
         </section>
 
         <section id="stripPanel" class="panel">
@@ -457,12 +458,12 @@
       <section id="todaySessions" class="panel today-sessions"></section>
     </main>
 
-    <!-- 収支: 作付ごとの収支の一覧（revenue-view.js）。いまは作業時間だけ -->
+    <!-- 収支: 作付ごとの収支の一覧（revenue-view.js）。収量と売上の見込み、収穫量の実績、作業時間 -->
     <main id="revenueView" class="schedule" hidden>
       <section class="panel">
         <div class="panel-heading">
-          <h2>作付ごとの作業時間</h2>
-          <p class="muted">「今日」のタブで測った時間を、作付ごとに合計しています。何本かの畝をまとめて測った時間と、区画全体にした作業の時間は、その日にある畝の作付に、畝＋通路の面積の比で分けています（畝立ての前の作業は、次に入る作付に分けます）。開いている圃場の分だけです。売上と経費は、これから足します。</p>
+          <h2>作付ごとの収支</h2>
+          <p class="muted">収量と売上の見込みは、品目（台帳）か作付（工程の計画）の収量・出荷率・単価から出します。単価は税抜きで、どちらにもなければ市況（卸値）から推定します。収穫量は、何本かの畝をまとめて量った分を、畝ごとに入れた量を除いて、畝＋通路の面積の比で分けています。作業時間は「今日」のタブで測った時間で、何本かの畝をまとめて測った時間と、区画全体にした作業の時間は、その日にある畝の作付に、面積の比で分けています（畝立ての前の作業は、次に入る作付に分けます）。開いている圃場の分だけです。経費は、これから足します。</p>
         </div>
         <div id="revenueBody"></div>
       </section>
@@ -483,7 +484,7 @@
       </div>
       <section class="panel master-panel" data-masterpanel="crops" role="tabpanel">
         <div class="panel-heading">
-          <p class="muted">品目ごとの設定値です。作付に品目を割り当てると、畝の寸法とこの値から、苗数と肥料の量を計算します。苗数は、定植・播種の実績に株間・条数を記録した作付では、実績の値で計算します。空の欄は計算に使いません。すべての圃場とプランで共通です。</p>
+          <p class="muted">品目ごとの設定値です。作付に品目を割り当てると、畝の寸法とこの値から、苗数と肥料の量を計算します。苗数は、定植・播種の実績に株間・条数を記録した作付では、実績の値で計算します。収量（10 a あたりか 1 株あたり）、出荷率、想定単価（税抜き）からは、作付ごとの収量と売上の見込みを出します。1 株あたりは苗数の分かる作付で、10 a あたりより先に使います。出荷率が空なら 100 % とします。想定単価が空なら、市況での品目名を選んでおくと、収穫の時期の市況（卸値）の中央値を使います。作付ごとに違う値は、「工程の計画」のその作付で入れます。空の欄は計算に使いません。すべての圃場とプランで共通です。</p>
           <button id="addCropBtn" class="chip-btn edit-only">品目を追加</button>
         </div>
         <div class="table-scroll"><table id="cropTable" class="work-table crop-table"></table></div>

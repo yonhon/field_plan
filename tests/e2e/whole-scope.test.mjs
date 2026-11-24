@@ -69,7 +69,7 @@ test("日程の「全体」: 工程表にすべての区画を描き、頭の面
   assert.equal(await shown("blockSummary"), false, "初めは集計を出さない");
   await page.click('#blockHead [data-act="summary"]');
   assert.equal(await shown("blockSummary"), true, "押すと苗と肥料の集計を出す");
-  assert.equal(await page.run(`document.getElementById("summaryTitle").textContent`), "苗と肥料の集計（全体）");
+  assert.equal(await page.run(`document.getElementById("summaryTitle").textContent`), "苗・肥料・収量の集計（全体）");
   assert.equal(await page.run(`document.querySelector("#cropSummary td:nth-child(2)").textContent`), "2", "2 つの区画の作付を合わせる");
   assert.equal(await shown("stripPanel"), false, "区画と畝の図は出さない");
   assert.equal(await shown("blockRecord"), false, "区画の作業の計画と実績は出さない");
@@ -90,7 +90,7 @@ test("日程の「全体」: 工程表にすべての区画を描き、頭の面
   await page.click('#gantt .gantt-link[data-detail="block"][data-id="b2"]');
   await page.waitFor(`location.hash === "#schedule/block/b2" && document.getElementById("schedulePicker").value === "block:b2"`, "区画 B を開く");
   assert.equal(await shown("stripPanel"), true, "区画では区画と畝の図を出す");
-  assert.equal(await page.run(`document.getElementById("summaryTitle").textContent`), "苗と肥料の集計（この区画）");
+  assert.equal(await page.run(`document.getElementById("summaryTitle").textContent`), "苗・肥料・収量の集計（この区画）");
   await page.run("history.back()");
   await page.waitFor(`location.hash === "#schedule/all" && document.getElementById("schedulePicker").value === "all"`, "戻ると全体");
 

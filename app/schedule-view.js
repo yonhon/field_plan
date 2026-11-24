@@ -19,6 +19,7 @@ import {
   worksRange,
 } from "./schedule.js";
 import { summarize } from "./crops.js";
+import { formatKg, formatYen, revenueByCrop } from "./revenue-view.js";
 import { confirmDelete, notify } from "./dialog.js";
 import { record } from "./journal.js";
 import { completeWorks, copyPlanWorks, logForWork, moveLogs, openLogEditor, openPlanEditor, revertWorks } from "./log-view.js";
@@ -835,24 +836,41 @@ function printGantt() {
 
 // 選んでいる区画（全体ならすべての区画）の、品目ごとの苗数と、肥料ごとの量。区画の頭の面積・畝・苗の行を押すと開く（planting-view.js）。
 function renderSummary() {
-  $("summaryTitle").textContent = sel.whole ? "苗と肥料の集計（全体）" : "苗と肥料の集計（この区画）";
-  const summary = summarize({ ...state(), beds: sel.whole ? state().beds : blockBeds(sel.blockId), logs: state().logs || [] });
+  $("summaryTitle").textContent = sel.whole ? "苗・肥料・収量の集計（全体）" : "苗・肥料・収量の集計（この区画）";
+  const beds = sel.whole ? state().beds : blockBeds(sel.blockId);
+  const summary = summarize({ ...state(), beds, logs: state().logs || [] });
+  // 収量と売上の見込み（revenue-view.js）。品目の名前で、苗と肥料の行に合わせる
+  const bedIds = new Set(beds.map((bed) => bed.id));
+  const revenue = new Map(revenueByCrop(state().plantings.filter((planting) => bedIds.has(planting.bed_id))).map((row) => [row.name, row]));
   const number = (value, digits = 0) => value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  // 値のない作付があれば、その数を添える（合計に入れていない）
+  const partial = (row, missing, text) => (missing ? `${missing < row.count ? text : "-"}<span class="muted">（${missing} 件は値なし）</span>` : text);
   draw(
     $("cropSummary"),
     summary.crops
-      .map(
-        (row) =>
+      .map((row) => {
+        const money = revenue.get(row.name);
+        return (
           `<tr><td>${escapeHtml(row.name)}${row.registered ? "" : '<span class="muted">（未登録）</span>'}</td>` +
           `<td class="num">${row.count}</td><td class="num">${number(row.area, 1)}</td>` +
           `<td class="num">${row.seedlings ? number(row.seedlings) : "-"}</td>` +
-          `<td>${row.fertilizerKg ? `${escapeHtml(row.fertilizer)} ${number(row.fertilizerKg, 2)} kg` : "-"}</td></tr>`
-      )
+          `<td>${row.fertilizerKg ? `${escapeHtml(row.fertilizer)} ${number(row.fertilizerKg, 2)} kg` : "-"}</td>` +
+          `<td class="num">${money ? partial(money, money.missingYield, formatKg(money.yieldKg)) : "-"}</td>` +
+          `<td class="num">${money ? partial(money, money.missingSales, formatYen(money.salesYen)) : "-"}</td></tr>`
+        );
+      })
       .join("")
   );
   $("fertilizerSummary").textContent = summary.fertilizers.length
     ? `肥料の合計: ${summary.fertilizers.map((row) => `${row.name} ${number(row.kg, 2)} kg`).join("、")}`
     : "";
+  const totals = [...revenue.values()];
+  const yieldKg = totals.reduce((sum, row) => sum + row.yieldKg, 0);
+  const salesYen = totals.reduce((sum, row) => sum + row.salesYen, 0);
+  $("revenueSummary").textContent =
+    yieldKg > 0 || salesYen > 0
+      ? `見込みの合計: 収量 ${formatKg(yieldKg)} kg・売上 ${formatYen(salesYen)} 円（税抜き）${totals.some((row) => row.missingYield || row.missingSales) ? "。値のない作付は含めていません" : ""}`
+      : "";
 }
 
 // 並んだ作業がすべて終わり、最後の作業のあとにあける日数（すき込みのあとの 21 日など）も過ぎた、最初の日。

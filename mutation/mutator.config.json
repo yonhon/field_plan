@@ -9,6 +9,7 @@
     "app/logs.js",
     "app/pesticide.js",
     "app/rac.js",
+    "app/revenue.js",
     "app/schedule.js",
     "app/upload.js",
     "app/weather.js",

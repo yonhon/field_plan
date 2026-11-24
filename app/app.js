@@ -39,7 +39,7 @@ import { MASTER_TABS, currentMasterTab, initCrops, renderCrops, setMasterTab } f
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
 import { setPlace, setPlaceActions, setUserMenu } from "./user-menu.js";
 import { initToday, renderToday, resetToday } from "./today-view.js";
-import { initRevenue, renderRevenue } from "./revenue-view.js";
+import { initRevenue, loadMarket, renderRevenue } from "./revenue-view.js";
 import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.js";
 import { syncTimerNotice } from "./timer-notice.js";
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
@@ -1570,6 +1570,8 @@ function refreshViews() {
   renderPlantingDetail();
   renderToday();
   renderRevenue();
+  // 品目に結んだ市況を、まだ読んでいなければ読む（読み終えたら、見込みを描き直す）
+  loadMarket();
 }
 
 // 「元に戻す」が途中で失敗したあとに呼ぶ。画面は戻したあとの内容、DB は途中までなので、DB から読み直して画面を DB にそろえる。
@@ -2729,6 +2731,8 @@ async function openField(field) {
   render();
   renderWeatherSettings();
   syncWeather();
+  // 品目に結んだ市況を読む（起動を待たせない。読み終えたら、見込みを描き直す）
+  loadMarket();
 }
 
 // 圃場を作って開く。作った圃場を返す（やめたときは null）
@@ -4576,6 +4580,16 @@ async function startApp(user = "local") {
   });
   initRevenue({
     state,
+    setStatus,
+    // 市況が届いたら、台帳の市況の品目名の候補と、単価の推定を使う画面を描き直す。品目の市況を読まなかったときは、台帳だけ
+    onMarket: ({ prices }) => {
+      renderCrops();
+      if (prices) {
+        renderSchedule();
+        renderPlantingDetail();
+        renderRevenue();
+      }
+    },
     typeLabel: anyTypeLabel,
     openDetail: (kind, id) => {
       openPlantingDetail(kind, id);

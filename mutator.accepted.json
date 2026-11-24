@@ -59,6 +59,10 @@
     "reason": "等価: 使用基準の行（_uses）を読むのは、登録番号を選んだ農薬だけ（pick、ensureUses。unpick で消す）。農薬でないものや登録番号のないものが _uses を持つことはない",
     "where": "app/pesticide.js:466:47 input.kind === \"pesticide\" && input.reg_no -> true"
   },
+  "1vci68z47xd": {
+    "reason": "等価: 市況がないときの予備 [] を文字の並びに変えても、文字には sale_date がないので、すぐ後の filter で除かれる",
+    "where": "app/revenue.js:162:27 [] -> [\"Stryker was here!\"]"
+  },
   "1xx9lx6bnso": {
     "reason": "等価: pesticideCounts が数えた登録番号は、同じ作付・同じ条件（農薬で登録番号がある）の繰り返しで、必ず productRows にも入る。?. と予備の [] は使われない",
     "where": "app/logs.js:470:32 ?. -> ."
@@ -147,9 +151,17 @@
     "reason": "等価: 選んだ希釈倍率は、選んだ品目の下限のいちばん大きいものなので、それを持つ品目は必ず見つかる。?. と予備の \"\" は使われない",
     "where": "app/pesticide.js:405:83 ?. -> ."
   },
+  "jpkxyuabmj": {
+    "reason": "等価: 年の中の何日目かは、2 つの日の差を 365 で割った余りでしか使わない。2001/1/1 を引かずに足すと、どの日にも同じ数が足されるだけで、差と余りは変わらない",
+    "where": "app/revenue.js:145:22 Date.UTC(2001, month - 1, day) - Date.UTC(2001, 0, 1) -> Date.UTC(2001, month - 1, day) + Date.UTC(2001, 0, 1)"
+  },
   "l9rb4j6o9x": {
     "reason": "等価: 2 つの日付が同じときだけ違うが、どちらを残しても同じ日付になる",
     "where": "app/logs.js:488:23 day > first -> day >= first"
+  },
+  "m4htral2q6": {
+    "reason": "等価: from は (日 - from + 365) % 365 でしか使わない。365 を足す代わりに引いても、365 の倍数が変わるだけで、余りは同じ（日 - from + 365 は負にならない）",
+    "where": "app/revenue.js:186:21 start - widen + 365 -> start - widen - 365"
   },
   "np60fct22m": {
     "reason": "等価: usageTable の並び順（ingredientOrder）と上限・条件の入れ物は、pesticideCounts が数えた成分の名前でしか読まない。空の名前や余分な名前、重なった名前が入っても、表には出ない。条件の文の予備 \"\" を変えても \"(\" を含まない",
@@ -170,5 +182,9 @@
   "rg9pib17t5": {
     "reason": "等価: 条件の文の予備 \"\" を変えても \"(\" を含まないので、条件の指摘は出ない",
     "where": "app/logs.js:531:31 \"\" -> \"Stryker was here!\""
+  },
+  "v703v58t9m": {
+    "reason": "等価: log.targets がないときの予備 [] を文字の並びに変えても、文字には planting_id がないので、すぐ後の filter で除かれる",
+    "where": "app/revenue.js:83:35 [] -> [\"Stryker was here!\"]"
   }
 }

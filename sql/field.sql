@@ -281,6 +281,20 @@ create table if not exists field.work_log_inputs (
 -- 1 穴あたりの量。unit が kg なら g、L なら mL、ほかは unit の単位。入れたときは、amount は対象の畝の穴の数（苗数）を掛けた合計
 alter table field.work_log_inputs add column if not exists per_hole numeric;
 
+-- 収量と売上の見込み（2026-11-24）。空の値は計算に使わない。作付の値は、入っていれば品目の値より優先する。金額は税抜き。
+-- 収量は、1 株あたり（苗数が分かるとき）を 10 a あたりより先に使う。計算は app/revenue.js
+alter table field.crops add column if not exists yield_kg_per_10a numeric;   -- 10 a あたりの収量（kg）
+alter table field.crops add column if not exists yield_g_per_plant numeric;  -- 1 株あたりの収量（g）
+alter table field.crops add column if not exists shippable_pct numeric;      -- 出荷率（%）。空なら 100 %
+alter table field.crops add column if not exists price_yen_per_kg numeric;   -- 想定単価（円/kg）。空なら市況から推す
+alter table field.crops add column if not exists market_item_name text not null default '';  -- 市況での品目名（public.market_daily_item_stats の item_name）
+alter table field.plantings add column if not exists yield_kg_per_10a numeric;
+alter table field.plantings add column if not exists yield_g_per_plant numeric;
+alter table field.plantings add column if not exists shippable_pct numeric;
+alter table field.plantings add column if not exists price_yen_per_kg numeric;
+-- 収穫で、この畝だけ量った収穫量（kg）。空の畝には、記録の収穫量（spec.harvest_kg）の残りを面積の比で分ける
+alter table field.work_log_targets add column if not exists harvest_kg numeric;
+
 create index if not exists work_log_inputs_log_idx on field.work_log_inputs (log_id);
 
 -- 作業時間の計測。「始める」から「止める」（または次の作業の「始める」）までの 1 回で 1 行。
@@ -403,11 +417,12 @@ begin
     spec = excluded.spec, note = excluded.note;
 
   delete from field.work_log_targets where log_id = new_id;
-  insert into field.work_log_targets (id, log_id, planting_id, bed_id, block_id, work_id, label, crop_name, area_m2, spray_l)
+  insert into field.work_log_targets (id, log_id, planting_id, bed_id, block_id, work_id, label, crop_name, area_m2, spray_l, harvest_kg)
   select
     coalesce((t ->> 'id')::uuid, gen_random_uuid()), new_id,
     (t ->> 'planting_id')::uuid, (t ->> 'bed_id')::uuid, (t ->> 'block_id')::uuid, (t ->> 'work_id')::uuid,
-    coalesce(t ->> 'label', ''), coalesce(t ->> 'crop_name', ''), (t ->> 'area_m2')::numeric, (t ->> 'spray_l')::numeric
+    coalesce(t ->> 'label', ''), coalesce(t ->> 'crop_name', ''), (t ->> 'area_m2')::numeric, (t ->> 'spray_l')::numeric,
+    (t ->> 'harvest_kg')::numeric
   from jsonb_array_elements(coalesce(targets, '[]'::jsonb)) as t;
 
   delete from field.work_log_inputs where log_id = new_id;
@@ -488,6 +503,9 @@ where jsonb_typeof(outline) = 'array' and jsonb_array_length(outline) > 0 and js
 update field.app_compat set min_version = 2 where min_version < 2;
 -- 版 3: プランのコピーを field.copy_plan() で行い、plans.copying の列に触らない。版 2 の画面は、この列を読み書きする
 update field.app_compat set min_version = 3 where min_version < 3;
+-- 版 4: 収穫の記録の対象に、畝ごとの収穫量（work_log_targets.harvest_kg）を持つ。版 3 の画面は、収穫の記録を直すと畝ごとの量を消す。
+-- 上の列を足してから版 4 の画面を公開し、そのあとで流す
+update field.app_compat set min_version = 4 where min_version < 4;
 
 -- 圃場ごとだったころのメモの表。中身を dev_notes に写したあと、2026-10-24 に消した
 drop table if exists field.day_notes;
@@ -705,6 +723,47 @@ begin
   group by p.ingredient
   having bool_or(p.use_type <> 'その他')
   order by p.ingredient;
+end;
+$$;
+
+-- ---- 市況 ----
+
+-- agri_db が取り込む沖縄協同青果の市況（public.market_daily_item_stats。日ごと、品目ごとの中値。円/kg、卸値）を、
+-- 品目の想定単価の推定に使う（app/revenue.js の marketEstimate）。ビューは agri_db が作るので、ない DB では空を返す
+create or replace function field.market_items() returns table (item_name text, days int)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not (select field.is_owner()) then
+    raise exception '読めません';
+  end if;
+  if to_regclass('public.market_daily_item_stats') is null then
+    return;
+  end if;
+  return query
+  select s.item_name, count(*)::int
+  from public.market_daily_item_stats s
+  where s.avg_price is not null
+  group by s.item_name
+  order by s.item_name;
+end;
+$$;
+
+create or replace function field.market_prices(p_names text[]) returns table (item_name text, sale_date date, avg_price numeric)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not (select field.is_owner()) then
+    raise exception '読めません';
+  end if;
+  if to_regclass('public.market_daily_item_stats') is null then
+    return;
+  end if;
+  return query
+  select s.item_name, s.sale_date, s.avg_price
+  from public.market_daily_item_stats s
+  where s.item_name = any (p_names) and s.avg_price is not null
+  order by s.item_name, s.sale_date;
 end;
 $$;
 
@@ -1148,6 +1207,10 @@ revoke all on function field.is_importer() from public, anon;
 grant execute on function field.is_importer() to authenticated;
 revoke all on function field.weather_stations() from public, anon;
 grant execute on function field.weather_stations() to authenticated;
+revoke all on function field.market_items() from public, anon;
+grant execute on function field.market_items() to authenticated;
+revoke all on function field.market_prices(text[]) from public, anon;
+grant execute on function field.market_prices(text[]) to authenticated;
 revoke all on function field.famic_begin() from public, anon;
 grant execute on function field.famic_begin() to authenticated;
 revoke all on function field.famic_finish(text[], int, int) from public, anon;

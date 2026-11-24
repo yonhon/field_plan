@@ -43,6 +43,7 @@ const FILES = [
   "today-view.js",
   "timer-notice.js",
   "revenue-view.js",
+  "revenue.js",
   "field-plans.js",
   "news-view.js",
   "toast.js",
