@@ -28,7 +28,7 @@ import {
 import { draw } from "./draw.js";
 import { openDiaryTarget } from "./diary-view.js";
 import { escapeHtml } from "./html.js";
-import { PRICE_FROM, actualSales, formatKg, formatYen, plantingRevenue, timeAllocation, typesText } from "./revenue-view.js";
+import { actualSales, formatKg, formatYen, plantingRevenue, priceSource, timeAllocation, typesText } from "./revenue-view.js";
 import { formatMinutes } from "./work-time.js";
 
 const $ = (id) => document.getElementById(id);
@@ -446,7 +446,7 @@ function revenueHtml(c) {
     `<thead><tr><th></th><th class="num">見込み</th>${showActual ? '<th class="num">実績</th>' : ""}</tr></thead><tbody>` +
     row("収量（kg）", formatKg(item.yieldKg), actual?.count ? `${formatKg(actual.kg)}（${actual.count} 回）` : "") +
     row("出荷量（kg）", formatKg(item.shippedKg), formatKg(actualShipped)) +
-    row("単価（円/kg）", item.price ? `${formatYen(item.price.yen)}（${PRICE_FROM[item.price.from]}）` : "") +
+    row("単価（円/kg）", item.price ? `${formatYen(item.price.yen)}（${priceSource(item.price)}）` : "") +
     row("売上（円）", formatYen(item.salesYen), formatYen(actualSales(item))) +
     row("10 a あたり収量（kg）", per10a(item.yieldKg), actual?.count ? per10a(actual.kg) : "") +
     (gap !== null ? row(`収量の差による売上の差${harvesting ? "（収穫中）" : ""}`, "", `${gap > 0 ? "＋" : gap < 0 ? "−" : ""}${formatYen(Math.abs(gap))}`) : "") +

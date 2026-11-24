@@ -207,17 +207,25 @@ test("単価: 品目にも作付にもなければ市況の卸値の中央値。
   await page.loadApp(seed({ crop: { price_yen_per_kg: null, market_item_name: "しけんな" }, works, market }));
   await openPlanting("pl1");
   await page.waitFor(
-    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "300（市況）")`,
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "300（市況・収穫期）")`,
     "市況からの単価"
   );
   assert.match(await panelNotes(), /市況「しけんな」の卸値から推しました。収穫の時期（6\/1〜6\/10）の中央値です（5 日分、2026\/06〜2026\/06、幅 200〜400 円）。手数料などを引く前の値です。/);
 
   await openPlanting("pl2");
   await page.waitFor(
-    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "600（市況）")`,
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "600（市況・全期間）")`,
     "全期間の中央値"
   );
   assert.match(await panelNotes(), /収穫の時期（1\/10〜1\/20）の市況が足りないため、市況のある全期間の中央値です（10 日分/);
+
+  // 「収支」のタブ: どの期間の市況から推したかを、単価に添える。指すと、日数と幅を出す
+  await page.openView("revenue");
+  await page.waitFor(`document.querySelectorAll("${PLANTING_ROWS}").length === 2`, "作付の行");
+  assert.deepEqual(await page.run(`[...document.querySelectorAll("${PLANTING_ROWS}")].map((tr) => [tr.cells[4].textContent, tr.cells[4].title])`), [
+    ["300（市況・収穫期）", "収穫の時期の卸値の中央値（5 日分、2026/06〜2026/06、幅 200〜400 円）"],
+    ["600（市況・全期間）", "収穫の時期の市況が足りないため、市況のある全期間の卸値の中央値（10 日分、2026/06〜2026/09、幅 325〜875 円）"],
+  ]);
 
   // 台帳の品目: 市況の品目名の候補を出す
   await page.openView("master");

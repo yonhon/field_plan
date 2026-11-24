@@ -298,7 +298,28 @@ export function revenueByCrop(plantings, index = revenueIndex()) {
   return [...byCrop.values()].sort((a, b) => a.name.localeCompare(b.name, "ja"));
 }
 
-export const PRICE_FROM = { planting: "作付", crop: "品目", market: "市況" };
+const PRICE_FROM = { planting: "作付", crop: "品目", market: "市況" };
+
+// 単価の出どころの短い名前。市況から推した単価は、どの期間の市況かも添える（revenue.js の marketEstimate の widen）:
+// 収穫の時期の市況なら「市況・収穫期」、前後に広げたなら「市況・前後 14 日」、足りずに全期間なら「市況・全期間」
+export function priceSource(price) {
+  if (price.from !== "market") {
+    return PRICE_FROM[price.from];
+  }
+  const widen = price.estimate.widen;
+  return widen === "all" ? "市況・全期間" : widen ? `市況・前後 ${widen} 日` : "市況・収穫期";
+}
+
+// 市況から推した単価の、指したときに出す説明。日数と、使った取引日の月、25〜75 % の幅
+export function priceTitle(price) {
+  const estimate = price.from === "market" ? price.estimate : null;
+  if (!estimate) {
+    return "";
+  }
+  const month = (iso) => iso.slice(0, 7).replace("-", "/");
+  const where = estimate.widen === "all" ? "収穫の時期の市況が足りないため、市況のある全期間" : estimate.widen ? `収穫の時期の前後 ${estimate.widen} 日` : "収穫の時期";
+  return `${where}の卸値の中央値（${estimate.days} 日分、${month(estimate.from)}〜${month(estimate.to)}、幅 ${formatYen(estimate.low)}〜${formatYen(estimate.high)} 円）`;
+}
 export const formatYen = (value) => (value === null || value === undefined ? "" : Math.round(value).toLocaleString("ja-JP"));
 export const formatKg = (value, digits = 1) =>
   value === null || value === undefined ? "" : value.toLocaleString("ja-JP", { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -320,7 +341,8 @@ function plantingTable(allocation, index) {
     .map(({ id, item, time, place, crop, open }) => {
       const cells = item
         ? `<td class="num">${formatKg(item.yieldKg)}</td><td class="num">${item.rate.pct} %</td>` +
-          `<td class="num">${item.price ? `${formatYen(item.price.yen)}<span class="muted">（${PRICE_FROM[item.price.from]}）</span>` : ""}</td>` +
+          `<td class="num"${item.price?.estimate ? ` title="${escapeHtml(priceTitle(item.price))}"` : ""}>` +
+          `${item.price ? `${formatYen(item.price.yen)}<span class="muted">（${escapeHtml(priceSource(item.price))}）</span>` : ""}</td>` +
           `<td class="num">${formatYen(item.salesYen)}</td>`
         : "<td></td><td></td><td></td><td></td>";
       const actual = active
