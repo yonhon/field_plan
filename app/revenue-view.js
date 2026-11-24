@@ -367,7 +367,7 @@ const PRICE_FROM = { planting: "作付", crop: "品目", market: "市況" };
 // その日の市況からの推定（revenue.js の marketEstimate に、その日だけを期間として渡す）。推定は月日で決まるので、
 // 同じ品目の市況（prices の並び）では、月日ごとに 1 回だけ計算する（作付ごと、日ごとに計算し直さない）
 const dailyEstimates = new WeakMap();
-function marketOnDay(prices, day) {
+export function marketOnDay(prices, day) {
   let byDay = dailyEstimates.get(prices);
   if (!byDay) {
     byDay = new Map();
