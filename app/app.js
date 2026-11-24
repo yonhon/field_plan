@@ -39,7 +39,7 @@ import { MASTER_TABS, currentMasterTab, initCrops, renderCrops, setMasterTab } f
 import { clearDiaryDrafts, hasDiaryDrafts, initDiary, refreshDiaryWorks, renderDiary } from "./diary-view.js";
 import { setPlace, setPlaceActions, setUserMenu } from "./user-menu.js";
 import { initToday, renderToday, resetToday } from "./today-view.js";
-import { initRevenue, loadMarket, renderRevenue } from "./revenue-view.js";
+import { forgetMarket, initRevenue, loadMarket, renderRevenue } from "./revenue-view.js";
 import { clearFieldCache, readFieldCache, writeFieldCache } from "./field-cache.js";
 import { syncTimerNotice } from "./timer-notice.js";
 import { initFieldPlans, openFieldPlans, refreshFieldPlans } from "./field-plans.js";
@@ -4679,8 +4679,9 @@ async function logout() {
     return;
   }
   clearDiaryDrafts();
-  // 端末に取っておいた圃場の中身も消す。計測中の通知も消す
+  // 端末に取っておいた圃場の中身と市況も消す。計測中の通知も消す
   await clearFieldCache();
+  forgetMarket();
   await syncTimerNotice(null);
   loggingOut = true;
   // この端末のログインだけを取り消す。既定（global）は、すべての端末のログインを取り消すので、

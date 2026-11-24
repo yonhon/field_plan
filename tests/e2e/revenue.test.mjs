@@ -227,6 +227,16 @@ test("単価: 品目にも作付にもなければ市況の卸値の中央値。
     ["600（市況・全期間）", "収穫の時期の市況が足りないため、市況のある全期間の卸値の中央値（10 日分、2026/06〜2026/09、幅 325〜875 円）"],
   ]);
 
+  // 読んだ市況は端末に取っておき、次の起動では読み直さずに使う（ここでは、DB の側の市況を空にして開き直す）
+  const kept = await page.run(`localStorage.getItem("field_plan_market")`);
+  assert.match(kept, /しけんな/);
+  await page.loadApp(seed({ crop: { price_yen_per_kg: null, market_item_name: "しけんな" }, works, market: [] }), { field_plan_market: kept });
+  await openPlanting("pl1");
+  await page.waitFor(
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "300（市況・収穫期）")`,
+    "取っておいた市況からの単価"
+  );
+
   // 台帳の品目: 市況の品目名の候補を出す
   await page.openView("master");
   await page.waitFor(`document.querySelectorAll("#cropTable datalist option").length === 2`, "市況の品目名の候補");

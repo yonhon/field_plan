@@ -149,14 +149,51 @@ const compareSort = (a, b) => {
 
 // ---- 市況（品目の想定単価の推定に使う。revenue.js の marketEstimate） ----
 // state.market = { items: [{ item_name, days }] | null, prices: Map(品目名 → [{ sale_date, avg_price }]), at, failedAt, loading }。
-// 起動のときの読み込み（load_field）とは別に、あとから読む。届いたら ctx.onMarket で描き直す（{ prices } は、品目の市況を読んだか）。メモリにだけ持つ（field-cache には入れない）
-const MARKET_FRESH_MS = 6 * 60 * 60 * 1000; // 市況は 1 日 1 回増えるので、これより古ければ読み直す
+// 起動のときの読み込み（load_field）とは別に、あとから読む。届いたら ctx.onMarket で描き直す（{ prices } は、品目の市況を読んだか）。
+// 読んだ市況は、端末（localStorage）にも MARKET_FRESH_MS のあいだ取っておき、次の起動ではそれを使う（読み直さない）。
+// 圃場の中身（field-cache.js）とは別に持つ（field-cache には、DB から読んだ圃場の中身だけを入れる）。ログアウトで消す（forgetMarket）
+const MARKET_FRESH_MS = 6 * 60 * 60 * 1000; // 市況は毎日 12:17 と 14:47 に増える（agri_db）ので、これより古ければ読み直す
 const MARKET_RETRY_MS = 5 * 60 * 1000; // 読めなかったあと、これより前には読み直さない（描き直しのたびに読まない）
+const MARKET_KEY = "field_plan_market";
+const MARKET_FORMAT = 1; // 取っておく形の版。形を変えたら上げる（前の形の中身は使わない）
+
+// 端末に取っておいた市況。古いか、形が違うか、読めなければ null。prices は [品目名, [[日付, 中値], …]] の並び
+function keptMarket(now = Date.now()) {
+  try {
+    const kept = JSON.parse(localStorage.getItem(MARKET_KEY));
+    if (kept?.format !== MARKET_FORMAT || !(now - kept.at < MARKET_FRESH_MS) || !Array.isArray(kept.prices)) {
+      return null;
+    }
+    const prices = new Map(kept.prices.map(([name, rows]) => [name, rows.map(([sale_date, avg_price]) => ({ item_name: name, sale_date, avg_price }))]));
+    return { items: kept.items || null, prices, at: kept.at };
+  } catch {
+    return null;
+  }
+}
+
+function keepMarket(m) {
+  try {
+    const prices = [...m.prices].map(([name, rows]) => [name, rows.map((row) => [row.sale_date, row.avg_price])]);
+    localStorage.setItem(MARKET_KEY, JSON.stringify({ format: MARKET_FORMAT, at: m.at, items: m.items, prices }));
+  } catch {
+    // 取っておけなくても（端末の空きがない、など）、次の起動で読み直すだけ
+  }
+}
+
+// ログアウトのときに、端末に取っておいた市況を消す（品目名の並びは、作付の内容にあたる）
+export function forgetMarket() {
+  try {
+    localStorage.removeItem(MARKET_KEY);
+  } catch {
+    // 消せなくても、6 時間たてば使わない
+  }
+}
 
 function market() {
   const s = state();
   if (!s.market) {
-    s.market = { items: null, prices: new Map(), at: 0, failedAt: 0, loading: false };
+    const kept = keptMarket();
+    s.market = { items: null, prices: new Map(), at: 0, failedAt: 0, loading: false, ...kept, restored: Boolean(kept) };
   }
   return s.market;
 }
@@ -168,6 +205,11 @@ export async function loadMarket() {
     return;
   }
   const m = market();
+  // 端末に取っておいた市況を使い始めたら、それで見込みを描き直す（起動のときの画面は、市況なしで描いている）
+  if (m.restored) {
+    m.restored = false;
+    ctx.onMarket?.({ prices: true });
+  }
   const now = Date.now();
   if (m.loading || now - m.failedAt < MARKET_RETRY_MS) {
     return;
@@ -192,6 +234,7 @@ export async function loadMarket() {
     } else {
       prices.forEach((list, name) => m.prices.set(name, list));
     }
+    keepMarket(m);
   } catch (error) {
     m.failedAt = now;
     ctx.setStatus?.(`市況を読めませんでした: ${error.message}`);

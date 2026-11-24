@@ -749,6 +749,9 @@ begin
 end;
 $$;
 
+-- 初めに作った、品目ごとの日々の中値を 1 日 1 行で返す関数。いまの画面は、下の field.market_series を使う。
+-- これを使う画面（版 4 の前の、ブランチの画面）のために残す。版 4 を公開して、その画面が残っていないのを確かめてから消す
+-- （drop function field.market_prices(text[])）
 create or replace function field.market_prices(p_names text[]) returns table (item_name text, sale_date date, avg_price numeric)
 language plpgsql stable security definer set search_path = ''
 as $$
@@ -764,6 +767,27 @@ begin
   from public.market_daily_item_stats s
   where s.item_name = any (p_names) and s.avg_price is not null
   order by s.item_name, s.sale_date;
+end;
+$$;
+
+-- 品目ごとの日々の中値。品目 1 つで 1 行（日付と値の並び）にして返す（1 日 1 行で返すと、品目が 25 で 3,500 行を超え、
+-- API の 1 回 1,000 行で切れる。並びにすれば行は品目の数だけで、量も 3 分の 1 ほどになる。2026-11-24）
+create or replace function field.market_series(p_names text[]) returns table (item_name text, dates date[], prices numeric[])
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not (select field.is_owner()) then
+    raise exception '読めません';
+  end if;
+  if to_regclass('public.market_daily_item_stats') is null then
+    return;
+  end if;
+  return query
+  select s.item_name, array_agg(s.sale_date order by s.sale_date), array_agg(s.avg_price order by s.sale_date)
+  from public.market_daily_item_stats s
+  where s.item_name = any (p_names) and s.avg_price is not null
+  group by s.item_name
+  order by s.item_name;
 end;
 $$;
 
@@ -1211,6 +1235,8 @@ revoke all on function field.market_items() from public, anon;
 grant execute on function field.market_items() to authenticated;
 revoke all on function field.market_prices(text[]) from public, anon;
 grant execute on function field.market_prices(text[]) to authenticated;
+revoke all on function field.market_series(text[]) from public, anon;
+grant execute on function field.market_series(text[]) to authenticated;
 revoke all on function field.famic_begin() from public, anon;
 grant execute on function field.famic_begin() to authenticated;
 revoke all on function field.famic_finish(text[], int, int) from public, anon;

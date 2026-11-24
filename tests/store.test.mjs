@@ -207,24 +207,32 @@ test("DB の関数が ID だけを返したときは、ID をそのまま返す"
   assert.equal(await store.saveLog({ id: "l1", targets: [], inputs: [] }), "l1");
 });
 
-test("市況: API が 1 回に 1,000 行までしか返さなくても、分けて全部読む", async () => {
-  const rows = Array.from({ length: 2500 }, (_, i) => ({ item_name: i < 1200 ? "あ" : "い", sale_date: `d${i}`, avg_price: i }));
+test("市況: 品目ごとの日付と値の並びを、1 日 1 行に広げる。品目名の一覧は、1,000 行で切れても分けて全部読む", async () => {
+  const items = Array.from({ length: 1500 }, (_, i) => ({ item_name: `品目${i}`, days: i }));
   const calls = [];
   const client = {
     rpc: (name, args) => ({
       range: async (from, to) => {
         calls.push([name, args, from, to]);
         // DB の API と同じく、頼んだ範囲のうち 1,000 行までを返す
+        const rows = name === "market_items" ? items : [
+          { item_name: "あ", dates: ["2026-06-01", "2026-06-02"], prices: [100, 120.5] },
+          { item_name: "い", dates: ["2026-07-01"], prices: ["300"] },
+        ];
         return { data: rows.slice(from, Math.min(to + 1, from + 1000)), error: null };
       },
     }),
   };
   const store = createSupabaseStore(client, {});
-  const read = await store.marketPrices(["あ", "い"]);
-  assert.equal(read.length, 2500);
-  assert.deepEqual(read.at(-1), rows.at(-1));
-  assert.deepEqual(calls.map((call) => call.slice(2)), [[0, 999], [1000, 1999], [2000, 2999]]);
-  assert.deepEqual(calls[0].slice(0, 2), ["market_prices", { p_names: ["あ", "い"] }]);
+  assert.deepEqual(await store.marketPrices(["あ", "い"]), [
+    { item_name: "あ", sale_date: "2026-06-01", avg_price: 100 },
+    { item_name: "あ", sale_date: "2026-06-02", avg_price: 120.5 },
+    { item_name: "い", sale_date: "2026-07-01", avg_price: 300 },
+  ]);
+  assert.deepEqual(calls[0].slice(0, 2), ["market_series", { p_names: ["あ", "い"] }]);
   assert.deepEqual(await store.marketPrices([]), [], "品目がなければ読まない");
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 1);
+  const read = await store.marketItems();
+  assert.equal(read.length, 1500);
+  assert.deepEqual(calls.slice(1).map((call) => call.slice(2)), [[0, 999], [1000, 1999]]);
 });
