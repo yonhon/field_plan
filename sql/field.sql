@@ -288,12 +288,12 @@ alter table field.crops add column if not exists yield_g_per_plant numeric;  -- 
 alter table field.crops add column if not exists shippable_pct numeric;      -- 出荷率（%）。空なら 100 %
 alter table field.crops add column if not exists price_yen_per_kg numeric;   -- 想定単価（円/kg）。空なら市況から推す
 alter table field.crops add column if not exists market_item_name text not null default '';  -- 市況での品目名（public.market_daily_item_stats の item_name）
--- 作付の 4 列は、初めに作付の値を 1 つだけ持つ形で足した。いまは使わない（作付の値は、下の field.planting_forecasts の履歴で持つ）。
--- どの公開の画面も使っていない（2026-11-24 に、本番の DB で 105 件すべて空）。版 4 を公開したあとで消す
-alter table field.plantings add column if not exists yield_kg_per_10a numeric;
-alter table field.plantings add column if not exists yield_g_per_plant numeric;
-alter table field.plantings add column if not exists shippable_pct numeric;
-alter table field.plantings add column if not exists price_yen_per_kg numeric;
+-- 作付の値を 1 つだけ持つ 4 列（収量、出荷率、単価）を初めに足したが、見直すたびに記録する履歴（下の field.planting_forecasts）に替えた。
+-- どの公開の画面も使わず（本番の DB で 105 件すべて空だった）、版 4 を公開して min_version を 4 にしたあと、2026-11-24 に消した
+alter table field.plantings drop column if exists yield_kg_per_10a;
+alter table field.plantings drop column if exists yield_g_per_plant;
+alter table field.plantings drop column if exists shippable_pct;
+alter table field.plantings drop column if exists price_yen_per_kg;
 
 -- 作付の収量と単価の見込みの履歴（2026-11-24）。見直すたびに 1 件足す（出荷率を発芽の具合で見直す、など）。
 -- 4 つの値は、変えるものだけを入れる（空は「この記録では変えていない」）。計算に使うのは、項目ごとに、
@@ -776,26 +776,9 @@ begin
 end;
 $$;
 
--- 初めに作った、品目ごとの日々の中値を 1 日 1 行で返す関数。いまの画面は、下の field.market_series を使う。
--- これを使う画面（版 4 の前の、ブランチの画面）のために残す。版 4 を公開して、その画面が残っていないのを確かめてから消す
--- （drop function field.market_prices(text[])）
-create or replace function field.market_prices(p_names text[]) returns table (item_name text, sale_date date, avg_price numeric)
-language plpgsql stable security definer set search_path = ''
-as $$
-begin
-  if not (select field.is_owner()) then
-    raise exception '読めません';
-  end if;
-  if to_regclass('public.market_daily_item_stats') is null then
-    return;
-  end if;
-  return query
-  select s.item_name, s.sale_date, s.avg_price
-  from public.market_daily_item_stats s
-  where s.item_name = any (p_names) and s.avg_price is not null
-  order by s.item_name, s.sale_date;
-end;
-$$;
+-- 初めに作った、品目ごとの日々の中値を 1 日 1 行で返す関数（品目が増えると API の 1,000 行で切れた）。下の field.market_series に替え、
+-- それを使うブランチの画面がなくなった（版 4 を公開して min_version を 4 にした）あと、2026-11-24 に消した
+drop function if exists field.market_prices(text[]);
 
 -- 品目ごとの日々の中値。品目 1 つで 1 行（日付と値の並び）にして返す（1 日 1 行で返すと、品目が 25 で 3,500 行を超え、
 -- API の 1 回 1,000 行で切れる。並びにすれば行は品目の数だけで、量も 3 分の 1 ほどになる。2026-11-24）
@@ -1261,8 +1244,6 @@ revoke all on function field.weather_stations() from public, anon;
 grant execute on function field.weather_stations() to authenticated;
 revoke all on function field.market_items() from public, anon;
 grant execute on function field.market_items() to authenticated;
-revoke all on function field.market_prices(text[]) from public, anon;
-grant execute on function field.market_prices(text[]) to authenticated;
 revoke all on function field.market_series(text[]) from public, anon;
 grant execute on function field.market_series(text[]) to authenticated;
 revoke all on function field.famic_begin() from public, anon;
