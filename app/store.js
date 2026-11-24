@@ -51,8 +51,10 @@ const PLAN_TABLES = {
   zones: { order: "created_at", children: [["blocks", "zone_id"]] },
   blocks: { order: "created_at", children: [["beds", "block_id"], ["works", "block_id"]] },
   beds: { order: "seq", children: [["plantings", "bed_id"]] },
-  plantings: { order: "seq", children: [["works", "planting_id"]] },
+  plantings: { order: "seq", children: [["works", "planting_id"], ["planting_forecasts", "planting_id"]] },
   works: { order: "seq", children: [] },
+  // 作付の収量と単価の見込みの履歴（revenue.js）
+  planting_forecasts: { order: "set_on", children: [] },
 };
 
 // このブラウザーの保存で、変更の記録（data.audit）を付ける表。key は行を見分ける列
@@ -65,6 +67,7 @@ const AUDITED = {
   beds: { key: "id" },
   plantings: { key: "id" },
   works: { key: "id" },
+  planting_forecasts: { key: "id" },
   crops: { key: "id" },
   fertilizers: { key: "id" },
   workTypes: { key: "code" },
@@ -102,6 +105,7 @@ const STRICT_TABLES = {
   beds: { delay: 2, parents: [["blocks", "block_id"]] },
   plantings: { delay: 1, parents: [["beds", "bed_id"]] },
   works: { delay: 0, parents: [["blocks", "block_id"], ["plantings", "planting_id"]] },
+  planting_forecasts: { delay: 0, parents: [["plantings", "planting_id"]] },
 };
 
 // 起動、戻ってきたときの読み直し、圃場の切り替えで読む中身を、表ごとの読み込みを組み合わせて返す。
@@ -816,7 +820,7 @@ function createLocalTables({ strict = false } = {}) {
       // 行ごとに新しい ID を振り、親を指す列は新しい ID に付け替える
       const ids = new Map();
       const fresh = (old) => ids.get(old) ?? ids.set(old, crypto.randomUUID()).get(old);
-      const parents = { zones: [], blocks: ["zone_id"], beds: ["block_id"], plantings: ["bed_id"], works: ["block_id", "planting_id"] };
+      const parents = { zones: [], blocks: ["zone_id"], beds: ["block_id"], plantings: ["bed_id"], works: ["block_id", "planting_id"], planting_forecasts: ["planting_id"] };
       data.plans = [...data.plans, copy];
       for (const [table, keys] of Object.entries(parents)) {
         const rows = (data[table] || []).filter((row) => row.plan_id === id).map((row) => {

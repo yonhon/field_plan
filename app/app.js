@@ -52,6 +52,7 @@ import { holdRecords, initJournal, record, releaseRecords, renderJournal, saveJo
 import { handleLogDialogPop, initLogs, renderLogs } from "./log-view.js";
 import { plantingOnDate } from "./logs.js";
 import { initProcessEditor } from "./process-editor.js";
+import { initForecastEditor } from "./forecast-editor.js";
 import { initPlantingView, openPlantingDetail, plantingTarget, renderBlockRecord, renderPlantingDetail, renderWholeHead } from "./planting-view.js";
 import { loadPref, savePref } from "./prefs.js";
 import { initNews } from "./news-view.js";
@@ -92,7 +93,7 @@ const HINTS = {
   blockrect: "有効圃場の中で、対角の 2 点をドラッグ。表示日に畝がない場所を、新しい区画にします。",
 };
 const TABLES = { zone: "zones", block: "blocks", bed: "beds" };
-const PLAN_TABLES = ["zones", "blocks", "beds", "plantings", "works"]; // プランの中身の表
+const PLAN_TABLES = ["zones", "blocks", "beds", "plantings", "works", "planting_forecasts"]; // プランの中身の表
 const CURRENT_PLAN_KEY = "field_plan_current_plan";
 const CURRENT_FIELD_KEY = "field_plan_current_field";
 // 最後に開いていた上のタブ（today、map、schedule、diary、revenue）。URL に画面がないときに開く。この端末だけ。
@@ -134,6 +135,7 @@ const state = {
   beds: [],
   plantings: [], // 作付（畝ごとの、畝立てから収穫までの 1 回ぶん）
   works: [],
+  planting_forecasts: [], // 作付の収量と単価の見込みの履歴（forecast-editor.js、revenue.js）
   workTypes: [], // 計画に置ける作業の種類
   allWorkTypes: [], // 記録だけに使う種類（灌水、防除など）も含めた、すべての作業の種類
   logs: [], // 作業の記録（圃場ごと。新しい順）
@@ -1534,6 +1536,10 @@ function showUndone(targets) {
     }
     if (table === "work_sessions") {
       return [`[data-session="${key}"]`];
+    }
+    if (table === "planting_forecasts") {
+      // 入力の窓の「収量と単価」のタブの履歴の行（forecast-editor.js）
+      return [`[data-forecast="${key}"]`];
     }
     return [];
   });
@@ -4608,6 +4614,7 @@ async function startApp(user = "local") {
     },
   });
   initProcessEditor({ state, setStatus, refresh: refreshRecords, currentBlockId });
+  initForecastEditor({ state, persist, sendPendingSaves, refresh: refreshRecords });
   initPlantingView({
     state,
     showView,

@@ -13,7 +13,7 @@ import { escapeHtml } from "./html.js";
 import { polygonArea } from "./geometry.js";
 import { cropLabel, plantingNumbers, plantingSpec } from "./crops.js";
 import { bedAreas, logEnd, plantingStart } from "./logs.js";
-import { MARKET_WIDEN_DAYS, forecast, harvestActual, harvestWindow, marketEstimate } from "./revenue.js";
+import { MARKET_WIDEN_DAYS, effectiveForecast, forecast, forecastValues, harvestActual, harvestWindow, marketEstimate } from "./revenue.js";
 import { existsOn, localToday } from "./schedule.js";
 import { COMMON_KINDS, SESSION_KINDS, allocateMinutes, formatMinutes, splitMinutes } from "./work-time.js";
 
@@ -301,6 +301,10 @@ function revenueIndex() {
       push(logs, id, log);
     }
   }
+  const forecasts = new Map();
+  for (const entry of s.planting_forecasts || []) {
+    push(forecasts, entry.planting_id, entry);
+  }
   const beds = new Map(s.beds.map((bed) => [bed.id, bed]));
   const blocks = new Map(s.blocks.map((block) => [block.id, block]));
   const areas = new Map();
@@ -308,7 +312,7 @@ function revenueIndex() {
     const live = s.beds.filter((bed) => bed.block_id === block.id && existsOn(bed.start_date, bed.removed_on, today));
     bedAreas(block, live).forEach((area, id) => areas.set(id, area));
   }
-  return { works, logs, beds, blocks, areas, crops: new Map(s.crops.map((crop) => [crop.id, crop])) };
+  return { works, logs, forecasts, beds, blocks, areas, crops: new Map(s.crops.map((crop) => [crop.id, crop])) };
 }
 
 // 作付の畝＋通路の面積（㎡）。今日ない畝は、その畝だけで求める
@@ -329,6 +333,7 @@ export function plantingRevenue(planting, index = revenueIndex()) {
   const bed = index.beds.get(planting.bed_id);
   const crop = index.crops.get(planting.crop_id) || null;
   const logs = index.logs.get(planting.id) || [];
+  const own = effectiveForecast(index.forecasts.get(planting.id) || []);
   const areaM2 = plantingArea(bed, index);
   const seedlings = bed && crop ? plantingNumbers(bed.shape, crop, null, plantingSpec(planting, crop, logs)).seedlings : null;
   const window = harvestWindow(index.works.get(planting.id) || []);
@@ -339,7 +344,9 @@ export function plantingRevenue(planting, index = revenueIndex()) {
   const estimate = prices && !window ? marketEstimate(prices, null) : null;
   const active = Boolean(s.field) && s.field.active_plan_id === s.plan?.id;
   return {
-    ...forecast(planting, crop, { seedlings, areaM2, window, marketOn, estimate }),
+    // 作付の値は、見込みの記録の履歴から、項目ごとにいちばん新しい値（入力の窓の「収量と単価」のタブで入れる）
+    ...forecast(forecastValues(own), crop, { seedlings, areaM2, window, marketOn, estimate }),
+    own,
     crop,
     areaM2,
     seedlings,

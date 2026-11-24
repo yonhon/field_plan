@@ -44,6 +44,7 @@ const FILES = [
   "timer-notice.js",
   "revenue-view.js",
   "revenue.js",
+  "forecast-editor.js",
   "field-plans.js",
   "news-view.js",
   "toast.js",

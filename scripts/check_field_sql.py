@@ -130,15 +130,17 @@ with z as (select *, row_number() over (order by name, id) n from field.zones wh
      b as (select b.*, z.n zn, row_number() over (order by b.name, b.id) n from field.blocks b join z on z.id = b.zone_id where b.plan_id = %(p)s),
      d as (select d.*, b.n bn, row_number() over (order by b.n, d.seq) n from field.beds d join b on b.id = d.block_id where d.plan_id = %(p)s),
      g as (select g.*, d.n dn, row_number() over (order by d.n, g.seq) n from field.plantings g join d on d.id = g.bed_id where g.plan_id = %(p)s),
-     w as (select w.*, b.n bn, g.n gn from field.works w left join b on b.id = w.block_id left join g on g.id = w.planting_id where w.plan_id = %(p)s)
+     w as (select w.*, b.n bn, g.n gn from field.works w left join b on b.id = w.block_id left join g on g.id = w.planting_id where w.plan_id = %(p)s),
+     f as (select f.*, g.n gn from field.planting_forecasts f join g on g.id = f.planting_id where f.plan_id = %(p)s)
 select jsonb_build_object(
   'zones', (select jsonb_agg(to_jsonb(z) - 'id' - 'plan_id' order by n) from z),
   'blocks', (select jsonb_agg(to_jsonb(b) - 'id' - 'plan_id' - 'zone_id' order by n) from b),
   'beds', (select jsonb_agg(to_jsonb(d) - 'id' - 'plan_id' - 'block_id' order by n) from d),
   'plantings', (select jsonb_agg(to_jsonb(g) - 'id' - 'plan_id' - 'bed_id' order by n) from g),
-  'works', (select jsonb_agg(to_jsonb(w) - 'id' - 'plan_id' - 'block_id' - 'planting_id' order by bn nulls last, gn nulls last, seq) from w))
+  'works', (select jsonb_agg(to_jsonb(w) - 'id' - 'plan_id' - 'block_id' - 'planting_id' order by bn nulls last, gn nulls last, seq) from w),
+  'planting_forecasts', (select jsonb_agg(to_jsonb(f) - 'id' - 'plan_id' - 'planting_id' order by gn, set_on, created_at) from f))
 """
-COUNTS = "select (select count(*) from field.plans), (select count(*) from field.zones), (select count(*) from field.blocks), (select count(*) from field.beds), (select count(*) from field.plantings), (select count(*) from field.works)"
+COUNTS = "select (select count(*) from field.plans), (select count(*) from field.zones), (select count(*) from field.blocks), (select count(*) from field.beds), (select count(*) from field.plantings), (select count(*) from field.works), (select count(*) from field.planting_forecasts)"
 
 
 def check_copy_plan(c):
@@ -154,6 +156,9 @@ def check_copy_plan(c):
     kind = c.execute("select code from field.work_types order by sort limit 1").fetchone()[0]
     for block, planting, seq in ((blocks[0], None, 1), (None, plantings[0], 1), (None, plantings[0], 2), (None, plantings[2], 1), (blocks[2], None, 1)):
         c.execute("insert into field.works (plan_id, block_id, planting_id, work_type, seq, plan_start, plan_end) values (%s, %s, %s, %s, %s, '2026-04-01', '2026-04-02')", (plan, block, planting, kind, seq))
+    # 作付の収量と単価の見込みの履歴も、作付につないで写る
+    for planting, day, pct, note in ((plantings[0], "2026-04-01", 90, "初め"), (plantings[0], "2026-05-01", 70, "発芽が 7 割"), (plantings[2], "2026-04-10", 80, "")):
+        c.execute("insert into field.planting_forecasts (plan_id, planting_id, set_on, shippable_pct, note) values (%s, %s, %s, %s, %s)", (plan, planting, day, pct, note))
     before = c.execute(COUNTS).fetchone()
     source = c.execute(PLAN_SHAPE, {"p": plan}).fetchone()[0]
 
@@ -179,7 +184,7 @@ def check_copy_plan(c):
     row = c.execute("select name, field_id = %s from field.plans where id = %s", (field, copy)).fetchone()
     expect("名前と圃場が合う", row == ("写し", True))
     shared = c.execute(
-        "select count(*) from (select id from field.zones union all select id from field.blocks union all select id from field.beds union all select id from field.plantings union all select id from field.works) t group by id having count(*) > 1"
+        "select count(*) from (select id from field.zones union all select id from field.blocks union all select id from field.beds union all select id from field.plantings union all select id from field.works union all select id from field.planting_forecasts) t group by id having count(*) > 1"
     ).fetchall()
     expect("ID は、どの行も新しい", not shared)
 
@@ -207,7 +212,7 @@ def check_copy_plan(c):
 
 UNDO_TABLES = (
     "fields", "backdrops", "plans", "work_types", "fertilizers", "crops", "zones", "blocks", "beds", "plantings", "works",
-    "work_logs", "work_log_targets", "work_log_inputs",
+    "planting_forecasts", "work_logs", "work_log_targets", "work_log_inputs",
 )
 
 
@@ -263,6 +268,8 @@ def check_undo_op(c):
         bed = c.execute("insert into field.beds (plan_id, block_id, seq, shape) values (%s, %s, 1, %s) returning id", (p, block, SHAPE)).fetchone()[0]
         planting = c.execute("insert into field.plantings (plan_id, bed_id, seq, crop_id, crop_name) values (%s, %s, 1, %s, '戻す試験の品目') returning id", (p, bed, crop)).fetchone()[0]
         work = c.execute("insert into field.works (plan_id, planting_id, work_type, seq, plan_start, plan_end) values (%s, %s, %s, 1, '2026-04-01', '2026-04-02') returning id", (p, planting, kind)).fetchone()[0]
+        # 作付の見込みの記録（作付を消すと一緒に消え、戻すと一緒に戻る）
+        c.execute("insert into field.planting_forecasts (plan_id, planting_id, set_on, shippable_pct, note) values (%s, %s, '2026-04-01', 80, '戻す試験')", (p, planting))
         return zone, block, bed, planting, work
 
     zone, block, bed, planting, work = build(plan)

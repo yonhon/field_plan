@@ -34,6 +34,28 @@ export function resolveYield(planting, crop, { seedlings = null, areaM2 = null }
   return null;
 }
 
+// 作付の見込みの記録（field.planting_forecasts の行）に持つ値
+export const FORECAST_KEYS = ["yield_kg_per_10a", "yield_g_per_plant", "shippable_pct", "price_yen_per_kg"];
+
+// 作付の見込みの記録の並びから、いま使う値を決める。項目ごとに、いちばん新しい記録（set_on、同じ日なら created_at）のうち、
+// その項目が入っているものの値。返り値: { values: { 項目: { value, set_on, id } }, latest（いちばん新しい記録か null）, count }。
+// values を作付の値として resolveYield などに渡す（入っていない項目は、品目の値を使う）
+export function effectiveForecast(entries) {
+  // created_at は、DB では必ず入る（not null、既定は今の時刻）。画面で足す行にも入れる（forecast-editor.js）
+  const sorted = [...entries].sort((a, b) => b.set_on.localeCompare(a.set_on) || b.created_at.localeCompare(a.created_at));
+  const values = {};
+  for (const key of FORECAST_KEYS) {
+    const hit = sorted.find((entry) => filled(entry[key]));
+    if (hit) {
+      values[key] = { value: Number(hit[key]), set_on: hit.set_on, id: hit.id };
+    }
+  }
+  return { values, latest: sorted[0] || null, count: sorted.length };
+}
+
+// effectiveForecast の値を、作付の値（resolveYield などの planting）の形にする
+export const forecastValues = (effective) => Object.fromEntries(Object.entries(effective.values).map(([key, item]) => [key, item.value]));
+
 // 出荷率（%）。作付 → 品目。どちらも空なら 100 %（from: "default"）
 export function resolveRate(planting, crop) {
   if (planting && filled(planting.shippable_pct)) {

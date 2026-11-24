@@ -70,7 +70,7 @@ test("防除の入力: 農薬・作物名・使い方を選んでも、窓の中
   await page.loadApp(seed());
   await page.click("#logAddBtn");
   // 窓は実績で開く。工程の計画、管理作業の計画、実績の順に並ぶ
-  assert.deepEqual(await page.run(`[...document.querySelectorAll('dialog.log-dialog [data-act="kind"]')].map((el) => el.textContent + (el.classList.contains("is-on") ? "*" : ""))`), ["工程の計画", "管理作業の計画", "実績*"]);
+  assert.deepEqual(await page.run(`[...document.querySelectorAll('dialog.log-dialog [data-act="kind"]')].map((el) => el.textContent + (el.classList.contains("is-on") ? "*" : ""))`), ["工程の計画", "管理作業の計画", "実績*", "収量と単価"]);
   await page.click('dialog.log-dialog [data-act="kind"][data-kind="actual"]');
   await page.click('dialog.log-dialog [data-act="type"][data-code="spray"]');
   await page.click('dialog.log-dialog [data-act="group"]');

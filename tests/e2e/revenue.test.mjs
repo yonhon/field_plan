@@ -86,21 +86,32 @@ test("収量と売上: 品目の値から見込みを出し、作付の値を優
   ]);
   assert.match(await panelNotes(), /1 株 500 g × 苗 40（品目の値）。出荷率 80 %（品目の値）。金額は税抜きです。/);
 
-  // 「工程の計画」のこの作付で、単価だけを上書きする
-  await page.click('#plantingBody [data-act="record"]');
-  await page.click(`${DIALOG} [data-act="kind"][data-kind="process"]`);
-  await page.click(`${DIALOG} [data-pe-act="values"][data-owner="planting:pl1"]`);
-  const PRICE = `${DIALOG} [data-pe="value"][data-key="price_yen_per_kg"][data-owner="planting:pl1"]`;
-  await page.waitFor(`document.querySelector(${JSON.stringify(PRICE)})?.placeholder === "品目: 300"`, "空の欄に品目の値");
-  await setValue(PRICE, "400", ["change"]);
-  await page.click(`${DIALOG} [data-act="save"]`);
-  await page.waitFor(`!document.querySelector("${DIALOG}")`, "保存して閉じる");
-  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).plantings.find((item) => item.id === "pl1").price_yen_per_kg === 400`, "作付の単価が保存される");
+  // 「見込みを記録」で、入力の窓の「収量と単価」のタブをこの作付で開き、単価だけを記録する
+  await page.click('#plantingBody [data-act="forecast"]');
+  await page.waitFor(`document.querySelector('${DIALOG} [data-act="kind"].is-on')?.dataset.kind === "forecast"`, "収量と単価のタブ");
+  assert.equal(await page.run(`document.querySelector('${DIALOG} [data-fc="planting"]').value`), "pl1");
+  const PRICE = `${DIALOG} [data-fc-scope="form"][data-fc-field="price_yen_per_kg"]`;
+  assert.equal(await page.run(`document.querySelector(${JSON.stringify(PRICE)}).placeholder`), "品目 300");
+  await setValue(PRICE, "400");
+  await setValue(`${DIALOG} [data-fc-scope="form"][data-fc-field="note"]`, "試しに高めにみる");
+  await page.click(`${DIALOG} [data-fc-act="add"]`);
+  await page.waitFor(`(JSON.parse(localStorage.getItem("field_plan_local")).planting_forecasts || []).some((row) => row.planting_id === "pl1" && row.price_yen_per_kg === 400 && row.shippable_pct === null)`, "見込みの記録が保存される");
+  // 記録すると、いま使っている値と履歴に出て、新しく記録する欄は空に戻る
+  await page.waitFor(`document.querySelectorAll('${DIALOG} .fc-entry').length === 1`, "履歴に 1 件");
+  assert.match(await page.run(`document.querySelector('${DIALOG} .fc-entry').textContent`), /単価 400 円\/kg.*試しに高めにみる/);
+  assert.equal(await page.run(`document.querySelector(${JSON.stringify(PRICE)}).value`), "");
+  assert.deepEqual(
+    await page.run(`[...document.querySelectorAll('${DIALOG} .fc-current tr')].map((tr) => [...tr.cells].map((cell) => cell.textContent))`).then((rows) => rows[3].slice(1)),
+    ["400 円/kg", `${Number(TODAY.slice(5, 7))}/${Number(TODAY.slice(8, 10))} の記録`]
+  );
+  await page.click(`${DIALOG} [data-act="close"]`);
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる");
   await page.waitFor(
     `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "400（作付）")`,
     "作付の単価を使う"
   );
   assert.deepEqual((await panelRows())[3], ["売上（円）", "6,400", "－"]);
+  assert.match(await page.run(`document.querySelector("#plantingBody .revenue-reviewed").textContent`), /見込みを .+ に記録（1 回目）/);
 
   // 「収支」のタブ: 作付ごとの見込みと、品目ごとの合計
   await page.openView("revenue");
@@ -304,5 +315,65 @@ test("収穫量: 量の入っていない収穫の記録は、実績の収穫量
   await openPlanting("pl1");
   assert.deepEqual((await panelRows())[0], ["収量（kg）", "20.0", "5.0（1 回）"]);
   assert.match(await panelNotes(), /収穫の記録 2 回のうち 1 回は、収穫量が入っていません（実績の収穫量に数えていません）。/);
+  assert.deepEqual(page.errors, []);
+});
+
+test("収量と単価の見込み: 履歴を直す・削除する。いま使う値は、項目ごとにいちばん新しい記録の値。削除は元に戻せる", options, async () => {
+  // 10/1 に出荷率 90 %・単価 350 円、11/20 に出荷率 70 % を記録してある（単価は 10/1 のまま）
+  const planting_forecasts = [
+    { id: "fc1", plan_id: "p1", planting_id: "pl1", set_on: "2026-10-01", yield_kg_per_10a: null, yield_g_per_plant: null, shippable_pct: 90, price_yen_per_kg: 350, note: "初めの見込み", created_at: AT },
+    { id: "fc2", plan_id: "p1", planting_id: "pl1", set_on: "2026-11-20", yield_kg_per_10a: null, yield_g_per_plant: null, shippable_pct: 70, price_yen_per_kg: null, note: "発芽が 7 割", created_at: AT },
+  ];
+  const saved = () => page.run(`JSON.parse(localStorage.getItem("field_plan_local")).planting_forecasts.map((row) => [row.id, row.shippable_pct, row.price_yen_per_kg, row.note])`);
+  const current = () => page.run(`[...document.querySelectorAll('${DIALOG} .fc-current tr')].map((tr) => [...tr.cells].slice(1).map((cell) => cell.textContent))`);
+  await page.loadApp(seed({ planting_forecasts }));
+  await openPlanting("pl1");
+  // 16 kg ではなく、出荷率 70 % で 14 kg、単価 350 円
+  assert.deepEqual((await panelRows()).slice(1, 4), [
+    ["出荷量（kg）", "14.0", "－"],
+    ["単価（円/kg）", "350（作付）", "－"],
+    ["売上（円）", "4,900", "－"],
+  ]);
+  assert.match(await page.run(`document.querySelector("#plantingBody .revenue-reviewed").textContent`), /見込みを 11\/20 に見直し（2 回目）/);
+
+  await page.click('#plantingBody [data-act="forecast"]');
+  await page.waitFor(`document.querySelectorAll('${DIALOG} .fc-entry').length === 2`, "履歴に 2 件");
+  assert.deepEqual(await current(), [
+    ["－", "値なし"],
+    ["500 g/株", "品目の値"],
+    ["70 %", "11/20 の記録"],
+    ["350 円/kg", "10/1 の記録"],
+  ]);
+  // 履歴は新しい順
+  assert.deepEqual(await page.run(`[...document.querySelectorAll('${DIALOG} .fc-entry')].map((li) => li.dataset.forecast)`), ["fc2", "fc1"]);
+
+  // 10/1 の記録を直す（単価 380 円）
+  await page.click(`${DIALOG} [data-fc-act="edit"][data-id="fc1"]`);
+  await setValue(`${DIALOG} [data-fc-scope="edit"][data-fc-field="price_yen_per_kg"]`, "380");
+  await page.click(`${DIALOG} [data-fc-act="save-edit"][data-id="fc1"]`);
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).planting_forecasts.find((row) => row.id === "fc1").price_yen_per_kg === 380`, "直した値が保存される");
+  assert.deepEqual((await current())[3], ["380 円/kg", "10/1 の記録"]);
+
+  // 11/20 の記録を削除すると、出荷率は 10/1 の記録の 90 % に戻る
+  await page.click(`${DIALOG} [data-fc-act="delete"][data-id="fc2"]`);
+  await page.click('dialog.notice [data-action="delete"]');
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).planting_forecasts.length === 1`, "削除が保存される");
+  await page.waitFor(`document.querySelectorAll('${DIALOG} .fc-entry').length === 1`, "履歴に 1 件");
+  assert.deepEqual((await current())[2], ["90 %", "10/1 の記録"]);
+  await page.click(`${DIALOG} [data-act="close"]`);
+  await page.waitFor(`!document.querySelector("${DIALOG}")`, "閉じる");
+
+  // 元に戻すと、削除した記録が戻る
+  await page.click("#undoBtn");
+  await page.waitFor(`JSON.parse(localStorage.getItem("field_plan_local")).planting_forecasts.length === 2`, "削除を元に戻す");
+  assert.deepEqual(await saved(), [
+    ["fc1", 90, 380, "初めの見込み"],
+    ["fc2", 70, null, "発芽が 7 割"],
+  ]);
+  await page.waitFor(
+    `[...document.querySelectorAll("#plantingBody .revenue-panel-table tbody tr")].some((tr) => tr.cells[1].textContent === "380（作付）")`,
+    "作付の詳細も戻る"
+  );
+  assert.deepEqual((await panelRows())[1], ["出荷量（kg）", "14.0", "－"]);
   assert.deepEqual(page.errors, []);
 });

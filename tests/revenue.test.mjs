@@ -5,7 +5,9 @@ import assert from "node:assert/strict";
 import {
   MARKET_MIN_DAYS,
   daysOf,
+  effectiveForecast,
   forecast,
+  forecastValues,
   harvestActual,
   harvestWindow,
   marketEstimate,
@@ -59,6 +61,33 @@ test("単価: 作付 → 品目 → 市況からの推定。どれもなけれ�
   assert.deepEqual(resolvePrice({}, {}, estimate), { yen: 250, from: "market", estimate });
   assert.equal(resolvePrice({}, {}, null), null);
   assert.equal(resolvePrice({}, {}, { yen: null }), null);
+});
+
+test("作付の見込みの記録: 項目ごとに、いちばん新しい記録のうち、その項目が入っているものの値を使う", () => {
+  const entries = [
+    { id: "a", set_on: "2026-10-01", created_at: "2026-10-01T01:00:00Z", yield_g_per_plant: 300, shippable_pct: 90, price_yen_per_kg: 250 },
+    { id: "b", set_on: "2026-11-20", created_at: "2026-11-20T01:00:00Z", shippable_pct: 70 },
+    // 同じ日なら、あとから入れた記録
+    { id: "c", set_on: "2026-11-20", created_at: "2026-11-20T02:00:00Z", shippable_pct: 60, price_yen_per_kg: "" },
+    // 日付が古ければ、あとから入れても前の値
+    { id: "d", set_on: "2026-09-01", created_at: "2026-11-24T00:00:00Z", yield_g_per_plant: 999, yield_kg_per_10a: 2000 },
+  ];
+  const effective = effectiveForecast(entries);
+  assert.deepEqual(effective.values, {
+    yield_kg_per_10a: { value: 2000, set_on: "2026-09-01", id: "d" },
+    yield_g_per_plant: { value: 300, set_on: "2026-10-01", id: "a" },
+    shippable_pct: { value: 60, set_on: "2026-11-20", id: "c" },
+    price_yen_per_kg: { value: 250, set_on: "2026-10-01", id: "a" },
+  });
+  assert.equal(effective.latest.id, "c");
+  assert.equal(effective.count, 4);
+  assert.deepEqual(forecastValues(effective), { yield_kg_per_10a: 2000, yield_g_per_plant: 300, shippable_pct: 60, price_yen_per_kg: 250 });
+  // 0 は値として使う
+  assert.deepEqual(effectiveForecast([{ id: "z", set_on: "2026-01-01", shippable_pct: 0 }]).values.shippable_pct, { value: 0, set_on: "2026-01-01", id: "z" });
+  assert.deepEqual(effectiveForecast([]), { values: {}, latest: null, count: 0 });
+  // 作付の値として使い、品目の値より先に使う
+  const result = forecast(forecastValues(effective), { yield_kg_per_10a: 5000, shippable_pct: 100, price_yen_per_kg: 200 }, { seedlings: 10, areaM2: 50, window: JUNE });
+  assert.deepEqual([result.yield.from, result.yield.method, result.rate.pct, result.price], ["planting", "plant", 60, { yen: 250, from: "planting" }]);
 });
 
 const JUNE = { start: "2027-06-01", end: "2027-06-10" };

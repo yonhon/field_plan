@@ -35,6 +35,7 @@ export const UNDO_APPLY = {
   beds: "plan",
   plantings: "plan",
   works: "plan",
+  planting_forecasts: "plan",
   crops: "shared",
   fertilizers: "shared",
   fields: "field",
@@ -49,7 +50,7 @@ export const UNDO_APPLY = {
 // 画面に当て方を決めていない表と、そこに書く操作。書く操作は、行ったあとに履歴を空にする（resetHistory）ので、戻すことはない。
 // 当てる行が返ったら、applyUndo は当てずに断り、DB から読み直す。いまはない
 export const UNDO_NOT_APPLIED = {};
-const TABLE_NAMES = { plans: "プラン", zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", crops: "品目", fertilizers: "肥料", logs: "実績" };
+const TABLE_NAMES = { plans: "プラン", zones: "区域", blocks: "区画", beds: "畝", plantings: "作付", works: "作業", planting_forecasts: "収量と単価の見込み", crops: "品目", fertilizers: "肥料", logs: "実績" };
 
 // ctx = { state, busy, lock, flush, apply, reload, setStatus, draft, showDialog, where, goTo }
 let ctx = null;

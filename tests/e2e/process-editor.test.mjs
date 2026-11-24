@@ -54,7 +54,7 @@ test("工程の計画: 区画の頭から開き、日付を直して、保存す
   await openFromBlock();
   assert.deepEqual(
     await page.run(`[...document.querySelectorAll('${DIALOG} [data-act="kind"]')].map((el) => el.textContent + (el.classList.contains("is-on") ? "*" : ""))`),
-    ["工程の計画*", "管理作業の計画", "実績"]
+    ["工程の計画*", "管理作業の計画", "実績", "収量と単価"]
   );
   assert.equal(await page.run(`document.querySelectorAll("${DIALOG} .pe-card").length`), 2);
 
@@ -120,7 +120,7 @@ test("工程の計画: 畝を選んで作業を足し、キャンセルで捨て
   assert.deepEqual(page.errors, []);
 });
 
-test("工程の計画: 何も変えずに閉じるときは確かめない。実際に使うプランがなければ、工程の計画のタブだけ", options, async () => {
+test("工程の計画: 何も変えずに閉じるときは確かめない。実際に使うプランがなければ、工程の計画と収量と単価のタブだけ", options, async () => {
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="schedule"]');
   await openFromBlock();
@@ -134,7 +134,8 @@ test("工程の計画: 何も変えずに閉じるときは確かめない。実
   await page.loadApp(data);
   await page.click("#logAddBtn");
   await page.waitFor(`Boolean(document.querySelector("${DIALOG} .pe"))`, "工程の計画のタブで開く");
-  assert.deepEqual(await page.run(`[...document.querySelectorAll('${DIALOG} [data-act="kind"]')].map((el) => el.disabled)`), [false, true, true]);
+  // 収量と単価は、工程の計画と同じく、開いているプランの作付に付けるので、実際に使うプランがなくても使える
+  assert.deepEqual(await page.run(`[...document.querySelectorAll('${DIALOG} [data-act="kind"]')].map((el) => el.disabled)`), [false, true, true, false]);
   await page.click(`${DIALOG} .log-head [data-act="close"]`);
   await page.waitFor(`history.state?.fieldPlanDialog !== true`, "積んだ履歴が取り消される");
   assert.deepEqual(page.errors, []);

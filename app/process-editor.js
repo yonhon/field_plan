@@ -110,7 +110,6 @@ export function startProcess({ blockId = null, plantingId = null, bedId = null }
     template: { key: Object.keys(TEMPLATES.block)[0], start: "" },
     arrange: new Map(), // 並べ直しの欄で選んだ基準と日。持ち主ごと
     folded: new Set(), // たたんでいる作付
-    values: new Set(), // 収量と単価の欄を開いている作付
     memo: new Set(), // メモの欄を開いている作業
     adding: { cropId: "", mode: "plant", date: null }, // 次の作付を足す欄
   };
@@ -123,8 +122,6 @@ export function startProcess({ blockId = null, plantingId = null, bedId = null }
     const ids = new Set(pd.plantings.map((item) => item.id));
     pd.works = processOnly(s.works.filter((work) => ids.has(work.planting_id))).sort(bySeq).map((work) => ({ ...work }));
   }
-  // 作付だけの収量や単価が入っている作付は、その欄を開いておく
-  pd.plantings.filter((item) => PLANTING_VALUES.some(([key]) => hasValue(item[key]))).forEach((item) => pd.values.add(item.id));
   pd.origPlantings = new Map(pd.plantings.map((item) => [item.id, JSON.stringify(item)]));
   pd.origWorks = new Map(pd.works.map((work) => [work.id, JSON.stringify(work)]));
   pd.orig = snapshot();
@@ -307,7 +304,6 @@ function bedHtml(problems) {
           : `<div class="pe-line"><select data-pe="crop" data-owner="${key}" aria-label="この作付の品目">${cropOptions(crop?.id)}</select>` +
             `<button type="button" class="text-btn danger" data-pe-act="delete-planting" data-owner="${key}">この作付を削除</button></div>` +
             (crop ? "" : `<input type="text" data-pe="crop_name" data-owner="${key}" placeholder="品目の名前" value="${escapeHtml(planting.crop_name)}" />`) +
-            valuesHtml(planting, crop, key) +
             (works.length ? `<details class="strip-detail pe-tools"><summary>並べ直す</summary>${arrangeHtml(owner)}</details>` : "") +
             ownerNotes(owner, problems) +
             cardsHtml(owner, problems) +
@@ -320,34 +316,6 @@ function bedHtml(problems) {
     (sections || '<p class="muted">この畝には作付がまだありません。下で品目と日を決めて「作付を追加」を押すと、畝立てから残渣処理までの作業が入った作付ができます。</p>') +
     addPlantingHtml()
   );
-}
-
-// 作付だけの収量、出荷率、単価（revenue.js）。空の欄は品目の値を使う。[列の名前, 見出し]
-const PLANTING_VALUES = [
-  ["yield_kg_per_10a", "収量（kg/10a）"],
-  ["yield_g_per_plant", "収量（g/株）"],
-  ["shippable_pct", "出荷率（%）"],
-  ["price_yen_per_kg", "単価（円/kg・税抜き）"],
-];
-const hasValue = (value) => value !== null && value !== undefined && value !== "";
-
-function valuesHtml(planting, crop, key) {
-  const open = pd.values.has(planting.id);
-  const count = PLANTING_VALUES.filter(([name]) => hasValue(planting[name])).length;
-  const button =
-    `<div class="pe-line"><button type="button" class="text-btn" data-pe-act="values" data-owner="${key}" aria-expanded="${open}">` +
-    `${open ? "▾" : "▸"} 収量と単価（この作付だけ）${count && !open ? `: ${count} 項目` : ""}</button></div>`;
-  if (!open) {
-    return button;
-  }
-  const inputs = PLANTING_VALUES.map(([name, label]) => {
-    const base = crop && hasValue(crop[name]) ? `品目: ${crop[name]}` : "品目: なし";
-    return (
-      `<label>${label}<input type="number" min="0"${name === "shippable_pct" ? ' max="100"' : ""} step="any" inputmode="decimal" ` +
-      `data-pe="value" data-key="${name}" data-owner="${key}" value="${hasValue(planting[name]) ? planting[name] : ""}" placeholder="${escapeHtml(base)}" /></label>`
-    );
-  }).join("");
-  return `${button}<div class="pe-values">${inputs}</div><p class="muted">空の欄は、品目の値を使います。単価が品目にもなければ、市況から推します。</p>`;
 }
 
 function addPlantingHtml() {
@@ -536,10 +504,6 @@ export function processClick(event, rerender) {
   } else if (act === "template") {
     applyTemplate(rerender);
     return true;
-  } else if (act === "values") {
-    if (!pd.values.delete(owner.planting_id)) {
-      pd.values.add(owner.planting_id);
-    }
   } else if (act === "fold") {
     if (!pd.folded.delete(owner.planting_id)) {
       pd.folded.add(owner.planting_id);
@@ -624,16 +588,6 @@ export function processChange(event, rerender) {
     }
   } else if (field === "crop_name") {
     plantingOf(owner).crop_name = value.trim();
-  } else if (field === "value") {
-    const name = event.target.dataset.key;
-    const number = Number(value);
-    if (value.trim() === "") {
-      plantingOf(owner)[name] = null;
-    } else if (!Number.isFinite(number) || number < 0 || (name === "shippable_pct" && number > 100)) {
-      notify(name === "shippable_pct" ? "0 から 100 までの数を入れてください。" : "0 以上の数を入れてください。");
-    } else {
-      plantingOf(owner)[name] = number;
-    }
   } else if (field === "add-crop") {
     pd.adding.cropId = value;
     pd.adding.date = null;

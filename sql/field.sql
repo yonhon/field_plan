@@ -288,10 +288,32 @@ alter table field.crops add column if not exists yield_g_per_plant numeric;  -- 
 alter table field.crops add column if not exists shippable_pct numeric;      -- 出荷率（%）。空なら 100 %
 alter table field.crops add column if not exists price_yen_per_kg numeric;   -- 想定単価（円/kg）。空なら市況から推す
 alter table field.crops add column if not exists market_item_name text not null default '';  -- 市況での品目名（public.market_daily_item_stats の item_name）
+-- 作付の 4 列は、初めに作付の値を 1 つだけ持つ形で足した。いまは使わない（作付の値は、下の field.planting_forecasts の履歴で持つ）。
+-- どの公開の画面も使っていない（2026-11-24 に、本番の DB で 105 件すべて空）。版 4 を公開したあとで消す
 alter table field.plantings add column if not exists yield_kg_per_10a numeric;
 alter table field.plantings add column if not exists yield_g_per_plant numeric;
 alter table field.plantings add column if not exists shippable_pct numeric;
 alter table field.plantings add column if not exists price_yen_per_kg numeric;
+
+-- 作付の収量と単価の見込みの履歴（2026-11-24）。見直すたびに 1 件足す（出荷率を発芽の具合で見直す、など）。
+-- 4 つの値は、変えるものだけを入れる（空は「この記録では変えていない」）。計算に使うのは、項目ごとに、
+-- いちばん新しい記録（set_on、同じ日なら created_at）のうち、その項目が入っているもの。どの記録にもなければ品目の値（app/revenue.js）。
+-- 作付と同じくプランに付け、プランをコピーすると一緒にコピーする（copy_plan）。作付を消すと一緒に消える
+create table if not exists field.planting_forecasts (
+  id uuid primary key default gen_random_uuid(),
+  plan_id uuid not null references field.plans (id) on delete cascade,
+  planting_id uuid not null references field.plantings (id) on delete cascade,
+  set_on date not null,                -- 見込みを決めた日
+  yield_kg_per_10a numeric,            -- 10 a あたりの収量（kg）
+  yield_g_per_plant numeric,           -- 1 株あたりの収量（g）
+  shippable_pct numeric,               -- 出荷率（%）
+  price_yen_per_kg numeric,            -- 単価（円/kg、税抜き）
+  note text not null default '',       -- なぜ見直したか
+  created_at timestamptz not null default now()
+);
+
+create index if not exists planting_forecasts_planting_idx on field.planting_forecasts (planting_id);
+create index if not exists planting_forecasts_plan_idx on field.planting_forecasts (plan_id);
 -- 収穫で、この畝だけ量った収穫量（kg）。空の畝には、記録の収穫量（spec.harvest_kg）の残りを面積の比で分ける
 alter table field.work_log_targets add column if not exists harvest_kg numeric;
 
@@ -383,6 +405,11 @@ begin
     'id', gen_random_uuid(), 'plan_id', copy.id,
     'block_id', block_ids ->> r.block_id::text, 'planting_id', planting_ids ->> r.planting_id::text))).*
   from field.works r where r.plan_id = p_source;
+
+  insert into field.planting_forecasts
+  select (jsonb_populate_record(null::field.planting_forecasts, to_jsonb(r) || jsonb_build_object(
+    'id', gen_random_uuid(), 'plan_id', copy.id, 'planting_id', planting_ids ->> r.planting_id::text))).*
+  from field.planting_forecasts r where r.plan_id = p_source;
 
   return copy;
 end;
@@ -889,7 +916,7 @@ declare
   t text;
 begin
   foreach t in array array[
-    'fields', 'backdrops', 'plans', 'zones', 'blocks', 'beds', 'plantings', 'works',
+    'fields', 'backdrops', 'plans', 'zones', 'blocks', 'beds', 'plantings', 'works', 'planting_forecasts',
     'crops', 'fertilizers', 'work_types', 'work_logs', 'work_log_targets', 'work_log_inputs', 'work_sessions'
   ] loop
     execute format('drop trigger if exists write_audit_log on field.%I', t);
@@ -930,7 +957,7 @@ declare
   -- 親から子の順。fields.active_plan_id は plans を指すので、入れる順で断られた行は、あとでもう一度試す
   v_order constant text[] := array[
     'fields', 'backdrops', 'plans', 'work_types', 'fertilizers', 'crops', 'zones', 'blocks', 'beds', 'plantings', 'works',
-    'work_logs', 'work_log_targets', 'work_log_inputs', 'work_sessions'];
+    'planting_forecasts', 'work_logs', 'work_log_targets', 'work_log_inputs', 'work_sessions'];
   v_rows jsonb;      -- [{ t: 表, id: 行の ID, before: 操作の前の中身か null, after: 操作のあとの中身か null }]
   v_conflicts jsonb;
   v_headers jsonb;
@@ -1159,7 +1186,8 @@ begin
       'blocks', coalesce((select json_agg(t order by t.created_at, t.id) from field.blocks t where t.plan_id = v_plan), '[]'),
       'beds', coalesce((select json_agg(t order by t.seq, t.id) from field.beds t where t.plan_id = v_plan), '[]'),
       'plantings', coalesce((select json_agg(t order by t.seq, t.id) from field.plantings t where t.plan_id = v_plan), '[]'),
-      'works', coalesce((select json_agg(t order by t.seq, t.id) from field.works t where t.plan_id = v_plan), '[]')
+      'works', coalesce((select json_agg(t order by t.seq, t.id) from field.works t where t.plan_id = v_plan), '[]'),
+      'planting_forecasts', coalesce((select json_agg(t order by t.set_on, t.id) from field.planting_forecasts t where t.plan_id = v_plan), '[]')
     ) end,
     -- 記録は、対象と資材ごと。形は save_work_log が返す 1 件と同じ
     'logs', coalesce((
@@ -1258,7 +1286,7 @@ declare
 begin
   foreach t in array array[
     'fields', 'backdrops', 'plans', 'zones', 'blocks', 'work_types',
-    'fertilizers', 'crops', 'beds', 'plantings', 'works', 'changes', 'dev_notes',
+    'fertilizers', 'crops', 'beds', 'plantings', 'works', 'planting_forecasts', 'changes', 'dev_notes',
     'work_logs', 'work_log_targets', 'work_log_inputs', 'work_sessions', 'weather_daily', 'news'
   ] loop
     execute format('alter table field.%I enable row level security', t);

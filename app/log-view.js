@@ -9,6 +9,7 @@ import { draw } from "./draw.js";
 import { holesOf } from "./crops.js";
 import { splitHarvest } from "./revenue.js";
 import { confirmDiscard, processChange, processClick, processDirty, processHtml, processPreset, saveProcess, startProcess } from "./process-editor.js";
+import { forecastChange, forecastClick, forecastDirty, forecastHtml, forecastInput, forecastPreset, startForecast } from "./forecast-editor.js";
 import { escapeHtml } from "./html.js";
 
 const $ = (id) => document.getElementById(id);
@@ -360,7 +361,7 @@ export function logForWork(workId) {
 // 窓を開く。log を渡すとその記録を直す。
 // preset.works を渡すと、その計画の作業（同じ種類、畝ごと）の記録として、種類と対象とつながりを入れて開く。
 // preset.plantingId を渡すと、その作付の畝を対象に入れて開く
-// 「作業を入力する」の窓を開く。preset.tab で初めのタブを選ぶ（"process" 工程の計画、"plan" 管理作業の計画、なければ実績）。
+// 「作業を入力する」の窓を開く。preset.tab で初めのタブを選ぶ（"process" 工程の計画、"plan" 管理作業の計画、"forecast" 収量と単価、なければ実績）。
 // 実際に使うプランがない（読めない）ときは、計画の作業や記録から開いたのでなければ、「工程の計画」のタブだけで開く
 export async function openLogEditor(log = null, preset = {}) {
   const free = !log && !preset.works?.length && !preset.planWork;
@@ -368,7 +369,9 @@ export async function openLogEditor(log = null, preset = {}) {
   if (!activeReady && !free) {
     return;
   }
-  if (free && (preset.tab === "process" || !activeReady)) {
+  if (free && preset.tab === "forecast") {
+    draft = forecastDraft(preset);
+  } else if (free && (preset.tab === "process" || !activeReady)) {
     draft = processDraft(preset);
   } else if (!makeDraft(log, preset)) {
     return;
@@ -387,6 +390,15 @@ export async function openLogEditor(log = null, preset = {}) {
   updateTotals();
   refreshUses(); // 直す記録の農薬は、使用基準を読み込んでから、使い方と指摘を出す
 }
+
+// 「収量と単価」のタブ。中身は forecast-editor.js が持つ（記録ごとにすぐ保存するので、窓の「保存する」はない）
+function forecastDraft(preset) {
+  startForecast(preset);
+  return { kind: "forecast", switchable: true, preset, id: null, planWorks: [], cancellable: [] };
+}
+
+// 中身をほかのファイルが持つタブ（工程の計画、収量と単価）か
+const editorTab = () => draft?.kind === "process" || draft?.kind === "forecast";
 
 // 「工程の計画」のタブの書きかけ。中身は process-editor.js が持つ
 function processDraft(preset) {
@@ -411,7 +423,8 @@ const draftSnapshot = () =>
     harvest: draft.harvest,
     inputs: draft.inputs.map(({ kind, name, reg_no, dilution, amount, unit, method, fertilizer_id, per_hole }) => ({ kind, name, reg_no, dilution, amount, unit, method, fertilizer_id, per_hole })),
   });
-const isDirty = () => Boolean(draft) && (draft.kind === "process" ? processDirty() : draftSnapshot() !== draft.baseline);
+const isDirty = () =>
+  Boolean(draft) && (draft.kind === "process" ? processDirty() : draft.kind === "forecast" ? forecastDirty() : draftSnapshot() !== draft.baseline);
 
 // 窓をどこから開いたかを、1 つの形にまとめる。開き方は次のどれか 1 つ（呼び出す側は組み合わせて渡さない）。
 //   実績を直す（log）、管理作業の計画を直す（preset.planWork）、計画の作業から実績を入れる（preset.works）、
@@ -561,9 +574,11 @@ async function switchKind(kind) {
     return;
   }
   // 相手は引き継ぐ（工程の計画で選んでいた区画や畝、または開いたときの相手）
-  const preset = { ...(draft.kind === "process" ? processPreset() : draft.preset), tab: kind };
+  const preset = { ...(draft.kind === "process" ? processPreset() : draft.kind === "forecast" ? forecastPreset() : draft.preset), tab: kind };
   if (kind === "process") {
     draft = processDraft(preset);
+  } else if (kind === "forecast") {
+    draft = forecastDraft(preset);
   } else {
     makeDraft(null, preset);
   }
@@ -695,7 +710,7 @@ function kindTabs() {
   const tab = (kind, label, disabled = false) =>
     `<button type="button" class="chip-btn${draft.kind === kind ? " is-on" : ""}" data-act="kind" data-kind="${kind}" aria-pressed="${draft.kind === kind}"${disabled ? " disabled" : ""}>${label}</button>`;
   return (
-    `<div class="log-kinds log-tabs seg" role="group" aria-label="入力するもの">${tab("process", "工程の計画")}${tab("plan", "管理作業の計画", !activeReady)}${tab("actual", "実績", !activeReady)}</div>` +
+    `<div class="log-kinds log-tabs seg" role="group" aria-label="入力するもの">${tab("process", "工程の計画")}${tab("plan", "管理作業の計画", !activeReady)}${tab("actual", "実績", !activeReady)}${tab("forecast", "収量と単価")}</div>` +
     (activeReady ? "" : '<p class="muted">管理作業の計画と実績は、実際に使うプランを決めると入力できます。</p>')
   );
 }
@@ -705,6 +720,16 @@ const footButtons = () =>
   `<button type="button" class="primary-btn" data-act="save">保存する</button>`;
 
 function renderDialog() {
+  if (draft.kind === "forecast") {
+    draw(
+      dialog,
+      `<div class="log-head"><h2 id="logDialogTitle" tabindex="-1">${dialogTitle()}</h2>` +
+      `<button type="button" class="text-btn" data-act="close" aria-label="閉じる">閉じる</button></div>` +
+      `<div class="log-body">${kindTabs()}${forecastHtml()}<p class="error" id="logError" role="alert"></p></div>` +
+      '<div class="log-foot"><span class="log-spacer"></span><button type="button" class="text-btn" data-act="close">閉じる</button></div>'
+    );
+    return;
+  }
   if (draft.kind === "process") {
     draw(
       dialog,
@@ -1122,7 +1147,7 @@ function harvestStartOf(plantingId) {
 
 // 選んだ農薬の使用基準を、対象の品目に合わせて読み込み直す（対象を変えたとき）
 function refreshUses() {
-  if (!famic.famicEnabled() || !draft || draft.kind === "process") {
+  if (!famic.famicEnabled() || !draft || editorTab()) {
     return;
   }
   const groups = sprayGroups();
@@ -1170,7 +1195,7 @@ function linkSection(items) {
 
 // 液の量の合計と、希釈倍率から計算した製品の量を、描き直さずに書き換える
 function updateTotals() {
-  if (!dialog || !draft || draft.kind === "process") {
+  if (!dialog || !draft || editorTab()) {
     return;
   }
   // 1 穴あたりの量から出した量は、欄と文を、描き直さずに入れ替える（打っている欄を作り直さないため）
@@ -1265,6 +1290,10 @@ function applySuggestedDilution(input) {
 function onClick(event) {
   // 「工程の計画」のタブの中の操作は、process-editor.js が受ける
   if (draft?.kind === "process" && processClick(event, renderDialog)) {
+    return;
+  }
+  // 「収量と単価」のタブの中の操作は、forecast-editor.js が受ける
+  if (draft?.kind === "forecast" && forecastClick(event, renderDialog)) {
     return;
   }
   const button = event.target.closest("[data-act]");
@@ -1448,6 +1477,10 @@ function onChange(event) {
     processChange(event, renderDialog);
     return;
   }
+  if (draft?.kind === "forecast") {
+    forecastChange(event, renderDialog);
+    return;
+  }
   const el = event.target;
   if (el.dataset.f === "date") {
     if (el.value) {
@@ -1513,6 +1546,10 @@ function onChange(event) {
 
 function onInput(event) {
   if (draft?.kind === "process") {
+    return;
+  }
+  if (draft?.kind === "forecast") {
+    forecastInput(event);
     return;
   }
   const el = event.target;

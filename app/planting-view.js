@@ -389,7 +389,7 @@ function asideHtml(c, active) {
   return [revenueHtml(c), workTimeHtml(c), famicEnabled() && active ? usageHtml(c) : "", accumulationHtml(), forecastHtml()].join("");
 }
 
-const VALUE_FROM = { planting: "この作付の値", crop: "品目の値" };
+const VALUE_FROM = { planting: "この作付の見込みの記録", crop: "品目の値" };
 const shortDate = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
 
 // 市況から推した単価の説明。日ごとにどこまで広げた市況かが分かるようにする（revenue-view.js の priceTitle）
@@ -404,13 +404,18 @@ function estimateNote(item) {
 // 収量と売上。見込み（品目か作付の値、市況からの推定）と、収穫量の実績を並べる。計算は revenue.js、値を集めるのは revenue-view.js
 function revenueHtml(c) {
   const item = plantingRevenue(c.planting);
-  const title = "<h2>収量と売上</h2>";
+  // 「見込みを記録」で、入力の窓の「収量と単価」のタブを、この作付で開く（forecast-editor.js）
+  const title =
+    '<div class="panel-heading revenue-panel-head"><h2>収量と売上</h2>' +
+    '<button type="button" class="chip-btn" data-act="forecast">見込みを記録</button></div>';
   if (!item.yield && !item.price && !item.actual?.count && !item.actual?.unmeasured) {
     const loading = item.marketLoading ? "市況を読んでいます。" : "";
     return (
-      `<section class="panel revenue-panel">${title}<p class="muted">${loading}台帳の品目か、「工程の計画」のこの作付で、収量（10 a あたりか 1 株あたり）と単価を入れると、見込みが出ます。</p></section>`
+      `<section class="panel revenue-panel">${title}<p class="muted">${loading}台帳の品目か、「見込みを記録」でこの作付の収量（10 a あたりか 1 株あたり）と単価を入れると、見込みが出ます。</p></section>`
     );
   }
+  // この作付の見込みの記録が何回あり、最後はいつか
+  const reviewed = item.own.count ? `見込みを ${shortDate(item.own.latest.set_on)} に${item.own.count > 1 ? "見直し" : "記録"}（${item.own.count} 回目）` : "";
   const actual = item.actual;
   const showActual = Boolean(actual);
   const per10a = (kg) => (kg !== null && item.areaM2 ? formatKg((kg / item.areaM2) * 1000, 0) : "");
@@ -448,7 +453,7 @@ function revenueHtml(c) {
     row("売上（円）", formatYen(item.salesYen), formatYen(actualSales(item))) +
     row("10 a あたり収量（kg）", per10a(item.yieldKg), actual?.count ? per10a(actual.kg) : "") +
     (gap !== null ? row(`収量の差による売上の差${harvesting ? "（収穫中）" : ""}`, "", `${gap > 0 ? "＋" : gap < 0 ? "−" : ""}${formatYen(Math.abs(gap))}`) : "") +
-    `</tbody></table>${notes.map((text) => `<p class="muted">${escapeHtml(text)}</p>`).join("")}</section>`
+    `</tbody></table>${reviewed ? `<p class="revenue-reviewed">${escapeHtml(reviewed)}</p>` : ""}${notes.map((text) => `<p class="muted">${escapeHtml(text)}</p>`).join("")}</section>`
   );
 }
 
@@ -1119,6 +1124,8 @@ function onClick(event) {
     if (c) {
       openDiary(c);
     }
+  } else if (act === "forecast") {
+    openLogEditor(null, { plantingId: t.id, tab: "forecast" });
   } else if (act === "record") {
     // 区画からは工程の計画のタブで、作付からは実績のタブで開く
     openLogEditor(null, t.kind === "block" ? { blockId: t.id, tab: "process" } : { plantingId: t.id });
