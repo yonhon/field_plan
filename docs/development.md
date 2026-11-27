@@ -16,9 +16,9 @@
 | 「作業を入力する」の窓、最近の実績、管理作業の計画、完了と取りやめ | `log-view.js` |
 | 「作業を入力する」の窓の「工程の計画」のタブ | `process-editor.js` |
 | 「作業を入力する」の窓の「収量と単価」のタブ | `forecast-editor.js` |
-| 作付の詳細（区画の詳細を含む） | `planting-view.js` |
+| 作付の詳細と、日程の画面の「区画の作業の計画と実績」 | `planting-view.js` |
 | 圃場の設定の窓の「気象」のタブ | `weather-view.js` |
-| 圃場図の上のタブの「ニュース」 | `news-view.js` |
+| 「今日」のタブの「ニュース」 | `news-view.js` |
 | 計測中の作業の、端末の通知欄 | `timer-notice.js`（帯は `today-view.js`） |
 | ヘッダーの左上のロゴとメニュー | `user-menu.js` |
 | 「圃場とプラン」の窓 | `field-plans.js` |

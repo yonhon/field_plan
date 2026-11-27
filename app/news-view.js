@@ -1,4 +1,4 @@
-// 圃場図の上のタブの「ニュース」。県のページに載った記事（field.news。scripts/fetch-news.mjs が 1 日 2 回足す）を、
+// 「今日」のタブの欄の「ニュース」。県のページに載った記事（field.news。scripts/fetch-news.mjs が 1 日 2 回足す）を、
 // 未読と既読に分けて出す。未読があれば、タブの名前の後ろに ⚠ と件数を出す。「確認」を押した記事は既読へ移る
 import { draw } from "./draw.js";
 import { escapeHtml } from "./html.js";
