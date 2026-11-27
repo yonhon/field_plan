@@ -13,8 +13,9 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const TEXT = /(\.(md|js|mjs|ts|py|sql|yml|yaml|json|html|toml)|(^|\/)\.gitignore)$/;
-// 過去の記録は、そのときの名前のまま残す
-const SKIP = new Set(["docs/e2e-runs.md", "docs/mutation-runs.md", "docs/perf-runs.md", "app/updates.json"]);
+// 過去の記録は、そのときの名前のまま残すので見ない。このファイルも、書き方の例を持つので見ない
+// （コミットの前は git ls-files に入らないので、外し忘れはコミットしたあとで初めて落ちる）
+const SKIP = new Set(["docs/e2e-runs.md", "docs/mutation-runs.md", "docs/perf-runs.md", "app/updates.json", "tests/doc-links.test.mjs"]);
 
 function trackedFiles() {
   return execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" })
