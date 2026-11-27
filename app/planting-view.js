@@ -45,7 +45,7 @@ let stationNames = null;
 let wx = null; // いま描いている作付の気象の表示（作業の表の列で使う）
 // 頭を 2 行（名前の行と、ボタンの行）にしているか。作付の詳細と、日程の画面の区画の頭で別々に、描き直すたびに測り直す（fitHead）
 const stacked = { plantingBody: false, blockHead: false };
-// 日程の画面の区画の頭で、苗と肥料の集計を開いているか
+// 日程の画面の区画の頭で、苗・肥料・収量の集計を開いているか
 let summaryOpen = false;
 // この作付（区画）に付いた日記の節。画面を開いたあとで読み、読み終えたら描き直す
 const diary = { key: "", rows: null, error: "" };
@@ -634,7 +634,7 @@ function forecastHtml() {
   );
 }
 
-// 区画の頭の、面積・畝の行。押すと、苗と肥料の集計を開く
+// 区画の頭の、面積・畝の行。押すと、苗・肥料・収量の集計を開く
 function blockInfoHtml(c) {
   const today = localToday();
   const beds = state().beds.filter((bed) => bed.block_id === c.block.id);
@@ -652,7 +652,7 @@ function blockInfoHtml(c) {
   return `<button type="button" class="text-btn detail-info detail-summary-btn" data-act="summary" aria-expanded="${summaryOpen}" title="苗・肥料・収量の集計を開きます">${escapeHtml(text)} ${summaryOpen ? "▾" : "▸"}</button>${timeHtml}`;
 }
 
-// 日程の画面で「全体」を選んだときの頭。名前と、すべての区画の面積・畝の本数（押すと苗と肥料の集計を出し入れする。区画の頭と同じ）、
+// 日程の画面で「全体」を選んだときの頭。名前と、すべての区画の面積・畝の本数（押すと苗・肥料・収量の集計を出し入れする。区画の頭と同じ）、
 // 入力のボタン（相手を決めずに入力の窓を開く。押したときの処理は schedule-view.js）。表示の切り替えは工程表の欄にある。
 // 面積と本数は、今日ある区画と畝
 export function renderWholeHead() {
@@ -1114,7 +1114,7 @@ function onClick(event) {
     ctx.showView("schedule", { history: "replace" });
     window.scrollTo(0, 0);
   } else if (act === "summary") {
-    // 苗と肥料の集計の出し入れ
+    // 苗・肥料・収量の集計の出し入れ
     summaryOpen = !summaryOpen;
     $("blockSummary").hidden = !summaryOpen;
     // 見込みの列は、窓を出しているときだけ計算するので、出したら描き直す（schedule-view.js の renderSummary）

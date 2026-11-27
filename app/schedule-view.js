@@ -232,7 +232,7 @@ export function renderSchedule() {
     renderSummary();
     return;
   }
-  // 全体: 工程表（すべての区画）と苗と肥料の集計だけを出す。区画と畝の図と、区画の作業の計画と実績は出さない
+  // 全体: 工程表（すべての区画）と苗・肥料・収量の集計だけを出す。区画と畝の図と、区画の作業の計画と実績は出さない
   $("stripPanel").hidden = sel.whole;
   $("blockRecord").hidden = sel.whole;
   if (sel.whole) {

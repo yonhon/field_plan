@@ -53,7 +53,7 @@ const ganttRows = () => page.run(`[...document.querySelectorAll("#gantt .gantt-r
 const shown = (id) => page.run(`document.getElementById(${JSON.stringify(id)}).offsetParent !== null`);
 const DIALOG = "dialog.log-dialog[open]";
 
-test("日程の「全体」: 工程表にすべての区画を描き、頭の面積・畝の行で苗と肥料の集計を出し入れする。区画と畝の図と区画の計画は出さない。URL で開き直せる", options, async () => {
+test("日程の「全体」: 工程表にすべての区画を描き、頭の面積・畝の行で苗・肥料・収量の集計を出し入れする。区画と畝の図と区画の計画は出さない。URL で開き直せる", options, async () => {
   await page.viewport(1280, 800);
   await page.loadApp(seed());
   await page.click('.tab-btn[data-view="map"]');
@@ -67,11 +67,11 @@ test("日程の「全体」: 工程表にすべての区画を描き、頭の面
   await page.setValue("#schedulePicker", "all");
   await page.waitFor(`location.hash === "#schedule/all"`, "URL が全体になる");
   assert.equal(await ganttRows(), "A/A 畝1/B/B 畝1", "全体では、すべての区画と畝");
-  // 頭の面積・畝の本数（区画 A と B の 18×18 m）。押すと苗と肥料の集計を出し、もう一度押すとしまう
+  // 頭の面積・畝の本数（区画 A と B の 18×18 m）。押すと苗・肥料・収量の集計を出し、もう一度押すとしまう
   assert.equal(await page.run(`document.querySelector('#blockHead [data-act="summary"]').textContent`), "区画 648.0 ㎡・畝 2 本 ▸");
   assert.equal(await shown("blockSummary"), false, "初めは集計を出さない");
   await page.click('#blockHead [data-act="summary"]');
-  assert.equal(await shown("blockSummary"), true, "押すと苗と肥料の集計を出す");
+  assert.equal(await shown("blockSummary"), true, "押すと苗・肥料・収量の集計を出す");
   assert.equal(await page.run(`document.getElementById("summaryTitle").textContent`), "苗・肥料・収量の集計（全体）");
   assert.equal(await page.run(`document.querySelector("#cropSummary td:nth-child(2)").textContent`), "2", "2 つの区画の作付を合わせる");
   assert.equal(await shown("stripPanel"), false, "区画と畝の図は出さない");

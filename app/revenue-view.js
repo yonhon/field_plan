@@ -1,6 +1,6 @@
 // 「収支」のタブ。作付ごとの収支の一覧（docs の 7.2）。行はプランのすべての作付で、収量と売上の見込み、収穫量の実績、作業時間を出す。
 // 経費の列は、資材の単価を入れられるようにしてから足す。
-// 収量と売上の見込み（作付の詳細、苗と肥料の集計も、ここの plantingRevenue を使う。計算は revenue.js）と、市況の読み込みも置く。
+// 収量と売上の見込み（作付の詳細、苗・肥料・収量の集計も、ここの plantingRevenue を使う。計算は revenue.js）と、市況の読み込みも置く。
 // 作業時間の分け方（作付の詳細と区画の頭も、ここの timeAllocation を使う）:
 // - 計測は、計画の作業（work_ids）か、つないだ実績（log_id）を通して、作付か区画に付ける。
 //   1 件の計測に作付がいくつもあるときは、畝＋通路の面積の比で分ける（区画の作業は区画の面積）。
@@ -338,10 +338,10 @@ export function plantingRevenue(planting, index = revenueIndex()) {
 // 収穫量の実績から見た売上（実績の収穫量 × 出荷率 × 単価）。収穫量か単価がなければ null
 export const actualSales = (item) => (item.actual?.kg && item.price ? (item.actual.kg * item.rate.pct * item.price.yen) / 100 : null);
 
-// 作付の品目の呼び名。苗と肥料の集計（crops.js の summarize）と同じ名前にする
+// 作付の品目の呼び名。苗・肥料・収量の集計（crops.js の summarize）と同じ名前にする
 export const plantingCropName = (planting, crop) => (crop ? cropLabel(crop) : planting.crop_name || "品目なし");
 
-// 作付の並びの見込みを、品目ごとに足す。苗と肥料の集計の窓と、「収支」のタブの「品目ごとの収支」で使う。
+// 作付の並びの見込みを、品目ごとに足す。苗・肥料・収量の集計の窓と、「収支」のタブの「品目ごとの収支」で使う。
 // 収量か売上の分からない作付は、その合計に入れず、数を missingYield、missingSales に数える
 export function revenueByCrop(plantings, index = revenueIndex()) {
   const byCrop = new Map();

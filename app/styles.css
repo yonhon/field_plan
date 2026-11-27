@@ -4119,7 +4119,7 @@ button.diary-work:hover {
   gap: 12px;
 }
 
-/* 面積・畝の行は、押すと苗と肥料の集計を開く。大きさは作付の詳細の面積・苗数の行と同じ */
+/* 面積・畝の行は、押すと苗・肥料・収量の集計を開く。大きさは作付の詳細の面積・苗数の行と同じ */
 .detail-summary-btn {
   padding: 0;
   color: var(--accent);
