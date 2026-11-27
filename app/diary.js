@@ -1,4 +1,4 @@
-// 農作業日記の計算（docs/actuals-plan.md の 11.1）。画面には触らない。
+// 農作業日記の計算。画面には触らない。
 // 本文は Markdown で、写真は文中に ![](images/<名前>) で書く。見出しごとの節への分け方は、
 // inoo_farm の scripts/build_sections.py と同じにする（diary-mcp は節を読むので、分け方が変わると答えが変わる）。
 import { escapeHtml } from "./html.js";
