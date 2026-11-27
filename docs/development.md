@@ -62,7 +62,7 @@ app_compat（この DB を使ってよい画面の版。画面からは読むだ
 
 ## アプリの更新の一覧
 
-アプリそのものに加えた変更は、`app/updates.json` に書きます。変更の履歴の画面に、「アプリ」の札と A の付いた番号で出ます（[使い方](manual.md)の「アプリの更新」）。
+アプリそのものに加えた変更は、`app/updates.json` に書きます。変更の履歴の画面に、「アプリ」の札と A の付いた番号で出ます（[変更の履歴](manual/history.md)の「アプリの更新」）。
 
 | 項目 | 内容 |
 |---|---|
@@ -74,6 +74,30 @@ app_compat（この DB を使ってよい画面の版。画面からは読むだ
 
 push のたびに、できるようになったことごとに 1 件ずつ足します。
 このファイルは公開されるので、圃場の場所、面積、実際の品目や時期は書きません。
+
+## 最初の準備
+
+一度だけ行います。
+
+1. Supabase の SQL Editor で `sql/field.sql` を実行します（実行済み）。
+2. Integrations > Data API > Settings（または Project Settings > Data API）の Exposed schemas に `field` を加えます。
+3. Authentication > Users でログイン用の利用者を作ります。
+4. その利用者の ID を登録します。
+
+   ```sql
+   insert into field.owners (user_id) values ('利用者の ID');
+   ```
+
+5. 2 週間気温予報の関数を配備します（配備済み）。
+
+   ```
+   bun x supabase functions deploy field-weather --remote=byhthaiwbutqstrqbwwc
+   bun x supabase functions deploy field-photos --remote=byhthaiwbutqstrqbwwc
+   ```
+
+   日記の「Google フォト」は、Google Cloud の OAuth クライアント（Photos Picker API を有効にしたプロジェクト）を使います。クライアント ID は `app/config.js` の `googleClientId` に入れます（秘密の値ではありません）。クライアントの「承認済みの JavaScript 生成元」は `https://yonhon.github.io`、「承認済みのリダイレクト URI」は `https://yonhon.github.io/field_plan/google-photos.html` です。同意画面は「外部」「テスト」のままにし、写真を選ぶ Google アカウントをテストユーザーに入れます。クライアントを作るアカウントと、写真を選ぶアカウントは別でかまいません。
+
+6. GitHub Actions が気象の値（毎日、`weather.yml`）、県のページのニュース（1 日 2 回、`news.yml`）と FAMIC の農薬登録情報（週に 1 回、`famic.yml`）を入れるために、取り込み係の利用者を作ります（作成済み）。Supabase Auth に利用者を作って `field.importers` に登録し、そのメールアドレスとパスワードを、GitHub のリポジトリの Settings > Secrets and variables > Actions に `FIELD_IMPORTER_EMAIL`、`FIELD_IMPORTER_PASSWORD` として置きます。取り込み係にできるのは、気象の値と FAMIC の入れ替え、ニュースを読むことと足すことだけです（確認した印は変えられません）。DB の接続文字列は GitHub に置きません。
 
 ## 手元で動かす
 

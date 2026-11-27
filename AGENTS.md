@@ -34,7 +34,7 @@ Rules to follow when writing or changing code. The rules for how screens look ar
 - **After an operation that cannot be undone, call `resetHistory()`.** Writes after that are not recorded under that operation's ID.
 - **Make an operation that does not depend on the plan a field operation.** Each history entry remembers the plan that was open when it was made, and is not reverted while another plan is open. Plan operations (`createPlan` and so on) become field operations automatically. For a field operation written in several steps (saving the field settings dialog), call `markSettingsOperation()` before writing, and bind the writes to the same operation ID with `bindOperation`. Plan operations and field settings saves open their dialog before undo and redo revert them (`ctx.showDialog`).
 - **When you add an operation that writes to the database from a dialog, decide whether undo reopens that dialog.** Each history entry remembers the screen (the URL hash) where the operation happened, and undo and redo move to that screen. Dialogs do not change the URL, so usually this only moves to the screen behind the dialog. Only the 「圃場とプラン」 dialog and the field settings dialog are reopened now (`dialog` in `history.js`, `showDialog` in `app.js`).
-- **List operations that cannot be undone in the section 「元に戻す、やり直す」 of `docs/manual.md`.**
+- **List operations that cannot be undone in the section 「元に戻す、やり直す」 of `docs/manual/common.md`.**
 
 ## Changing the database schema, adding parts
 
