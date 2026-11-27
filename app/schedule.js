@@ -1,5 +1,5 @@
-import { rectSize } from "./geometry.js";
 // 工程の日程の計算。日付は "YYYY-MM-DD" の文字列で扱う。
+import { rectSize } from "./geometry.js";
 
 // DB の field.work_types と同じ初期値（DB を使わないモードで使う）
 // scope は、その作業をふつうどこに付けるか。block は耕起対象区画（畝立ての前まで）、bed は畝（畝立てから後）

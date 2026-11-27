@@ -30,5 +30,5 @@ mutation/node_modules/
 mutation/report/
 .mutator/
 
-# jev-lint の判定の結果（README の 12 章）
+# jev-lint の判定の結果（docs/development.md の「jev-lint」）
 .jev-lint/

@@ -8,7 +8,7 @@
 
 create schema if not exists field;
 
--- 読み書きを許す利用者。ログイン用の利用者を作ったあと、その ID を 1 行入れる（README を参照）
+-- 読み書きを許す利用者。ログイン用の利用者を作ったあと、その ID を 1 行入れる（docs/manual.md の「最初の準備」）
 create table if not exists field.owners (
   user_id uuid primary key references auth.users (id) on delete cascade
 );

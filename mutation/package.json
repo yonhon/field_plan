@@ -1,7 +1,7 @@
 {
   "name": "field-plan-mutation",
   "private": true,
-  "description": "Mutation testing (mizchi/mutator) for the calculation tests. Installed here so the repository root has no package.json. See README section 12.",
+  "description": "Mutation testing (mizchi/mutator) for the calculation tests. Installed here so the repository root has no package.json. See docs/development.md, section \"Mutation testing\".",
   "type": "module",
   "devDependencies": {
     "@mizchi/mutator": "0.5.3",

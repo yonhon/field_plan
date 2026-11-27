@@ -1,4 +1,4 @@
-# 半年に 1 度、画面の速さと、計算のテストの効き目（Mutation testing）の確かめの Issue を開く（docs/performance.md、README の 12 章）。
+# 半年に 1 度、画面の速さと、計算のテストの効き目（Mutation testing）の確かめの Issue を開く（docs/performance.md、docs/development.md の「Mutation testing」）。
 # 1 月と 7 月の 1 日、9:00（日本時間）。手で動かすこともできる
 name: Performance check reminder
 

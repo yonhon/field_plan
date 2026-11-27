@@ -58,7 +58,7 @@ jobs:
       - name: Check secret
         run: |
           if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
-            echo "::error::リポジトリのシークレット SUPABASE_ACCESS_TOKEN が未設定です（README の「MCP サーバーを配備する」を参照）"
+            echo "::error::リポジトリのシークレット SUPABASE_ACCESS_TOKEN が未設定です（docs/mcp.md の「サーバーを配備する」を参照）"
             exit 1
           fi
 

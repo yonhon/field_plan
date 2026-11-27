@@ -1,5 +1,5 @@
 # field.sql を、空の DB（手元の Docker の Postgres）で流す。Supabase が持っているもの（auth、cron、storage、役割）は、代わりを先に作る。
-# 使い方（README の 12 章）:
+# 使い方（docs/development.md の「field.sql を空の DB で確かめる」）:
 #   docker run -d --rm --name fp-empty -e POSTGRES_PASSWORD=local -p 127.0.0.1:55432:5432 postgres:17-alpine
 #   python scripts/check_field_sql.py sql/field.sql [--times N] [--whole] [--dump out.txt]
 # 文ごとに流して失敗した文を出す。--whole は、SQL Editor と同じにファイル全体を 1 回で流す。--dump は、できた定義を書き出す

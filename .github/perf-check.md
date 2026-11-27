@@ -10,7 +10,7 @@
 - [ ] 本番のデータの件数が、前のレビューのときの 2 倍ほどになっていないかを確かめる（件数は、この Issue に書かない）
 - [ ] 目安に当たったら、本物のデータでレビューし、直す候補を `performance` のラベルの Issue にする
 
-計算のテストの効き目の確かめです（Mutation testing。README の 12 章）。
+計算のテストの効き目の確かめです（Mutation testing。docs/development.md の「Mutation testing」）。
 
 - [ ] `node mutation/run.mjs` で全体を回し（7 分ほど）、`node mutation/summary.mjs` の表を `docs/mutation-runs.md` に足す
 - [ ] `docs/mutation-runs.md` の前の記録より点数が下がったファイルは、`mutation/report/index.html` で Survived と NoCoverage を見て、直した所に当たるものにテストを足す

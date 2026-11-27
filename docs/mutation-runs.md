@@ -1,6 +1,6 @@
 # Mutation testing の記録
 
-計算のテストが計算の誤りに気づくかを確かめる Mutation testing（mizchi/mutator。README の 12 章）の結果を残します。
+計算のテストが計算の誤りに気づくかを確かめる Mutation testing（mizchi/mutator。docs/development.md の「Mutation testing」）の結果を残します。
 次のときに足します。前の記録と比べ、大きく変わったら理由を調べます。
 
 - mutator の版を上げたとき（`mutation/package.json`）。上げる前と同じ形で全体を回し、点数が大きく変わらないかを確かめる。変わったら、下の「StrykerJS との検算」でも確かめ、mutator の不具合らしければ版を戻す。
@@ -94,7 +94,7 @@ mutator の結果が正しいかを、仕組みの違う StrykerJS（`node scrip
 
 ## critical の関数
 
-農薬の使用回数、使用基準、量、指摘にかかわる関数（`app/logs.js` の 14、`app/pesticide.js` の 11）に `// mutator-critical` を付けている（README の 12 章）。
+農薬の使用回数、使用基準、量、指摘にかかわる関数（`app/logs.js` の 14、`app/pesticide.js` の 11）に `// mutator-critical` を付けている（docs/development.md の「Mutation testing」）。
 
 | 日 | mutator | 気づいた | 気づかない | 記録した等価な変異 | メモ |
 |---|---|---|---|---|---|
