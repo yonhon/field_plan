@@ -1,3 +1,4 @@
+// 農薬の作用機構分類（RAC コード）のアイコン（app/rac.js）と、農薬名の後ろに付けるきまりのテスト。実行: node --test "tests/*.test.mjs"
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "./test-api.mjs";
